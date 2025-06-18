@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
 
-ALLOWED_USERS = {407721399}  # сюда вручную добавляй user_id оплативших
+ALLOWED_USERS = {407721399, 5922700446}  # сюда вручную добавляй user_id оплативших
 TEST_USERS = set()
 
 reply_keyboard = [
@@ -131,8 +131,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
+    # Обработка прогноза после ввода цены
+    if "price_asset" in context.user_data:
+        asset = context.user_data["price_asset"]
+        price = update.message.text.strip()
 
-    if text == "📉 Прогноз по BTC":
+        prompt = (
+            f"Ты — профессиональный трейдер. Дай краткий прогноз по {asset} при текущей цене {price}.
+"
+            f"Укажи ближайшие уровни поддержки и сопротивления, а также обоснование, куда может пойти цена.
+"
+            f"Пиши уверенно, избегай фраз 'возможно', 'по-видимому'."
+        )
+        response = await client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        await update.message.reply_text(f"📊 GPT-прогноз по {asset}:
+{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
+        context.user_data.pop("price_asset")
+        return
+
         context.user_data["price_asset"] = "BTC"
         await update.message.reply_text("Введите текущую цену BTC:")
     elif text == "📉 Прогноз по ETH":
@@ -188,6 +207,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
