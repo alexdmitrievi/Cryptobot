@@ -10,11 +10,15 @@ from openai import AsyncOpenAI
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
 
-ALLOWED_USERS = {407721399, 592270446}  # сюда вручную добавляй user_id оплативших
+ALLOWED_USERS = {407721399}  # сюда вручную добавляй user_id оплативших
 TEST_USERS = set()
 
 reply_keyboard = [
     ["📊 Помощь профессионала"],
+    ["📉 Прогноз по BTC", "📉 Прогноз по ETH"],
+    ["🏁 Тестовый период", "💰 Оплатить помощника"],
+    ["💵 Тарифы /prices"]
+],
     ["📉 Прогноз по BTC", "📉 Прогноз по ETH"],
     ["📊 Оценить альтсезон"],
     ["🏁 Тестовый период", "💰 Оплатить помощника"],
@@ -101,11 +105,14 @@ async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = (
         f"Ты — профессиональный трейдер с 10+ годами опыта. Отвечай уверенно, точно и без лишней неопределённости. "
         f"Избегай фраз вроде 'по-видимому', 'возможно', 'может быть'. Формулируй выводы чётко и по существу. "
-        f"Стиль общения — уверенный наставник. Пользователь торгует: {style}. Таймфрейм: {tf}. Рынок: {market}.\n\n"
-        f"Вопрос: {user_text}\n\n"
+        f"Стиль общения — уверенный наставник. Пользователь торгует: {style}. Таймфрейм: {tf}. Рынок: {market}.
+
+"
+        f"Вопрос: {user_text}
+
+"
         f"Дай конкретную, практичную рекомендацию. Если вопрос неконкретный — уточни, что нужно."
     )
-
     response = await client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
@@ -131,15 +138,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "📉 Прогноз по ETH":
         context.user_data["price_asset"] = "ETH"
         await update.message.reply_text("Введите текущую цену ETH:")
-    elif text == "📊 Оценить альтсезон":
-        if not await check_access(update): return
-        data = requests.get("https://api.coingecko.com/api/v3/global").json()
-        btc_d = round(data["data"]["market_cap_percentage"]["btc"], 2)
-        eth_d = round(data["data"]["market_cap_percentage"]["eth"], 2)
-        eth_btc = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=btc").json()["ethereum"]["btc"]
-        prompt = f"BTC Dominance: {btc_d}%\nETH Dominance: {eth_d}%\nETH/BTC: {eth_btc}\nОцени вероятность альтсезона."
-        response = await client.chat.completions.create(model="gpt-4", messages=[{"role": "user", "content": prompt}])
-        await update.message.reply_text(response.choices[0].message.content.strip(), reply_markup=REPLY_MARKUP)
+    
     elif text == "🏁 Тестовый период":
         if user_id in TEST_USERS or user_id in ALLOWED_USERS:
             await update.message.reply_text("⏳ Ты уже использовал тест.")
@@ -189,6 +188,8 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
 
 
 
