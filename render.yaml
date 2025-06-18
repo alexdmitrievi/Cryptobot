@@ -2,8 +2,10 @@ services:
   - type: worker
     name: cryptobot
     env: python
+    runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+
 
 
 
