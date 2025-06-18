@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
 
-ALLOWED_USERS = set()  # сюда вручную добавляй user_id оплативших
+ALLOWED_USERS = {4077211399}  # сюда вручную добавляй user_id оплативших
 TEST_USERS = set()
 
 reply_keyboard = [["📊 Помощь профессионала"], ["📉 Прогноз по BTC", "📉 Прогноз по ETH"], ["📊 Оценить альтсезон"], ["📢 Опубликовать пост"], ["🎁 Тестовый период", "💰 Оплатить помощника"], ["💵 Тарифы /prices"], ["🔁 Перезапустить бота"]]
