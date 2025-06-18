@@ -19,7 +19,6 @@ reply_keyboard = [
     ["🏁 Тестовый период", "💰 Оплатить помощника"],
     ["💵 Тарифы /prices"]
 ]
-
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
 INTERPRET_NEWS, ASK_EVENT, ASK_FORECAST, ASK_ACTUAL, GENERAL_QUESTION, FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3 = range(8)
@@ -81,27 +80,11 @@ async def generate_interpretation(update: Update, context: ContextTypes.DEFAULT_
     user_inputs[update.effective_user.id]["actual"] = update.message.text.strip()
     data = user_inputs[update.effective_user.id]
     prompt = (
-        f"Событие: {data['event']}\n"
-        f"Прогноз: {data['forecast']}\n"
-        f"Факт: {data['actual']}\n"
-        "Проанализируй новость и дай торговую рекомендацию кратко: влияние на доллар, фондовый рынок и криптовалюты."
-    )
-    response = await client.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    await update.message.reply_text(f"📊 GPT:\n{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
-    return ConversationHandler.END
-
-async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip()
-    style = context.user_data.get("style", "трейдинг")
-    tf = context.user_data.get("timeframe", "любом")
-    market = context.user_data.get("market", "общий")
-    prompt = (
         f"Ты — профессиональный трейдер с 10+ годами опыта. Отвечай уверенно, точно и без лишней неопределённости. "
         f"Избегай фраз вроде 'по-видимому', 'возможно', 'может быть'. Формулируй выводы чётко и по существу. "
         f"Стиль общения — уверенный наставник. Пользователь торгует: {style}. Таймфрейм: {tf}. Рынок: {market}.
+
+"
 
 "
         f"Вопрос: {user_text}
@@ -134,24 +117,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
+
     # Обработка прогноза после ввода цены
     if "price_asset" in context.user_data:
         asset = context.user_data["price_asset"]
         price = update.message.text.strip()
 
         prompt = (
-            f"Ты — профессиональный трейдер. Дай краткий прогноз по {asset} при текущей цене {price}.
-"
-            f"Укажи ближайшие уровни поддержки и сопротивления, а также обоснование, куда может пойти цена.
-"
+            f"Ты — профессиональный трейдер. Дай краткий прогноз по {asset} при текущей цене {price}.\n"
+            f"Укажи ближайшие уровни поддержки и сопротивления, а также обоснование, куда может пойти цена.\n"
             f"Пиши уверенно, избегай фраз 'возможно', 'по-видимому'."
         )
         response = await client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}]
         )
-        await update.message.reply_text(f"📊 GPT-прогноз по {asset}:
-{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
+        await update.message.reply_text(
+            f"📊 GPT-прогноз по {asset}:\n{response.choices[0].message.content.strip()}",
+            reply_markup=REPLY_MARKUP
+        )
         context.user_data.pop("price_asset")
         return
 
@@ -211,9 +195,6 @@ def main():
 if __name__ == '__main__':
     main()
 
-
-if __name__ == '__main__':
-    main()
 
 
 
