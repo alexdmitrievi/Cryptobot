@@ -10,11 +10,15 @@ from openai import AsyncOpenAI
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
 
-ALLOWED_USERS = {407721399, 5922700446}  # сюда вручную добавляй user_id оплативших
+ALLOWED_USERS = {407721399}  # сюда вручную добавляй user_id оплативших
 TEST_USERS = set()
 
 reply_keyboard = [
     ["📊 Помощь профессионала"],
+    ["📉 Прогноз по BTC", "📉 Прогноз по ETH"],
+    ["🏁 Тестовый период", "💰 Оплатить помощника"],
+    ["💵 Тарифы /prices"]
+],
     ["📉 Прогноз по BTC", "📉 Прогноз по ETH"],
     ["🏁 Тестовый период", "💰 Оплатить помощника"],
     ["💵 Тарифы /prices"]
@@ -207,6 +211,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
