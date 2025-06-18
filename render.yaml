@@ -1,10 +1,12 @@
 services:
   - type: worker
     name: cryptobot
-    env: python
-    runtime: python
-    buildCommand: pip install -r requirements.txt
+    env: docker
+    dockerfilePath: ./Dockerfile
+    repo: https://github.com/alexdmitrievi/Cryptobot
+    branch: main
     startCommand: python bot.py
+
 
 
 
