@@ -80,24 +80,31 @@ async def generate_interpretation(update: Update, context: ContextTypes.DEFAULT_
     user_inputs[update.effective_user.id]["actual"] = update.message.text.strip()
     data = user_inputs[update.effective_user.id]
     prompt = (
-        f"Ты — профессиональный трейдер с 10+ годами опыта. Отвечай уверенно, точно и без лишней неопределённости. "
-        f"Избегай фраз вроде 'по-видимому', 'возможно', 'может быть'. Формулируй выводы чётко и по существу. "
-        f"Стиль общения — уверенный наставник. Пользователь торгует: {style}. Таймфрейм: {tf}. Рынок: {market}.
+        f"Событие: {data['event']}\n"
+        f"Прогноз: {data['forecast']}\n"
+        f"Факт: {data['actual']}\n"
+        f"Проанализируй новость и дай торговую рекомендацию.\n"
+        f"Ты — профессиональный трейдер с 10+ годами опыта. Отвечай уверенно, избегай фраз 'возможно', 'по-видимому'."
+    )
+    response = await client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    await update.message.reply_text(f"📚 GPT:\n{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
+    return ConversationHandler.END
 
-"
 
-"
-        f"Вопрос: {user_text}
+async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text.strip()
+    style = context.user_data.get("style", "трейдинг")
+    tf = context.user_data.get("timeframe", "любом")
+    market = context.user_data.get("market", "общий")
 
-"
-        f"Дай конкретную, практичную рекомендацию. Если вопрос неконкретный — уточни, что нужно."
-    ).
-
-"
-        f"Вопрос: {user_text}
-
-"
-        f"Дай конкретную, практичную рекомендацию. Если вопрос неконкретный — уточни, что нужно."
+    prompt = (
+        f"Ты — профессиональный трейдер с 10+ годами опыта. Отвечай уверенно, избегай фраз 'возможно', 'по-видимому'.\n"
+        f"Пользователь торгует: {style}. Таймфрейм: {tf}. Рынок: {market}.\n"
+        f"Вопрос: {user_text}\n"
+        f"Дай конкретную, практичную рекомендацию."
     )
     response = await client.chat.completions.create(
         model="gpt-4",
@@ -118,9 +125,19 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    # Обработка прогноза после ввода цены
-    if "price_asset" in context.user_data:
-        asset = context.user_data["price_asset"]
+    # Обработка кнопок
+    if text == "📉 Прогноз по BTC":
+        context.user_data["price_asset"] = "BTC"
+        await update.message.reply_text("Введите текущую цену BTC:")
+        return
+
+    elif text == "📉 Прогноз по ETH":
+        context.user_data["price_asset"] = "ETH"
+        await update.message.reply_text("Введите текущую цену ETH:")
+        return
+
+    elif "price_asset" in context.user_data:
+        asset = context.user_data.pop("price_asset")
         price = update.message.text.strip()
 
         prompt = (
@@ -136,15 +153,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📊 GPT-прогноз по {asset}:\n{response.choices[0].message.content.strip()}",
             reply_markup=REPLY_MARKUP
         )
-        context.user_data.pop("price_asset")
         return
 
-        context.user_data["price_asset"] = "BTC"
-        await update.message.reply_text("Введите текущую цену BTC:")
-    elif text == "📉 Прогноз по ETH":
-        context.user_data["price_asset"] = "ETH"
-        await update.message.reply_text("Введите текущую цену ETH:")
-    
     elif text == "🏁 Тестовый период":
         if user_id in TEST_USERS or user_id in ALLOWED_USERS:
             await update.message.reply_text("⏳ Ты уже использовал тест.")
@@ -152,19 +162,29 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ALLOWED_USERS.add(user_id)
             TEST_USERS.add(user_id)
             await update.message.reply_text("✅ Тестовый доступ активирован на 1 сессию.")
+
     elif text == "💰 Оплатить помощника":
-        await update.message.reply_text("Отправь USDT в сети TON на адрес:\n\n`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\nПосле оплаты пришли TX hash админу или сюда для активации.", reply_markup=REPLY_MARKUP)
+        await update.message.reply_text(
+            "Отправь USDT в сети TON на адрес:\n\n"
+            "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\n"
+            "После оплаты пришли TX hash админу или сюда для активации.",
+            reply_markup=REPLY_MARKUP
+        )
+
     elif text == "💵 Тарифы /prices":
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("💳 Оплатить TON", callback_data="show_wallet")]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Оплатить TON", callback_data="show_wallet")]
+        ])
         text = (
             "💰 Тарифы на подписку:\n\n"
             "• 1 месяц — $25\n"
-            "• 3 месяца — $60 (экономия 15$)\n"
-            "• 6 месяцев — $100 (экономия 50$)\n"
-            "• 12 месяцев — $180 (экономия 120$)\n"
-            "• Пожизненно — $299\n\n"
+            "• 3 месяца — $60 (экономия $15)\n"
+            "• 6 месяцев — $100 (экономия $50)\n"
+            "• 12 месяцев — $180 (экономия $120)\n"
+            "• Пожизненно — $299\n"
         )
         await update.message.reply_text(text, reply_markup=keyboard)
+
 
 async def post_init(app):
     await app.bot.set_my_commands([BotCommand("start", "Запуск бота")])
@@ -194,6 +214,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
