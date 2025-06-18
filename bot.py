@@ -189,6 +189,35 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(app):
     await app.bot.set_my_commands([BotCommand("start", "Запуск бота")])
 
+# 👇 ВСТАВЬ ЗДЕСЬ:
+ADMIN_IDS = {407721399}  # замени на свой user_id
+
+async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("⛔️ У тебя нет прав на публикацию.")
+        return
+
+    logging.info(f"[COMMAND] /publish от {user_id}")
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 Открыть GPT-помощника", url="https://t.me/Parser_newbot")]
+    ])
+    
+    text = (
+        "🚀 **GPT-Помощник для трейдинга по новостям — прямо в Telegram**\n\n"
+        "💬 Индивидуальные консультации от опытных трейдеров\n"
+        "📈 Мгновенные интерпретации макроэкономических новостей\n"
+        "🎯 Точки входа для скальпинга и позиционной торговли\n"
+        "📚 Еженедельные обзоры и обучающие материалы\n"
+        "🌍 Без VPN, без ChatGPT — всё внутри Telegram\n"
+        "🤝 Ты также получаешь доступ к сильному комьюнити трейдеров\n\n"
+        "🔥 Это не просто подписка на GPT — это инструмент + поддержка + опыт"
+    )
+
+    message = await context.bot.send_message(chat_id='@Cripto_inter_bot', text=text, reply_markup=keyboard)
+    await context.bot.pin_chat_message(chat_id='@Cripto_inter_bot', message_id=message.message_id, disable_notification=True)
+
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     conv_handler = ConversationHandler(
@@ -206,6 +235,7 @@ def main():
         fallbacks=[CommandHandler("start", start)]
     )
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
     app.add_handler(CallbackQueryHandler(button_handler))
