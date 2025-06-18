@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: cryptobot
+    env: python
+    buildCommand: ""
+    startCommand: python bot.py
+    runtime: python
+    pythonVersion: 3.10.13
+    region: frankfurt
+    plan: free
+    autoDeploy: true
