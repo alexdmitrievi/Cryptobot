@@ -18,16 +18,8 @@ reply_keyboard = [
     ["📉 Прогноз по BTC", "📉 Прогноз по ETH"],
     ["🏁 Тестовый период", "💰 Оплатить помощника"],
     ["💵 Тарифы /prices"]
-],
-    ["📉 Прогноз по BTC", "📉 Прогноз по ETH"],
-    ["🏁 Тестовый период", "💰 Оплатить помощника"],
-    ["💵 Тарифы /prices"]
-],
-    ["📉 Прогноз по BTC", "📉 Прогноз по ETH"],
-    ["📊 Оценить альтсезон"],
-    ["🏁 Тестовый период", "💰 Оплатить помощника"],
-    ["💵 Тарифы /prices"]
 ]
+
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
 INTERPRET_NEWS, ASK_EVENT, ASK_FORECAST, ASK_ACTUAL, GENERAL_QUESTION, FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3 = range(8)
@@ -211,6 +203,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
