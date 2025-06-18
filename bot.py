@@ -13,7 +13,13 @@ logging.basicConfig(level=logging.INFO)
 ALLOWED_USERS = {407721399}  # сюда вручную добавляй user_id оплативших
 TEST_USERS = set()
 
-reply_keyboard = [["📊 Помощь профессионала"], ["📉 Прогноз по BTC", "📉 Прогноз по ETH"], ["📊 Оценить альтсезон"], ["📢 Опубликовать пост"], ["🎁 Тестовый период", "💰 Оплатить помощника"], ["💵 Тарифы /prices"], ["🔁 Перезапустить бота"]]
+reply_keyboard = [
+    ["\ud83d\udcca Помощь профессионала"],
+    ["\ud83d\udcc9 Прогноз по BTC", "\ud83d\udcc9 Прогноз по ETH"],
+    ["\ud83d\udcca Оценить альтсезон"],
+    ["\ud83c\udff1 Тестовый период", "\ud83d\udcb0 Оплатить помощника"],
+    ["\ud83d\udcb5 Тарифы /prices"]
+]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
 INTERPRET_NEWS, ASK_EVENT, ASK_FORECAST, ASK_ACTUAL, GENERAL_QUESTION, FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3 = range(8)
@@ -22,12 +28,12 @@ user_inputs = {}
 async def check_access(update: Update):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS:
-        await update.message.reply_text("🔒 Доступ ограничен. Активируй тест или оплати помощника.", reply_markup=REPLY_MARKUP)
+        await update.message.reply_text("\ud83d\udd12 Доступ ограничен. Активируй тест или оплати помощника.", reply_markup=REPLY_MARKUP)
         return False
     return True
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Привет! Выбери действие ниже:", reply_markup=REPLY_MARKUP)
+    await update.message.reply_text("\ud83d\udc4b Привет! Выбери действие ниже:", reply_markup=REPLY_MARKUP)
 
 async def help_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return ConversationHandler.END
@@ -40,7 +46,7 @@ async def interpret_decision(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Что за новость?")
         return ASK_EVENT
     elif text == "нет":
-        await update.message.reply_text("Хорошо. Для точной консультации ответь на несколько вопросов.\n\n1. Твой стиль торговли? (скальпинг, позиционка или инвестици)")
+        await update.message.reply_text("Хорошо. Для точной консультации ответь на несколько вопросов.\n\n1. Твой стиль торговли? (скальпинг, позиционка или инвестиции)")
         return FOLLOWUP_1
     else:
         await update.message.reply_text("Пожалуйста, ответь 'да' или 'нет'")
@@ -81,10 +87,10 @@ async def generate_interpretation(update: Update, context: ContextTypes.DEFAULT_
         "Проанализируй новость и дай торговую рекомендацию кратко: влияние на доллар, фондовый рынок и криптовалюты."
     )
     response = await client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
     )
-    await update.message.reply_text(f"📊 GPT:\n{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
+    await update.message.reply_text(f"\ud83d\udcca GPT:\n{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
     return ConversationHandler.END
 
 async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,12 +98,18 @@ async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     style = context.user_data.get("style", "трейдинг")
     tf = context.user_data.get("timeframe", "любом")
     market = context.user_data.get("market", "общий")
-    prompt = f"Пользователь торгует: {style}. Таймфрейм: {tf}. Рынок: {market}.\nВопрос: {user_text}\n\nОтветь как опытный профессиональный трейдер, адаптируя советы под стиль, рынок и уровень подготовки."
+    prompt = (
+        f"Ты — опытный трейдер с 10+ годами практики. Объясни понятным, простым языком, избегая жаргона, "
+        f"но оставайся профессиональным. Пользователь торгует: {style}. Таймфрейм: {tf}. Рынок: {market}.\n\n"
+        f"Вопрос: {user_text}\n\n"
+        f"Дай чёткий, практичный и полезный ответ, как будто ты обучаешь новичка или среднего уровня трейдера. "
+        f"Если есть риски — предупреди. Если вопрос неконкретный — задай уточняющий."
+    )
     response = await client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
     )
-    await update.message.reply_text(f"📚 GPT:\n{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
+    await update.message.reply_text(f"\ud83d\udcda GPT:\n{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
     return ConversationHandler.END
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -105,82 +117,56 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     if query.data == "show_wallet":
         await query.edit_message_text(
-            "💸 Отправь USDT (TON) на адрес:\n\n`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\nПосле оплаты отправь TX hash админу или прямо сюда."
+            "\ud83d\udcb8 Отправь USDT (TON) на адрес:\n\n`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\nПосле оплаты отправь TX hash админу или прямо сюда."
         )
 
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    if text == "📉 Прогноз по BTC":
+    if text == "\ud83d\udcc9 Прогноз по BTC":
         context.user_data["price_asset"] = "BTC"
         await update.message.reply_text("Введите текущую цену BTC:")
-    elif text == "📉 Прогноз по ETH":
+    elif text == "\ud83d\udcc9 Прогноз по ETH":
         context.user_data["price_asset"] = "ETH"
         await update.message.reply_text("Введите текущую цену ETH:")
-    elif text == "📊 Оценить альтсезон":
+    elif text == "\ud83d\udcca Оценить альтсезон":
         if not await check_access(update): return
         data = requests.get("https://api.coingecko.com/api/v3/global").json()
         btc_d = round(data["data"]["market_cap_percentage"]["btc"], 2)
         eth_d = round(data["data"]["market_cap_percentage"]["eth"], 2)
         eth_btc = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=btc").json()["ethereum"]["btc"]
         prompt = f"BTC Dominance: {btc_d}%\nETH Dominance: {eth_d}%\nETH/BTC: {eth_btc}\nОцени вероятность альтсезона."
-        response = await client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}])
+        response = await client.chat.completions.create(model="gpt-4", messages=[{"role": "user", "content": prompt}])
         await update.message.reply_text(response.choices[0].message.content.strip(), reply_markup=REPLY_MARKUP)
-    elif text == "📢 Опубликовать пост":
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔥 Перейти к боту", url="https://t.me/Parser_newbot")]])
-        post = (
-            "🧠 Ты тоже сливал депозиты на роботе, сигналах и ручной торговле?\n"
-            "Я был там. Тратил деньги на иллюзии, торговал без знаний и риска — и всё терял.\n\n"
-            "Сегодня я создаю сообщество тех, кто хочет **жить с рынка**:\n"
-            "📈 стабильно инвестировать\n"
-            "💼 грамотно управлять капиталом\n"
-            "🧭 получать поддержку и реальные инструменты, а не 'волшебную кнопку бабло'.\n\n"
-            "Я не обещаю чудо. Но я даю всё, что помогает **зарабатывать стабильно**:\n\n"
-            "✅ Обучение\n"
-            "✅ GPT-помощник трейдера\n"
-            "✅ Поддержка в любой момент\n"
-            "✅ Торговые идеи\n"
-            "✅ Интерпретации новостей\n"
-            "✅ 📚 База знаний — бесплатно для подписчиков\n"
-            "✅ 🗓 Еженедельные обзоры\n"
-            "✅ 🤝 Сильное сообщество единомышленников\n"
-            "✅ 📟 Бесплатный калькулятор для расчёта рисков\n\n"
-            "Всё это — уже входит в подписку.\n"
-            "Готов перейти от хаоса к системе?\n\n"
-            "👇 Жми, и присоединяйся.\n"
-            "🧩 Жить с рынка — реально."
-        )
-        await update.message.reply_text(post, reply_markup=keyboard)
-    elif text == "🎁 Тестовый период":
+    elif text == "\ud83c\udff1 Тестовый период":
         if user_id in TEST_USERS or user_id in ALLOWED_USERS:
-            await update.message.reply_text("⏳ Ты уже использовал тест.")
+            await update.message.reply_text("\u23f3 Ты уже использовал тест.")
         else:
             ALLOWED_USERS.add(user_id)
             TEST_USERS.add(user_id)
-            await update.message.reply_text("✅ Тестовый доступ активирован на 1 сессию.")
-    elif text == "💰 Оплатить помощника":
+            await update.message.reply_text("\u2705 Тестовый доступ активирован на 1 сессию.")
+    elif text == "\ud83d\udcb0 Оплатить помощника":
         await update.message.reply_text("Отправь USDT в сети TON на адрес:\n\n`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\nПосле оплаты пришли TX hash админу или сюда для активации.", reply_markup=REPLY_MARKUP)
-    elif text == "💵 Тарифы /prices":
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("💳 Оплатить TON", callback_data="show_wallet")]])
+    elif text == "\ud83d\udcb5 Тарифы /prices":
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("\ud83d\udcb3 Оплатить TON", callback_data="show_wallet")]])
         text = (
-            "💰 Тарифы на подписку:\n\n"
-            "• 1 месяц — $25\n"
-            "• 3 месяца — $60 (экономия 15$)\n"
-            "• 6 месяцев — $100 (экономия 50$)\n"
-            "• 12 месяцев — $180 (экономия 120$)\n"
-            "• Пожизненно — $299\n\n"
-            "Для активации отправь TX hash после оплаты."
+            "\ud83d\udcb0 Тарифы на подписку:\n\n"
+            "\u2022 1 месяц — $25\n"
+            "\u2022 3 месяца — $60 (экономия 15$)\n"
+            "\u2022 6 месяцев — $100 (экономия 50$)\n"
+            "\u2022 12 месяцев — $180 (экономия 120$)\n"
+            "\u2022 Пожизненно — $299\n\n"
         )
         await update.message.reply_text(text, reply_markup=keyboard)
 
 async def post_init(app):
-    await app.bot.set_my_commands([BotCommand("start", "Перезапустить бота")])
+    await app.bot.set_my_commands([BotCommand("start", "Запуск бота")])
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📊 Помощь профессионала$"), help_pro)],
+        entry_points=[MessageHandler(filters.Regex("^\ud83d\udcca Помощь профессионала$"), help_pro)],
         states={
             INTERPRET_NEWS: [MessageHandler(filters.TEXT & ~filters.COMMAND, interpret_decision)],
             ASK_EVENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_forecast)],
@@ -197,9 +183,11 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.post_init = post_init
     app.run_polling()
 
 if __name__ == '__main__':
     main()
+
 
 
