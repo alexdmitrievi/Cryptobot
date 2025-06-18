@@ -40,7 +40,7 @@ async def interpret_decision(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Что за новость?")
         return ASK_EVENT
     elif text == "нет":
-        await update.message.reply_text("Хорошо. Для точной консультации ответь на несколько вопросов.\n\n1. Твой стиль торговли?")
+        await update.message.reply_text("Хорошо. Для точной консультации ответь на несколько вопросов.\n\n1. Твой стиль торговли? (скальпинг, позиционная торговля или инвестици)")
         return FOLLOWUP_1
     else:
         await update.message.reply_text("Пожалуйста, ответь 'да' или 'нет'")
