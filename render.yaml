@@ -2,9 +2,8 @@ services:
   - type: worker
     name: cryptobot
     env: python
-    buildCommand: |
-      curl -sSL https://install.python-poetry.org | python3 -
-      python3.10 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+
 
 
