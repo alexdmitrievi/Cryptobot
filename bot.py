@@ -100,6 +100,14 @@ async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📚 GPT:\n{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
     return ConversationHandler.END
 
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "show_wallet":
+        await query.edit_message_text(
+            "💸 Отправь USDT (TON) на адрес:\n\n`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\nПосле оплаты отправь TX hash админу или прямо сюда."
+        )
+
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
@@ -143,7 +151,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👇 Жми, и присоединяйся.\n"
             "🧩 Жить с рынка — реально."
         )
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=post, reply_markup=keyboard)
+        await update.message.reply_text(post, reply_markup=keyboard)
     elif text == "🎁 Тестовый период":
         if user_id in TEST_USERS or user_id in ALLOWED_USERS:
             await update.message.reply_text("⏳ Ты уже использовал тест.")
@@ -166,19 +174,11 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(text, reply_markup=keyboard)
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data == "show_wallet":
-        await query.edit_message_text(
-            "💸 Отправь USDT (TON) на адрес:\n\n`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\nПосле оплаты отправь TX hash админу или прямо сюда."
-        )
-
 async def post_init(app):
     await app.bot.set_my_commands([BotCommand("start", "Перезапустить бота")])
 
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📊 Помощь профессионала$"), help_pro)],
         states={
@@ -201,4 +201,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 

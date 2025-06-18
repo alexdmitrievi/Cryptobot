@@ -1,4 +1,4 @@
-python-telegram-bot[ext]==20.7
+python-telegram-bot[ext]==21.1
 openai>=1.0.0
 requests
 python-dotenv
