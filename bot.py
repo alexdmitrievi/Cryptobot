@@ -108,6 +108,13 @@ async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 "
         f"Дай конкретную, практичную рекомендацию. Если вопрос неконкретный — уточни, что нужно."
+    ).
+
+"
+        f"Вопрос: {user_text}
+
+"
+        f"Дай конкретную, практичную рекомендацию. Если вопрос неконкретный — уточни, что нужно."
     )
     response = await client.chat.completions.create(
         model="gpt-4",
@@ -200,6 +207,10 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.post_init = post_init
     app.run_polling()
+
+if __name__ == '__main__':
+    main()
+
 
 if __name__ == '__main__':
     main()
