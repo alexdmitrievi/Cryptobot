@@ -5,7 +5,7 @@ services:
     dockerfilePath: ./Dockerfile
     repo: https://github.com/alexdmitrievi/Cryptobot
     branch: main
-    startCommand: python bot.py
+
 
 
 
