@@ -157,14 +157,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await photo.get_file()
     photo_bytes = await file.download_as_bytearray()
 
-    image_base64 = base64.b64encode(photo_bytes).decode("utf-8")
-    logging.info(f"[PHOTO] Длина изображения в base64: {len(image_base64)} символов")
+    context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
+    await update.message.reply_text("🧠 Что сейчас происходит в мире? (например, новости, конфликты, решения центробанков и т.д.)")
+    context.user_data["awaiting_macro_for_image"] = True
+
+async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("awaiting_macro_for_image"):
+        return
+
+    del context.user_data["awaiting_macro_for_image"]
+    macro = update.message.text.strip()
+    image_base64 = context.user_data.pop("graph_image_base64", None)
+
+    if not image_base64:
+        await update.message.reply_text("⚠️ Ошибка: изображение не найдено.")
+        return
 
     prompt = (
-        "На изображении представлен график криптовалюты на 4-часовом таймфрейме.\n"
-        "Проанализируй его с точки зрения технического анализа: найди уровни поддержки/сопротивления, тренды, фигуры и индикаторы, если они видны.\n"
-        "Сделай краткий торговый вывод: возможное направление, риски и подходящие действия трейдера.\n"
-        "Не используй фундаментальный анализ и новости."
+        "Ты — профессиональный трейдер с опытом более 10 лет.\n"
+        "На изображении представлен график криптовалюты на 4H таймфрейме.\n"
+        "Проанализируй его с точки зрения технического анализа: уровни, тренды, фигуры и индикаторы.\n\n"
+        f"Также учти фундаментальный фон:\n{macro}\n\n"
+        "Сделай краткий торговый вывод: возможное направление, риски и рекомендации для трейдера.\n"
+        "Отвечай уверенно, избегай фраз 'возможно', 'по-видимому'."
     )
 
     try:
@@ -176,18 +191,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
                 ]}
             ],
-            max_tokens=500
+            max_tokens=600
         )
 
         await update.message.reply_text(
-            f"📈 Прогноз по графику:\n{response.choices[0].message.content.strip()}",
+            f"📈 Прогноз по графику с учётом фундамента:\n{response.choices[0].message.content.strip()}",
             reply_markup=REPLY_MARKUP
         )
 
     except Exception as e:
-        logging.error(f"[PHOTO] Ошибка при обработке изображения: {e}")
-        await update.message.reply_text("⚠️ Произошла ошибка при анализе изображения. Попробуй позже.")
-
+        logging.error(f"[MACRO_GRAPH] Ошибка анализа: {e}")
+        await update.message.reply_text("⚠️ Произошла ошибка при анализе. Попробуй позже.")
 
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -203,21 +217,40 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
         return
 
-    elif "price_asset" in context.user_data:
+    elif "awaiting_asset_name" in context.user_data:
+        context.user_data["price_asset"] = update.message.text.strip().upper()
+        del context.user_data["awaiting_asset_name"]
+        context.user_data["awaiting_price_input"] = True
+        await update.message.reply_text("Введи текущую цену актива:")
+        return
+
+    elif "awaiting_price_input" in context.user_data:
+        context.user_data["price_value"] = update.message.text.strip()
+        del context.user_data["awaiting_price_input"]
+        context.user_data["awaiting_macro_input"] = True
+        await update.message.reply_text("Что сейчас происходит в мире? (например, новости, конфликты, заявления ФРС и т.д.)")
+        return
+
+    elif "awaiting_macro_input" in context.user_data:
         asset = context.user_data.pop("price_asset")
-        price = update.message.text.strip()
+        price = context.user_data.pop("price_value")
+        macro = update.message.text.strip()
+        del context.user_data["awaiting_macro_input"]
 
         prompt = (
-            f"Ты — профессиональный трейдер. Дай краткий прогноз по {asset} при текущей цене {price}.\n"
-            f"Укажи ближайшие уровни поддержки и сопротивления, а также обоснование, куда может пойти цена.\n"
+            f"Ты — профессиональный трейдер с опытом более 10 лет в трейдинге.\n"
+            f"Анализируй актив {asset}, текущая цена {price}.\n"
+            f"Учитывай следующий фундаментальный фон: {macro}.\n\n"
+            f"Дай краткий прогноз, укажи ближайшие уровни поддержки и сопротивления, текущий тренд и потенциальные действия трейдера.\n"
             f"Пиши уверенно, избегай фраз 'возможно', 'по-видимому'."
         )
+
         response = await client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}]
         )
         await update.message.reply_text(
-            f"📊 GPT-прогноз по {asset}:\n{response.choices[0].message.content.strip()}",
+            f"📊 Прогноз по {asset} с учетом фундамента:\n{response.choices[0].message.content.strip()}",
             reply_markup=REPLY_MARKUP
         )
         return
@@ -251,6 +284,14 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Пожизненно — $299\n"
         )
         await update.message.reply_text(text, reply_markup=keyboard)
+
+    elif text == "🧘 Спокойствие":
+        await update.message.reply_text(
+            "😔 Бывают тяжёлые периоды в трейдинге. Я помогу тебе вернуть спокойствие и контроль.\n\n"
+            "Напиши, что с тобой происходит — и GPT-психолог поддержит тебя:",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return WAITING_FOR_THERAPY_INPUT
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
