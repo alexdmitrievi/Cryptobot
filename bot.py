@@ -350,13 +350,19 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = await context.bot.send_message(chat_id='@Cripto_inter_bot', text=text, reply_markup=keyboard)
     await context.bot.pin_chat_message(chat_id='@Cripto_inter_bot', message_id=message.message_id, disable_notification=True)
 
+async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("awaiting_macro_for_image"):
+        await handle_macro_for_image(update, context)
+    else:
+        await handle_main(update, context)
+
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex("^📊 Помощь профессионала$"), help_pro),
-            MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)  # ✅ добавлен entry point
+            MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)
         ],
         states={
             INTERPRET_NEWS: [MessageHandler(filters.TEXT & ~filters.COMMAND, interpret_decision)],
@@ -376,11 +382,8 @@ def main():
     app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(conv_handler)
 
-    # 🧠 ВАЖНО: сначала хендлер для макрофона после скрина
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_macro_for_image))
-
-    # 📊 Затем основной хендлер
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
+    # 📌 Универсальный хендлер для всего текстового ввода
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
 
     # 📍 Обработка кнопок и изображений
     app.add_handler(CallbackQueryHandler(button_handler))
