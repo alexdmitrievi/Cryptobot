@@ -6,6 +6,10 @@ from telegram import Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardBut
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, ConversationHandler
 from config import TELEGRAM_TOKEN, OPENAI_API_KEY
 from openai import AsyncOpenAI
+from PIL import Image
+import io
+import base64
+
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +20,7 @@ TEST_USERS = set()
 reply_keyboard = [
     ["📊 Помощь профессионала"],
     ["📉 Прогноз по BTC", "📉 Прогноз по ETH"],
+    ["📷 Прогноз по скрину"],
     ["🏁 Тестовый период", "💰 Оплатить помощника"],
     ["💵 Тарифы /prices"]
 ]
@@ -23,6 +28,8 @@ REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
 INTERPRET_NEWS, ASK_EVENT, ASK_FORECAST, ASK_ACTUAL, GENERAL_QUESTION, FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3 = range(8)
 user_inputs = {}
+
+WAITING_FOR_PHOTO = set()
 
 async def check_access(update: Update):
     user_id = update.effective_user.id
@@ -121,6 +128,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "💸 Отправь USDT (TON) на адрес:\n\n`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\nПосле оплаты отправь TX hash админу или прямо сюда."
         )
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in WAITING_FOR_PHOTO:
+        return  # игнорируем случайные фото
+
+    WAITING_FOR_PHOTO.discard(user_id)
+    if not await check_access(update): return
+
+    photo = update.message.photo[-1]
+    file = await photo.get_file()
+    photo_bytes = await file.download_as_bytearray()
+
+    image_base64 = base64.b64encode(photo_bytes).decode("utf-8")
+
+    prompt = (
+        "На изображении представлен график криптовалюты на 4-часовом таймфрейме.\n"
+        "Проанализируй его с точки зрения технического анализа: найди уровни поддержки/сопротивления, тренды, фигуры и индикаторы, если они видны.\n"
+        "Сделай краткий торговый вывод: возможное направление, риски и подходящие действия трейдера.\n"
+        "Не используй фундаментальный анализ и новости."
+    )
+
+    response = await client.chat.completions.create(
+        model="gpt-4-vision-preview",
+        messages=[
+            {"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+            ]}
+        ],
+        max_tokens=500
+    )
+
+    await update.message.reply_text(f"📈 Прогноз по графику:\n{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
+
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
@@ -185,6 +226,12 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(text, reply_markup=keyboard)
 
+    elif text == "📷 Прогноз по скрину":
+        WAITING_FOR_PHOTO.add(user_id)
+        await update.message.reply_text("📸 Пришли скрин графика на 4H таймфрейме.")
+        return
+
+
 
 async def post_init(app):
     await app.bot.set_my_commands([BotCommand("start", "Запуск бота")])
@@ -240,6 +287,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.post_init = post_init
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.run_polling()
 
 if __name__ == '__main__':
