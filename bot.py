@@ -375,10 +375,17 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(conv_handler)
+
+    # 🧠 ВАЖНО: сначала хендлер для макрофона после скрина
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_macro_for_image))
+
+    # 📊 Затем основной хендлер
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
+
+    # 📍 Обработка кнопок и изображений
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_macro_for_image))  # ✅ обязательно добавь этот хендлер
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
     app.post_init = post_init
     app.run_polling()
 
