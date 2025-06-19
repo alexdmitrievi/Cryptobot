@@ -377,6 +377,7 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_macro_for_image))  # ✅ обязательно добавь этот хендлер
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.post_init = post_init
     app.run_polling()
