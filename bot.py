@@ -18,9 +18,9 @@ ALLOWED_USERS = {407721399, 592270446}  # сюда вручную добавля
 TEST_USERS = set()
 
 reply_keyboard = [
-    ["📊 Прогноз по активу", "📊 Помощь профессионала"],
-    ["🏁 Тестовый период", "💰 Оплатить помощника"],
-    ["💵 Тарифы /prices"]
+    ["📊 Прогноз по активу", "🧠 Помощь профессионала"],
+    ["🧘 Спокойствие", "🏁 Тестовый период"],
+    ["💰 Оплатить помощника", "💵 Тарифы /prices"]
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
@@ -28,6 +28,8 @@ INTERPRET_NEWS, ASK_EVENT, ASK_FORECAST, ASK_ACTUAL, GENERAL_QUESTION, FOLLOWUP_
 user_inputs = {}
 
 WAITING_FOR_PHOTO = set()
+WAITING_FOR_THERAPY_INPUT = 100
+
 
 async def check_access(update: Update):
     user_id = update.effective_user.id
@@ -250,6 +252,31 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(text, reply_markup=keyboard)
 
+    elif text == "🧘 Спокойствие":
+        await update.message.reply_text(
+        "😔 Бывают тяжёлые периоды в трейдинге. Я помогу тебе вернуть спокойствие и контроль.\n\n"
+        "Напиши, что с тобой происходит — и GPT-психолог поддержит тебя:",
+        reply_markup=ReplyKeyboardRemove()
+        )
+        return "WAITING_FOR_THERAPY_INPUT"
+
+async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text.strip()
+    prompt = (
+        "Ты — доброжелательный GPT-психолог, специализирующийся на поддержке трейдеров после потерь, лудомании и кризисов уверенности.\n"
+        "Твоя задача — помочь человеку вернуть душевное равновесие, дать поддержку и мягко вернуть его к осознанной торговле.\n\n"
+        f"Сообщение от пользователя:\n{user_text}"
+    )
+    response = await client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    await update.message.reply_text(
+        f"🧘 GPT-психолог:\n{response.choices[0].message.content.strip()}",
+        reply_markup=REPLY_MARKUP
+    )
+    return ConversationHandler.END
+
 async def post_init(app):
     await app.bot.set_my_commands([BotCommand("start", "Запуск бота")])
 
@@ -294,7 +321,8 @@ def main():
             FOLLOWUP_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, followup_strategy)],
             FOLLOWUP_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, followup_timeframe)],
             FOLLOWUP_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, followup_market)],
-            GENERAL_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, general_response)]
+            GENERAL_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, general_response)],
+            WAITING_FOR_THERAPY_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, gpt_psychologist_response)]
         },
         fallbacks=[CommandHandler("start", start)]
     )
