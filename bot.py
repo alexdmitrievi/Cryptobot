@@ -18,9 +18,7 @@ ALLOWED_USERS = {407721399, 592270446}  # сюда вручную добавля
 TEST_USERS = set()
 
 reply_keyboard = [
-    ["📊 Помощь профессионала"],
-    ["📉 Прогноз по BTC", "📉 Прогноз по ETH"],
-    ["📷 Прогноз по скрину"],
+    ["📊 Прогноз по активу", "📊 Помощь профессионала"],
     ["🏁 Тестовый период", "💰 Оплатить помощника"],
     ["💵 Тарифы /prices"]
 ]
@@ -123,11 +121,27 @@ async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    user_id = query.from_user.id
+
     if query.data == "show_wallet":
         await query.edit_message_text(
-            "💸 Отправь USDT (TON) на адрес:\n\n`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\nПосле оплаты отправь TX hash админу или прямо сюда."
+            "💸 Отправь USDT (TON) на адрес:\n\n"
+            "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\n"
+            "После оплаты отправь TX hash админу или прямо сюда."
         )
-        
+
+    elif query.data == "forecast_by_image":
+        WAITING_FOR_PHOTO.add(user_id)
+        await query.edit_message_text("📸 Пришли скрин графика (4H таймфрейм), и я дам прогноз на основе технического анализа.")
+
+    elif query.data == "forecast_by_price":
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="Введи название актива (например, BTC, ETH, XRP и т.д.):"
+        )
+        context.user_data["awaiting_asset_name"] = True
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in WAITING_FOR_PHOTO:
@@ -177,15 +191,14 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    # Обработка кнопок
-    if text == "📉 Прогноз по BTC":
-        context.user_data["price_asset"] = "BTC"
-        await update.message.reply_text("Введите текущую цену BTC:")
-        return
-
-    elif text == "📉 Прогноз по ETH":
-        context.user_data["price_asset"] = "ETH"
-        await update.message.reply_text("Введите текущую цену ETH:")
+    if text == "📊 Прогноз по активу":
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image"),
+                InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")
+            ]
+        ])
+        await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
         return
 
     elif "price_asset" in context.user_data:
@@ -236,13 +249,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Пожизненно — $299\n"
         )
         await update.message.reply_text(text, reply_markup=keyboard)
-
-    elif text == "📷 Прогноз по скрину":
-        WAITING_FOR_PHOTO.add(user_id)
-        await update.message.reply_text("📸 Пришли скрин графика на 4H таймфрейме.")
-        return
-
-
 
 async def post_init(app):
     await app.bot.set_my_commands([BotCommand("start", "Запуск бота")])
