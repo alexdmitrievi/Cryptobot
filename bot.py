@@ -303,7 +303,8 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
         f"🧘 GPT-психолог:\n{response.choices[0].message.content.strip()}",
         reply_markup=REPLY_MARKUP
     )
-    return ConversationHandler.END
+    return WAITING_FOR_THERAPY_INPUT
+
 
 
 async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
