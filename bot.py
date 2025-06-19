@@ -252,14 +252,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(text, reply_markup=keyboard)
 
-    elif text == "🧘 Спокойствие":
-        await update.message.reply_text(
-        "😔 Бывают тяжёлые периоды в трейдинге. Я помогу тебе вернуть спокойствие и контроль.\n\n"
-        "Напиши, что с тобой происходит — и GPT-психолог поддержит тебя:",
-        reply_markup=ReplyKeyboardRemove()
-        )
-        return "WAITING_FOR_THERAPY_INPUT"
-
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
     prompt = (
@@ -276,6 +268,14 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
         reply_markup=REPLY_MARKUP
     )
     return ConversationHandler.END
+
+async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "😔 Бывают тяжёлые периоды в трейдинге. Я помогу тебе вернуть спокойствие и контроль.\n\n"
+        "Напиши, что с тобой происходит — и GPT-психолог поддержит тебя:",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return WAITING_FOR_THERAPY_INPUT
 
 async def post_init(app):
     await app.bot.set_my_commands([BotCommand("start", "Запуск бота")])
@@ -311,8 +311,12 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
     conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📊 Помощь профессионала$"), help_pro)],
+        entry_points=[
+            MessageHandler(filters.Regex("^📊 Помощь профессионала$"), help_pro),
+            MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)  # ✅ добавлен entry point
+        ],
         states={
             INTERPRET_NEWS: [MessageHandler(filters.TEXT & ~filters.COMMAND, interpret_decision)],
             ASK_EVENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_forecast)],
@@ -326,13 +330,14 @@ def main():
         },
         fallbacks=[CommandHandler("start", start)]
     )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.post_init = post_init
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.post_init = post_init
     app.run_polling()
 
 if __name__ == '__main__':
