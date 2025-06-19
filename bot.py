@@ -131,36 +131,52 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in WAITING_FOR_PHOTO:
-        return  # игнорируем случайные фото
+        return  # Игнорируем случайные фото
 
     WAITING_FOR_PHOTO.discard(user_id)
-    if not await check_access(update): return
+    if not await check_access(update):
+        return
 
-    photo = update.message.photo[-1]
-    file = await photo.get_file()
-    photo_bytes = await file.download_as_bytearray()
+    try:
+        logging.info("[PHOTO] Получено изображение от %s", user_id)
 
-    image_base64 = base64.b64encode(photo_bytes).decode("utf-8")
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        photo_bytes = await file.download_as_bytearray()
 
-    prompt = (
-        "На изображении представлен график криптовалюты на 4-часовом таймфрейме.\n"
-        "Проанализируй его с точки зрения технического анализа: найди уровни поддержки/сопротивления, тренды, фигуры и индикаторы, если они видны.\n"
-        "Сделай краткий торговый вывод: возможное направление, риски и подходящие действия трейдера.\n"
-        "Не используй фундаментальный анализ и новости."
-    )
+        image_base64 = base64.b64encode(photo_bytes).decode("utf-8")
+        logging.info("[PHOTO] Длина изображения в base64: %d символов", len(image_base64))
 
-    response = await client.chat.completions.create(
-        model="gpt-4-vision-preview",
-        messages=[
-            {"role": "user", "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-            ]}
-        ],
-        max_tokens=500
-    )
+        prompt = (
+            "На изображении представлен график криптовалюты на 4-часовом таймфрейме.\n"
+            "Проанализируй его с точки зрения технического анализа: найди уровни поддержки/сопротивления, тренды, фигуры и индикаторы, если они видны.\n"
+            "Сделай краткий торговый вывод: возможное направление, риски и подходящие действия трейдера.\n"
+            "Не используй фундаментальный анализ и новости."
+        )
 
-    await update.message.reply_text(f"📈 Прогноз по графику:\n{response.choices[0].message.content.strip()}", reply_markup=REPLY_MARKUP)
+        response = await client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=[
+                {"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                ]}
+            ],
+            max_tokens=500
+        )
+
+        reply = response.choices[0].message.content.strip()
+        logging.info("[PHOTO] GPT ответил: %s", reply)
+
+        await update.message.reply_text(f"📈 Прогноз по графику:\n{reply}", reply_markup=REPLY_MARKUP)
+
+    except Exception as e:
+        logging.error(f"[PHOTO] Ошибка при обработке изображения: {e}")
+        await update.message.reply_text(
+            "⚠️ Возникла ошибка при обработке скрина. Проверь изображение или повтори попытку позже.\n"
+            "Возможно, модель GPT-4 Vision временно недоступна.",
+            reply_markup=REPLY_MARKUP
+        )
 
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
