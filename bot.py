@@ -361,16 +361,22 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
     return WAITING_FOR_THERAPY_INPUT
 
 async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    therapy_keyboard = [
+        ["↩️ Выйти в меню"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(therapy_keyboard, resize_keyboard=True)
+
     await update.message.reply_text(
         "😵‍💫 Ну что, опять рынок побрил как барбер в пятницу? Бывает, дружище.\n\n"
         "Напиши, что случилось — GPT-психолог с доброй иронией выслушает, подбодрит и вставит мем.\n\n"
         "Когда захочешь вернуться к аналитике — просто нажми *«↩️ Выйти в меню»*.",
-        reply_markup=REPLY_MARKUP
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
     )
     return WAITING_FOR_THERAPY_INPUT
 
 async def post_init(app):
-    await app.bot.set_my_commands([BotCommand("start", "Запуск бота")])
+    await app.bot.set_my_commands([BotCommand("start", "Запустить бота")])
 
 # 👇 ВСТАВЬ ЗДЕСЬ:
 ADMIN_IDS = {407721399}  # замени на свой user_id
