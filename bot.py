@@ -10,7 +10,6 @@ from PIL import Image
 import io
 import base64
 
-
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
 
@@ -20,7 +19,8 @@ TEST_USERS = set()
 reply_keyboard = [
     ["📊 Прогноз по активу", "🧠 Помощь профессионала"],
     ["🧘 Спокойствие", "🏁 Тестовый период"],
-    ["💰 Оплатить помощника", "💵 Тарифы /prices"]
+    ["📏 Калькулятор риска", "💰 Оплатить помощника"],
+    ["💵 Тарифы /prices"]
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
@@ -30,6 +30,53 @@ user_inputs = {}
 WAITING_FOR_PHOTO = set()
 WAITING_FOR_THERAPY_INPUT = 100
 
+RISK_CALC_1, RISK_CALC_2, RISK_CALC_3 = range(101, 104)
+
+async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📊 Введи размер депозита в $:")
+    return RISK_CALC_1
+
+async def risk_calc_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data["deposit"] = float(update.message.text.strip())
+        await update.message.reply_text("💡 Теперь введи процент риска на сделку (%):")
+        return RISK_CALC_2
+    except ValueError:
+        await update.message.reply_text("❗️ Введи число. Пример: 1000")
+        return RISK_CALC_1
+
+async def risk_calc_risk_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data["risk_percent"] = float(update.message.text.strip())
+        await update.message.reply_text("⚠️ Введи стоп-лосс по сделке (%):")
+        return RISK_CALC_3
+    except ValueError:
+        await update.message.reply_text("❗️ Введи число. Пример: 2")
+        return RISK_CALC_2
+
+async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        stoploss_percent = float(update.message.text.strip())
+        deposit = context.user_data["deposit"]
+        risk_percent = context.user_data["risk_percent"]
+
+        risk_amount = deposit * risk_percent / 100
+        position_size = risk_amount / (stoploss_percent / 100)
+
+        await update.message.reply_text(
+            f"✅ Результат:\n"
+            f"• Депозит: ${deposit:.2f}\n"
+            f"• Риск на сделку: {risk_percent:.2f}% (${risk_amount:.2f})\n"
+            f"• Стоп-лосс: {stoploss_percent:.2f}%\n\n"
+            f"📌 Рекомендуемый объём позиции: **${position_size:.2f}**",
+            reply_markup=REPLY_MARKUP,
+            parse_mode="Markdown"
+        )
+        return ConversationHandler.END
+
+    except ValueError:
+        await update.message.reply_text("❗️ Введи число. Пример: 1.5")
+        return RISK_CALC_3
 
 async def check_access(update: Update):
     user_id = update.effective_user.id
@@ -287,6 +334,11 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
+
+    if user_text == "↩️ Выйти в меню":
+        await update.message.reply_text("🔁 Возвращаемся в главное меню!", reply_markup=REPLY_MARKUP)
+        return ConversationHandler.END
+
     prompt = (
         "Ты — GPT-психолог с юмором. Ты поддерживаешь трейдеров после неудач, лудомании и паники. "
         "Общайся легко, с доброй иронией, используй эмодзи, не бойся подколоть — но всегда поддерживай и подбадривай. "
@@ -299,19 +351,21 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
     )
+
     await update.message.reply_text(
         f"🧘 GPT-психолог:\n{response.choices[0].message.content.strip()}",
         reply_markup=REPLY_MARKUP
     )
+
+    # ⛔️ НЕ завершаем диалог — пользователь может продолжать
     return WAITING_FOR_THERAPY_INPUT
-
-
 
 async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "😵‍💫 Ну что, опять рынок побрил как барбер в пятницу? Бывает, дружище.\n\n"
-        "Напиши, что случилось — GPT-психолог с доброй иронией выслушает, поддержит и вставит мем, чтобы ты снова почувствовал силу 💪",
-        reply_markup=ReplyKeyboardRemove()
+        "Напиши, что случилось — GPT-психолог с доброй иронией выслушает, подбодрит и вставит мем.\n\n"
+        "Когда захочешь вернуться к аналитике — просто нажми *«↩️ Выйти в меню»*.",
+        reply_markup=REPLY_MARKUP
     )
     return WAITING_FOR_THERAPY_INPUT
 
@@ -334,14 +388,16 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
     
     text = (
-        "🚀 **GPT-Помощник для трейдинга по новостям — прямо в Telegram**\n\n"
-        "💬 Индивидуальные консультации от опытных трейдеров\n"
-        "📈 Мгновенные интерпретации макроэкономических новостей\n"
-        "🎯 Точки входа для скальпинга и позиционной торговли\n"
-        "📚 Еженедельные обзоры и обучающие материалы\n"
-        "🌍 Без VPN, без ChatGPT — всё внутри Telegram\n"
-        "🤝 Ты также получаешь доступ к сильному комьюнити трейдеров\n\n"
-        "🔥 Это не просто подписка на GPT — это инструмент + поддержка + опыт"
+        "🧠 **GPT-Помощник для трейдера** — твой личный аналитик, наставник и психолог в Telegram\n\n"
+        "🔍 Хватает гадать по графику? Смотри, что ты получаешь:\n"
+        "• 📈 Прогноз по скрину графика за 10 секунд\n"
+        "• 📰 Интерпретация макроэкономических новостей с торговыми идеями\n"
+        "• 💬 Ответы под твой стиль: скальпинг, позиционка или инвестиции\n"
+        "• 🧘 GPT-психолог с мемами для восстановления после просадки\n\n"
+        "🔥 Всё это — в одном боте, без VPN, ChatGPT или заморочек\n"
+        "💰 Всего от $1 в день. Уже 500+ трейдеров подключились.\n\n"
+        "👤 Хочешь индивидуальную консультацию? [@zhbankov_alex](https://t.me/zhbankov_alex)\n"
+        "🎁 Новичкам: [Бесплатный гайд по основам трейдинга](https://t.me/zhbankov_alex/33)"
     )
 
     message = await context.bot.send_message(chat_id='@Cripto_inter_bot', text=text, reply_markup=keyboard)
@@ -375,9 +431,23 @@ def main():
         fallbacks=[CommandHandler("start", start)]
     )
 
+    # 🔢 Калькулятор риска
+    risk_calc_handler = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc)
+        ],
+        states={
+            RISK_CALC_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_deposit)],
+            RISK_CALC_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_risk_percent)],
+            RISK_CALC_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_stoploss)],
+        },
+        fallbacks=[CommandHandler("start", start)]
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(conv_handler)
+    app.add_handler(risk_calc_handler)
 
     # 📌 Универсальный хендлер для всего текстового ввода
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
