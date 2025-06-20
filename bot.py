@@ -352,12 +352,14 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
         messages=[{"role": "user", "content": prompt}]
     )
 
+    therapy_keyboard = [["↩️ Выйти в меню"]]
+    reply_markup = ReplyKeyboardMarkup(therapy_keyboard, resize_keyboard=True)
+
     await update.message.reply_text(
         f"🧘 GPT-психолог:\n{response.choices[0].message.content.strip()}",
-        reply_markup=REPLY_MARKUP
+        reply_markup=reply_markup
     )
 
-    # ⛔️ НЕ завершаем диалог — пользователь может продолжать
     return WAITING_FOR_THERAPY_INPUT
 
 async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
