@@ -93,6 +93,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return ConversationHandler.END
+    context.user_data.clear()  # <— добавь это
     await update.message.reply_text("Ты хочешь интерпретировать новость? (да/нет)", reply_markup=ReplyKeyboardRemove())
     return INTERPRET_NEWS
 
@@ -615,11 +616,42 @@ async def post_init(app):
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    conv_handler = ConversationHandler(
-        entry_points=[
-            MessageHandler(filters.Regex("^🧠 Помощь профессионала$"), help_pro),
-            MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)
-        ],
+    # ⛑️ Хендлер "🧘 Спокойствие" через ConversationHandler
+    therapy_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)],
+        states={
+            WAITING_FOR_THERAPY_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, gpt_psychologist_response)]
+        },
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("restart", restart),
+            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
+        ]
+    )
+
+    # 📏 Калькулятор риска через ConversationHandler
+    risk_calc_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc)],
+        states={
+            RISK_CALC_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_deposit)],
+            RISK_CALC_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_risk_percent)],
+            RISK_CALC_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_stoploss)],
+        },
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("restart", restart),
+            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
+        ]
+    )
+
+    # 📈 Хендлер для старта и перезапуска
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("restart", restart))
+    app.add_handler(CommandHandler("publish", publish_post))
+
+    # 🧠 Помощь профессионала (новости/вопросы) через ConversationHandler
+    help_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🧠 Помощь профессионала$"), help_pro)],
         states={
             INTERPRET_NEWS: [MessageHandler(filters.TEXT & ~filters.COMMAND, interpret_decision)],
             ASK_EVENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_forecast)],
@@ -629,32 +661,32 @@ def main():
             FOLLOWUP_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, followup_timeframe)],
             FOLLOWUP_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, followup_market)],
             GENERAL_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, general_response)],
-            WAITING_FOR_THERAPY_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, gpt_psychologist_response)]
         },
-        fallbacks=[CommandHandler("start", start)]
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("restart", restart),
+            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
+        ]
     )
 
-    risk_calc_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc)],
-        states={
-            RISK_CALC_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_deposit)],
-            RISK_CALC_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_risk_percent)],
-            RISK_CALC_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_stoploss)],
-        },
-        fallbacks=[CommandHandler("start", start)]
-    )
-
-    # 🔧 Регистрируем хендлеры
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("publish", publish_post))
-    app.add_handler(CommandHandler("restart", restart))
-    app.add_handler(conv_handler)
-    app.add_handler(risk_calc_handler)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
-    app.add_handler(CallbackQueryHandler(button_handler))
+    # 🖼️ Обработка фото
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
+    # 📥 Кнопки с callback_data
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    # 📲 Unified текстовый обработчик (остальной текст)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
+
+    # 🔁 Register conversation flows
+    app.add_handler(therapy_handler)
+    app.add_handler(risk_calc_handler)
+    app.add_handler(help_conv_handler)
+
+    # 📌 Команды в меню
     app.post_init = post_init
+
+    # ▶️ Запуск
     app.run_polling()
 
 if __name__ == '__main__':
