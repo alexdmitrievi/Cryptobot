@@ -291,6 +291,49 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
+    # Если пользователь в процессе ввода для калькулятора
+    if context.user_data.get("awaiting_deposit"):
+        try:
+            deposit = float(text.replace(",", "."))
+            context.user_data["deposit"] = deposit
+            context.user_data["awaiting_deposit"] = False
+            context.user_data["awaiting_risk"] = True
+            await update.message.reply_text("📉 Введи риск на сделку в %:")
+        except:
+            await update.message.reply_text("❗ Введи число. Пример: 1000")
+        return
+
+    if context.user_data.get("awaiting_risk"):
+        try:
+            risk_percent = float(text.replace(",", "."))
+            context.user_data["risk_percent"] = risk_percent
+            context.user_data["awaiting_risk"] = False
+            context.user_data["awaiting_sl"] = True
+            await update.message.reply_text("🛑 Введи размер стоп-лосса в $:")
+        except:
+            await update.message.reply_text("❗ Введи число. Пример: 2.5")
+        return
+
+    if context.user_data.get("awaiting_sl"):
+        try:
+            sl = float(text.replace(",", "."))
+            deposit = context.user_data.pop("deposit")
+            risk_percent = context.user_data.pop("risk_percent")
+            context.user_data.pop("awaiting_sl")
+
+            risk_usd = deposit * risk_percent / 100
+            position_size = risk_usd / sl
+
+            await update.message.reply_text(
+                f"📏 Размер позиции: `{position_size:.2f}$`\n"
+                f"(риск {risk_percent:.2f}%, стоп {sl}$, депозит {deposit}$)",
+                parse_mode="Markdown",
+                reply_markup=REPLY_MARKUP
+            )
+        except:
+            await update.message.reply_text("❗ Введи число. Пример: 1.5")
+        return
+
     # 🧠 Помощь профессионала
     if text == "🧠 Помощь профессионала":
         if user_id not in ALLOWED_USERS:
@@ -327,7 +370,10 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 📏 Калькулятор риска
     if text == "📏 Калькулятор риска":
-        return await start_risk_calc(update, context)
+        context.user_data.clear()
+        context.user_data["awaiting_deposit"] = True
+        await update.message.reply_text("📊 Введи размер депозита в $:")
+        return
 
     # 🧘 Спокойствие
     if text == "🧘 Спокойствие":
@@ -359,7 +405,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
         return
 
-    # Все прочее → сброс
+    # ⛔ По умолчанию — если не в активной сессии, сбрасываем всё
     context.user_data.clear()
     await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
 
