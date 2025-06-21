@@ -547,7 +547,22 @@ async def post_init(app):
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    # Сначала ConversationHandler для "🧠 Помощь профессионала"
+    # 🧘 Психолог
+    therapy_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)],
+        states={
+            WAITING_FOR_THERAPY_INPUT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, gpt_psychologist_response)
+            ]
+        },
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("restart", restart),
+            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
+        ]
+    )
+
+    # 🧠 Помощь профессионала
     help_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧠 Помощь профессионала$"), help_pro)],
         states={
@@ -567,34 +582,40 @@ def main():
         ]
     )
 
-    # Добавь его ПЕРЕД unified_text_handler!
-    app.add_handler(help_conv_handler)
+    # 📏 Риск-калькулятор
+    risk_calc_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc)],
+        states={
+            RISK_CALC_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_deposit)],
+            RISK_CALC_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_risk_percent)],
+            RISK_CALC_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_stoploss)],
+        },
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("restart", restart),
+            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
+        ]
+    )
 
-    # Остальные хендлеры
+    # ✅ Порядок имеет значение:
+    app.add_handler(help_conv_handler)     # 🧠 GPT-аналитик
+    app.add_handler(therapy_handler)       # 🧘 Психолог
+    app.add_handler(risk_calc_handler)     # 📏 Калькулятор
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
 
-    # Психолог
-    app.add_handler(therapy_handler)
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # 🖼️ График
+    app.add_handler(CallbackQueryHandler(button_handler))         # Кнопки
 
-    # Риск-калькулятор
-    app.add_handler(risk_calc_handler)
-
-    # Фото
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-    # Кнопки
-    app.add_handler(CallbackQueryHandler(button_handler))
-
-    # Вот ЭТО должен быть В САМОМ КОНЦЕ
+    # 📲 Обработчик обычного текста (последний!)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
 
     app.post_init = post_init
     app.run_polling()
 
-
-if __name__ == '__main__':
+if _name__ == '__main__':
     main()
 
 
