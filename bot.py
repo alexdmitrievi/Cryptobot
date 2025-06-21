@@ -440,11 +440,6 @@ async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return WAITING_FOR_THERAPY_INPUT
 
-await app.bot.set_my_commands([
-    BotCommand("start", "Запустить бота"),
-    BotCommand("restart", "🔁 Перезапустить бота")
-])
-
 # 👇 ВСТАВЬ ЗДЕСЬ:
 ADMIN_IDS = {407721399}  # замени на свой user_id
 
