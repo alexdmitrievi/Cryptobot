@@ -196,20 +196,44 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in WAITING_FOR_PHOTO:
-        return  # Игнорируем случайные фото
-
-    WAITING_FOR_PHOTO.discard(user_id)
-    if not await check_access(update):
-        return
-
     photo = update.message.photo[-1]
     file = await photo.get_file()
     photo_bytes = await file.download_as_bytearray()
 
-    context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
-    await update.message.reply_text("🧠 Что сейчас происходит в мире? (например, новости, конфликты, решения центробанков и т.д.)")
-    context.user_data["awaiting_macro_for_image"] = True
+    # 📈 График с уровнями
+    if context.user_data.get("awaiting_chart"):
+        context.user_data.pop("awaiting_chart")
+
+        try:
+            vision_response = await client.chat.completions.create(
+                model="gpt-4-vision-preview",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "На изображении график криптовалюты. Определи уровни поддержки и сопротивления, тренд и действия трейдера."},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64.b64encode(photo_bytes).decode()}"}}
+                    ]
+                }]
+            )
+
+            analysis = vision_response.choices[0].message.content.strip()
+            await update.message.reply_text(f"📉 Анализ графика:\n{analysis}", reply_markup=REPLY_MARKUP)
+
+        except Exception as e:
+            logging.error(f"[CHART_LEVELS] Ошибка анализа: {e}")
+            await update.message.reply_text("⚠️ Не удалось проанализировать график. Попробуй позже.")
+        return
+
+    # 📷 Прогноз по скрину графика
+    if user_id in WAITING_FOR_PHOTO:
+        WAITING_FOR_PHOTO.discard(user_id)
+        if not await check_access(update):
+            return
+
+        context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
+        await update.message.reply_text("🧠 Что сейчас происходит в мире? (например, новости, конфликты, решения центробанков и т.д.)")
+        context.user_data["awaiting_macro_for_image"] = True
+        return
 
 async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_macro_for_image"):
@@ -252,7 +276,7 @@ async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_T
     except Exception as e:
         logging.error(f"[MACRO_GRAPH] Ошибка анализа: {e}")
         await update.message.reply_text("⚠️ Произошла ошибка при анализе. Попробуй позже.")
-
+        
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
@@ -287,28 +311,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "📈 График с уровнями":
         await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию на рынке")
         context.user_data["awaiting_chart"] = True
-        return
-
-    if "awaiting_chart" in context.user_data and update.message.photo:
-        context.user_data.pop("awaiting_chart")
-        photo_file = await update.message.photo[-1].get_file()
-        photo_bytes = await photo_file.download_as_bytearray()
-
-        vision_response = await client.chat.completions.create(
-            model="gpt-4-vision-preview",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "На изображении график криптовалюты. Определи уровни поддержки и сопротивления, тренд и действия трейдера."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64.b64encode(photo_bytes).decode()}"}}
-                    ]
-                }
-            ]
-        )
-
-        analysis = vision_response.choices[0].message.content.strip()
-        await update.message.reply_text(f"📉 Анализ графика:\n{analysis}", reply_markup=REPLY_MARKUP)
         return
 
     if text == "📊 Прогноз по активу":
@@ -392,6 +394,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message, reply_markup=keyboard)
         return
 
+
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
 
@@ -437,8 +440,10 @@ async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return WAITING_FOR_THERAPY_INPUT
 
-async def post_init(app):
-    await app.bot.set_my_commands([BotCommand("start", "Запустить бота")])
+await app.bot.set_my_commands([
+    BotCommand("start", "Запустить бота"),
+    BotCommand("restart", "🔁 Перезапустить бота")
+])
 
 # 👇 ВСТАВЬ ЗДЕСЬ:
 ADMIN_IDS = {407721399}  # замени на свой user_id
@@ -476,6 +481,9 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await handle_macro_for_image(update, context)
     else:
         await handle_main(update, context)
+
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
@@ -525,6 +533,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     app.post_init = post_init
+    app.add_handler(CommandHandler("restart", restart))
     app.run_polling()
 
 if __name__ == '__main__':
