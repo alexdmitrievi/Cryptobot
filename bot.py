@@ -363,11 +363,11 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         message = (
             "💰 Тарифы на подписку:\n\n"
-            "• 1 месяц — $25\n"
-            "• 3 месяца — $60 (экономия $15)\n"
-            "• 6 месяцев — $100 (экономия $50)\n"
-            "• 12 месяцев — $180 (экономия $120)\n"
-            "• Пожизненно — $299\n"
+            "• 1 месяц — $10\n"
+            "• 3 месяца — $25 (экономия $5)\n"
+            "• 6 месяцев — $45 (экономия $15)\n"
+            "• 12 месяцев — $80 (экономия $40)\n"
+            "• Пожизненно — $149\n"
         )
         await update.message.reply_text(message, reply_markup=keyboard)
         return
@@ -569,8 +569,9 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await handle_main(update, context)
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()  # сбрасываем все флаги и ожидания
+    context.user_data.clear()  # Сброс пользовательских флагов
     await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
+    return ConversationHandler.END  # <-- критично!
 
 async def post_init(app):
     await app.bot.set_my_commands([
