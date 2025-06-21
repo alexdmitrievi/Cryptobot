@@ -276,7 +276,7 @@ async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_T
     except Exception as e:
         logging.error(f"[MACRO_GRAPH] Ошибка анализа: {e}")
         await update.message.reply_text("⚠️ Произошла ошибка при анализе. Попробуй позже.")
-        
+
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
@@ -485,6 +485,12 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
 
+async def post_init(app):
+    await app.bot.set_my_commands([
+        BotCommand("start", "Запустить бота"),
+        BotCommand("restart", "🔁 Перезапустить бота")
+    ])
+
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -507,11 +513,8 @@ def main():
         fallbacks=[CommandHandler("start", start)]
     )
 
-    # 🔢 Калькулятор риска
     risk_calc_handler = ConversationHandler(
-        entry_points=[
-            MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc)
-        ],
+        entry_points=[MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc)],
         states={
             RISK_CALC_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_deposit)],
             RISK_CALC_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_risk_percent)],
@@ -520,20 +523,17 @@ def main():
         fallbacks=[CommandHandler("start", start)]
     )
 
+    # 🔧 Регистрируем хендлеры
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("publish", publish_post))
+    app.add_handler(CommandHandler("restart", restart))
     app.add_handler(conv_handler)
     app.add_handler(risk_calc_handler)
-
-    # 📌 Универсальный хендлер для всего текстового ввода
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
-
-    # 📍 Обработка кнопок и изображений
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     app.post_init = post_init
-    app.add_handler(CommandHandler("restart", restart))
     app.run_polling()
 
 if __name__ == '__main__':
