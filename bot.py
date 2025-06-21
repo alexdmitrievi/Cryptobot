@@ -206,14 +206,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             vision_response = await client.chat.completions.create(
-                model="gpt-4-vision-preview",
+                model="gpt-4o",
                 messages=[{
                     "role": "user",
                     "content": [
                         {"type": "text", "text": "На изображении график криптовалюты. Определи уровни поддержки и сопротивления, тренд и действия трейдера."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64.b64encode(photo_bytes).decode()}"}}
+                        {"type": "image_url", "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64.b64encode(photo_bytes).decode()}"
+                        }}
                     ]
-                }]
+                }],
+                max_tokens=600
             )
 
             analysis = vision_response.choices[0].message.content.strip()
