@@ -291,21 +291,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    known_buttons = [
-        "📊 Прогноз по активу", "📈 График с уровнями", "🧘 Спокойствие",
-        "📚 Объяснение термина", "📏 Калькулятор риска",
-        "💰 Подключить за $25", "💵 О подписке", "🔄 Перезапустить бота"
-    ]
-    if text in known_buttons:
-        context.user_data.clear()
-        await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
-        return ConversationHandler.END
-
-    if text == "🔄 Перезапустить бота":
-        context.user_data.clear()
-        await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
-        return ConversationHandler.END
-
     # 🧠 Помощь профессионала
     if text == "🧠 Помощь профессионала":
         if user_id not in ALLOWED_USERS:
@@ -318,16 +303,21 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # 📚 Объяснение термина
     if text == "📚 Объяснение термина":
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить. Пример: шорт")
         return
 
+    # 📈 График с уровнями
     if text == "📈 График с уровнями":
-        await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию на рынке")
+        context.user_data.clear()
         context.user_data["awaiting_chart"] = True
+        await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию на рынке")
         return
 
+    # 📊 Прогноз по активу
     if text == "📊 Прогноз по активу":
+        context.user_data.clear()
         keyboard = InlineKeyboardMarkup([[ 
             InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image"),
             InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")
@@ -335,7 +325,16 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
         return
 
-    if "Подключить" in text or "Оплатить" in text:
+    # 📏 Калькулятор риска
+    if text == "📏 Калькулятор риска":
+        return await start_risk_calc(update, context)
+
+    # 🧘 Спокойствие
+    if text == "🧘 Спокойствие":
+        return await start_therapy(update, context)
+
+    # 💰 Подключить за $25
+    if text == "💰 Подключить за $25":
         await update.message.reply_text(
             "💸 Стоимость подписки: **навсегда за $25**\n\n"
             "Отправь USDT в сети TON на адрес:\n\n"
@@ -346,12 +345,23 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if "О подписке" in text:
+    # 💵 О подписке
+    if text == "💵 О подписке":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Оплатить через TON", callback_data="show_wallet")]
         ])
         await update.message.reply_text("Выбери способ оплаты:", reply_markup=keyboard)
         return
+
+    # 🔄 Перезапуск
+    if text == "🔄 Перезапустить бота":
+        context.user_data.clear()
+        await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
+        return
+
+    # Все прочее → сброс
+    context.user_data.clear()
+    await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
