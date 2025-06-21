@@ -291,7 +291,18 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # === КАЛЬКУЛЯТОР РИСКА ===
+    # Список команд-кнопок
+    command_texts = [
+        "📏 Калькулятор риска", "🧘 Спокойствие", "🧠 Помощь профессионала",
+        "📚 Объяснение термина", "📈 График с уровнями", "📊 Прогноз по активу",
+        "💰 Подключить за $25", "💵 О подписке", "🔄 Перезапустить бота"
+    ]
+
+    # Если нажата кнопка — сбрасываем все user_data
+    if text in command_texts:
+        context.user_data.clear()
+
+    # Обработка калькулятора риска (если не было нажатий на кнопки)
     if context.user_data.get("awaiting_deposit"):
         try:
             deposit = float(text.replace(",", "."))
@@ -329,21 +340,19 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• Депозит: ${deposit:.2f}\n"
                 f"• Риск на сделку: {risk_percent:.2f}% (${risk_usd:.2f})\n"
                 f"• Стоп-лосс: {sl:.2f}%\n\n"
-                f"📌 Рекомендуемый объём позиции: *${position_size:.2f}*",
+                f"📌 *Рекомендуемый объём позиции:* ${position_size:.2f}",
                 parse_mode="Markdown",
                 reply_markup=REPLY_MARKUP
             )
-            context.user_data.clear()  # ⬅️ Сброс состояния
         except:
             await update.message.reply_text("❗ Введи число. Пример: 1.5")
         return
 
-    # === КНОПКИ ===
+    # 🧠 Помощь профессионала
     if text == "🧠 Помощь профессионала":
         if user_id not in ALLOWED_USERS:
             await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
             return
-        context.user_data.clear()
         context.user_data["awaiting_pro_question"] = True
         await update.message.reply_text(
             "🧑‍💼 Напиши свой вопрос по трейдингу, инвестициям или аналитике — GPT-аналитик ответит.",
@@ -351,19 +360,19 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # 📚 Объяснение термина
     if text == "📚 Объяснение термина":
-        context.user_data.clear()
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить. Пример: шорт")
         return
 
+    # 📈 График с уровнями
     if text == "📈 График с уровнями":
-        context.user_data.clear()
         context.user_data["awaiting_chart"] = True
         await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию на рынке")
         return
 
+    # 📊 Прогноз по активу
     if text == "📊 Прогноз по активу":
-        context.user_data.clear()
         keyboard = InlineKeyboardMarkup([[ 
             InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image"),
             InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")
@@ -371,18 +380,18 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
         return
 
+    # 📏 Калькулятор риска
     if text == "📏 Калькулятор риска":
-        context.user_data.clear()
         context.user_data["awaiting_deposit"] = True
         await update.message.reply_text("📊 Введи размер депозита в $:")
         return
 
+    # 🧘 Спокойствие
     if text == "🧘 Спокойствие":
-        context.user_data.clear()
         return await start_therapy(update, context)
 
+    # 💰 Подключить за $25
     if text == "💰 Подключить за $25":
-        context.user_data.clear()
         await update.message.reply_text(
             "💸 Стоимость подписки: **навсегда за $25**\n\n"
             "Отправь USDT в сети TON на адрес:\n\n"
@@ -393,20 +402,21 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # 💵 О подписке
     if text == "💵 О подписке":
-        context.user_data.clear()
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Оплатить через TON", callback_data="show_wallet")]
         ])
         await update.message.reply_text("Выбери способ оплаты:", reply_markup=keyboard)
         return
 
+    # 🔄 Перезапуск
     if text == "🔄 Перезапустить бота":
         context.user_data.clear()
         await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
         return
 
-    # По умолчанию — если ввели что-то вне сценария
+    # Всё остальное — сброс
     context.user_data.clear()
     await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
 
