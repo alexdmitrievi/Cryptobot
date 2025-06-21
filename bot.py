@@ -350,7 +350,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Оплатить через TON", callback_data="show_wallet")]
         ])
-        await
+        await update.message.reply_text("Выбери способ оплаты:", reply_markup=keyboard)
+        return
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
