@@ -606,7 +606,7 @@ def main():
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
 
-    app.add_handler(MessageHandler(ыilters.PHOTO, handle_photo))  # 🖼️ График
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # ✅
     app.add_handler(CallbackQueryHandler(button_handler))         # Кнопки
 
     # 📲 Обработчик обычного текста (последний!)
