@@ -569,6 +569,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await handle_main(update, context)
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()  # сбрасываем все флаги и ожидания
     await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
 
 async def post_init(app):
