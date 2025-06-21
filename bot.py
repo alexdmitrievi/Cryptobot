@@ -291,10 +291,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # 📍 Кнопки, которые сбрасывают состояния (без «🧠 Помощь профессионала»)
     known_buttons = [
-        "📊 Прогноз по активу",
-        "📈 График с уровнями", "🧘 Спокойствие",
+        "📊 Прогноз по активу", "📈 График с уровнями", "🧘 Спокойствие",
         "📚 Объяснение термина", "📏 Калькулятор риска",
         "💰 Подключить за $25", "💵 О подписке", "🔄 Перезапустить бота"
     ]
@@ -303,33 +301,40 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
         return ConversationHandler.END
 
-    # 🔄 Перезапуск
     if text == "🔄 Перезапустить бота":
         context.user_data.clear()
         await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
         return ConversationHandler.END
 
-    # 📚 Объяснение термина
+    # 🧠 Помощь профессионала
+    if text == "🧠 Помощь профессионала":
+        if user_id not in ALLOWED_USERS:
+            await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
+            return
+        context.user_data["awaiting_pro_question"] = True
+        await update.message.reply_text(
+            "🧑‍💼 Напиши свой вопрос по трейдингу, инвестициям или аналитике — GPT-аналитик ответит.",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
     if text == "📚 Объяснение термина":
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить. Пример: шорт")
         return
 
-    # 📈 График с уровнями
     if text == "📈 График с уровнями":
         await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию на рынке")
         context.user_data["awaiting_chart"] = True
         return
 
-    # 📊 Прогноз по активу
     if text == "📊 Прогноз по активу":
-        keyboard = InlineKeyboardMarkup([[
+        keyboard = InlineKeyboardMarkup([[ 
             InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image"),
             InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")
         ]])
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
         return
 
-    # 💰 Подключить за $25
     if "Подключить" in text or "Оплатить" in text:
         await update.message.reply_text(
             "💸 Стоимость подписки: **навсегда за $25**\n\n"
@@ -341,115 +346,11 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💵 О подписке
     if "О подписке" in text:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Оплатить через TON", callback_data="show_wallet")]
         ])
-        await update.message.reply_text(
-            "🔐 **Открытие доступа**\n\n"
-            "• Подписка: **навсегда за $25**\n"
-            "• Оплата: USDT (TON)\n"
-            "• Доступ ко всем функциям бота\n\n"
-            "После оплаты — просто отправь хеш транзакции сюда.",
-            reply_markup=keyboard
-        )
-        return
-
-    # 📏 Калькулятор риска
-    if text == "📏 Калькулятор риска":
-        context.user_data["awaiting_deposit"] = True
-        await update.message.reply_text("📊 Введи размер депозита в $:")
-        return
-
-    if context.user_data.get("awaiting_deposit"):
-        try:
-            deposit = float(text.replace(",", "."))
-            context.user_data["deposit"] = deposit
-            context.user_data["awaiting_deposit"] = False
-            context.user_data["awaiting_risk"] = True
-            await update.message.reply_text("📉 Введи риск на сделку в %:")
-        except:
-            await update.message.reply_text("❗ Введи число. Пример: 1000")
-        return
-
-    if context.user_data.get("awaiting_risk"):
-        try:
-            risk_percent = float(text.replace(",", "."))
-            context.user_data["risk_percent"] = risk_percent
-            context.user_data["awaiting_risk"] = False
-            context.user_data["awaiting_sl"] = True
-            await update.message.reply_text("🛑 Введи размер стоп-лосса в $:")
-        except:
-            await update.message.reply_text("❗ Введи число. Пример: 1000")
-        return
-
-    if context.user_data.get("awaiting_sl"):
-        try:
-            sl = float(text.replace(",", "."))
-            deposit = context.user_data.pop("deposit")
-            risk_percent = context.user_data.pop("risk_percent")
-            context.user_data.pop("awaiting_sl")
-
-            risk_usd = deposit * risk_percent / 100
-            position_size = risk_usd / sl
-
-            await update.message.reply_text(
-                f"📏 Размер позиции: `{position_size:.2f}$`\n"
-                f"(риск {risk_percent:.2f}%, стоп {sl}$, депозит {deposit}$)",
-                reply_markup=REPLY_MARKUP,
-                parse_mode="Markdown"
-            )
-        except:
-            await update.message.reply_text("❗ Введи число. Пример: 1000")
-        return
-
-    # 🧠 Ответ на вопрос по трейдингу
-    if context.user_data.get("awaiting_pro_question"):
-        context.user_data.pop("awaiting_pro_question")
-        prompt = (
-            f"Ты — опытный трейдер. Ответь на вопрос начинающего:\n\n"
-            f"{text}\n\n"
-            f"Объясни кратко, по существу, избегай воды и общих фраз. Стиль — профессиональный, но дружелюбный."
-        )
-        response = await client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        await update.message.reply_text(
-            f"📘 Ответ:\n{response.choices[0].message.content.strip()}",
-            reply_markup=REPLY_MARKUP
-        )
-        return
-
-    # 🖼️ Прогноз по скрину
-    if context.user_data.get("awaiting_macro_for_image"):
-        await handle_macro_for_image(update, context)
-        return
-
-    # 📘 Автообъяснение термина
-    if 2 <= len(text) <= 40 and len(text.split()) <= 3 and all(c.isalnum() or c in "-_ " for c in text):
-        prompt = (
-            f"Ты — крипто-трейдер и аналитик. Объясни термин из мира криптовалют и трейдинга:\n"
-            f"{text.strip()}\n\n"
-            f"🔸 Объясни просто, без академичности.\n"
-            f"🔸 Приведи пример из крипторынка.\n"
-            f"🔸 Избегай слишком общего стиля — делай упор на практику трейдера."
-        )
-        response = await client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        await update.message.reply_text(
-            f"📘 Объяснение:\n{response.choices[0].message.content.strip()}",
-            reply_markup=REPLY_MARKUP
-        )
-        return
-
-    # 🤖 Нераспознанный ввод
-    await update.message.reply_text("🤖 Я не понял запрос. Попробуй выбрать действие из меню.", reply_markup=REPLY_MARKUP)
-
-
+        await
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
