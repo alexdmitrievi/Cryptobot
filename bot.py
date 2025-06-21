@@ -291,9 +291,9 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # 📍 Кнопки, которые сбрасывают состояния
+    # 📍 Кнопки, которые сбрасывают состояния (без «🧠 Помощь профессионала»)
     known_buttons = [
-        "📊 Прогноз по активу", "🧠 Помощь профессионала",
+        "📊 Прогноз по активу",
         "📈 График с уровнями", "🧘 Спокойствие",
         "📚 Объяснение термина", "📏 Калькулятор риска",
         "💰 Подключить за $25", "💵 О подписке", "🔄 Перезапустить бота"
@@ -322,36 +322,11 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 📊 Прогноз по активу
     if text == "📊 Прогноз по активу":
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image"),
-                InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")
-            ]
-        ])
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image"),
+            InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")
+        ]])
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
-        return
-
-    # 🧠 Помощь профессионала (GPT-аналитик)
-    if text == "🧠 Помощь профессионала":
-        if user_id not in ALLOWED_USERS:
-            await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
-            return
-        await update.message.reply_text(
-            "🧑‍💼 Напиши свой вопрос по трейдингу, инвестициям или анализу — GPT-аналитик ответит.",
-            reply_markup=REPLY_MARKUP
-        )
-        context.user_data["awaiting_pro_question"] = True
-        return
-
-    # 🧘 Спокойствие
-    if text == "🧘 Спокойствие":
-        await update.message.reply_text(
-            "😵 Ну что, опять рынок побрил как барбер в пятницу? Бывает, дружище.\n\n"
-            "Напиши, что случилось — GPT-психолог с доброй иронией выслушает, подбодрит и вставит мем.\n\n"
-            "Когда захочешь вернуться к аналитике — просто нажми «⏩ Выйти в меню».",
-            reply_markup=ReplyKeyboardMarkup([["⏩ Выйти в меню"]], resize_keyboard=True)
-        )
-        context.user_data["awaiting_therapy"] = True
         return
 
     # 💰 Подключить за $25
@@ -381,7 +356,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 📏 Калькулятор риска (ввод по шагам)
+    # 📏 Калькулятор риска
     if text == "📏 Калькулятор риска":
         context.user_data["awaiting_deposit"] = True
         await update.message.reply_text("📊 Введи размер депозита в $:")
@@ -473,6 +448,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 🤖 Нераспознанный ввод
     await update.message.reply_text("🤖 Я не понял запрос. Попробуй выбрать действие из меню.", reply_markup=REPLY_MARKUP)
+
 
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
