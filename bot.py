@@ -186,7 +186,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "forecast_by_image":
         WAITING_FOR_PHOTO.add(user_id)
-        await query.edit_message_text("📸 Пришли скрин графика (4H таймфрейм), и я дам прогноз на основе технического анализа.")
+        context.user_data["awaiting_macro_for_image"] = True
+        await query.edit_message_text(
+            "📸 Пришли скрин графика (4H таймфрейм), и я дам прогноз на основе технического анализа."
+        )
 
     elif query.data == "forecast_by_price":
         await context.bot.send_message(
@@ -291,7 +294,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💰 Оплатить помощника", "💵 Тарифы /prices", "🏁 Тестовый период"
     ]
     if text in known_buttons:
-        for key in ["awaiting_deposit", "awaiting_risk", "awaiting_sl"]:
+        for key in ["awaiting_deposit", "awaiting_risk", "awaiting_sl", "awaiting_pro_question"]:
             context.user_data.pop(key, None)
 
     # 📚 Объяснение термина
@@ -314,6 +317,15 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ])
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
+        return
+
+    # 🧠 Помощь профессионала
+    if text == "🧠 Помощь профессионала":
+        await update.message.reply_text(
+            "🧑‍💼 Напиши свой вопрос по трейдингу, инвестициям или анализу — GPT-аналитик ответит.",
+            reply_markup=REPLY_MARKUP
+        )
+        context.user_data["awaiting_pro_question"] = True
         return
 
     # 🧘 Спокойствие
@@ -445,6 +457,24 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(
             f"📊 Прогноз по {asset} с учетом фундамента:\n{response.choices[0].message.content.strip()}",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
+    # 🧠 Ответ на вопрос по трейдингу
+    if context.user_data.get("awaiting_pro_question"):
+        context.user_data.pop("awaiting_pro_question")
+        prompt = (
+            f"Ты — опытный трейдер. Ответь на вопрос начинающего:\n\n"
+            f"{text}\n\n"
+            f"Объясни кратко, по существу, избегай воды и общих фраз. Стиль — профессиональный, но дружелюбный."
+        )
+        response = await client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        await update.message.reply_text(
+            f"📘 Ответ:\n{response.choices[0].message.content.strip()}",
             reply_markup=REPLY_MARKUP
         )
         return
