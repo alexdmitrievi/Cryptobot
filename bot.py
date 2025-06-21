@@ -20,7 +20,8 @@ reply_keyboard = [
     ["📊 Прогноз по активу", "🧠 Помощь профессионала"],
     ["📈 График с уровнями", "🧘 Спокойствие"],
     ["📚 Объяснение термина", "📏 Калькулятор риска"],
-    ["💰 Оплатить помощника", "💵 Тарифы /prices"]
+    ["💰 Оплатить помощника", "💵 Тарифы /prices"],
+    ["🏁 Тестовый период"]  # ← добавленная строка
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
@@ -282,7 +283,18 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # 📚 Объяснение термина (кнопка)
+    # Сброс лишних ожиданий, если нажата команда
+    known_buttons = [
+        "📊 Прогноз по активу", "🧠 Помощь профессионала",
+        "📈 График с уровнями", "🧘 Спокойствие",
+        "📚 Объяснение термина", "📏 Калькулятор риска",
+        "💰 Оплатить помощника", "💵 Тарифы /prices", "🏁 Тестовый период"
+    ]
+    if text in known_buttons:
+        for key in ["awaiting_deposit", "awaiting_risk", "awaiting_sl"]:
+            context.user_data.pop(key, None)
+
+    # 📚 Объяснение термина
     if text == "📚 Объяснение термина":
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить. Пример: шорт")
         return
@@ -304,7 +316,27 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
         return
 
-    # 💰 Оплата и тарифы
+    # 🧠 Помощь профессионала
+    if text == "🧠 Помощь профессионала":
+        await update.message.reply_text(
+            "🧑‍💼 Напиши свой вопрос по трейдингу, инвестициям или анализу — GPT-аналитик ответит.",
+            reply_markup=REPLY_MARKUP
+        )
+        context.user_data["awaiting_pro_question"] = True
+        return
+
+    # 🧘 Спокойствие
+    if text == "🧘 Спокойствие":
+        await update.message.reply_text(
+            "😵 Ну что, опять рынок побрил как барбер в пятницу? Бывает, дружище.\n\n"
+            "Напиши, что случилось — GPT-психолог с доброй иронией выслушает, подбодрит и вставит мем.\n\n"
+            "Когда захочешь вернуться к аналитике — просто нажми «⏩ Выйти в меню».",
+            reply_markup=ReplyKeyboardMarkup([["⏩ Выйти в меню"]], resize_keyboard=True)
+        )
+        context.user_data["awaiting_therapy"] = True
+        return
+
+    # 🏁 Тестовый период
     if text == "🏁 Тестовый период":
         if user_id in TEST_USERS or user_id in ALLOWED_USERS:
             await update.message.reply_text("⏳ Ты уже использовал тест.")
@@ -314,7 +346,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Тестовый доступ активирован на 1 сессию.")
         return
 
-    if text == "💰 Оплатить помощника":
+    # 💰 Оплатить помощника
+    if "Оплатить помощника" in text:
         await update.message.reply_text(
             "Отправь USDT в сети TON на адрес:\n\n"
             "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\n"
@@ -323,7 +356,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "💵 Тарифы /prices":
+    # 💵 Тарифы /prices
+    if "Тарифы" in text:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Оплатить TON", callback_data="show_wallet")]
         ])
@@ -338,7 +372,54 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message, reply_markup=keyboard)
         return
 
-    # 🔄 Прогноз по цене: шаги
+    # 📏 Калькулятор риска
+    if text == "📏 Калькулятор риска":
+        context.user_data["awaiting_deposit"] = True
+        await update.message.reply_text("📊 Введи размер депозита в $:")
+        return
+
+    if context.user_data.get("awaiting_deposit"):
+        try:
+            deposit = float(text.replace(",", "."))
+            context.user_data["deposit"] = deposit
+            context.user_data["awaiting_deposit"] = False
+            context.user_data["awaiting_risk"] = True
+            await update.message.reply_text("📉 Введи риск на сделку в %:")
+        except:
+            await update.message.reply_text("❗ Введи число. Пример: 1000")
+        return
+
+    if context.user_data.get("awaiting_risk"):
+        try:
+            risk_percent = float(text.replace(",", "."))
+            context.user_data["risk_percent"] = risk_percent
+            context.user_data["awaiting_risk"] = False
+            context.user_data["awaiting_sl"] = True
+            await update.message.reply_text("🛑 Введи размер стоп-лосса в $:")
+        except:
+            await update.message.reply_text("❗ Введи число. Пример: 1000")
+        return
+
+    if context.user_data.get("awaiting_sl"):
+        try:
+            sl = float(text.replace(",", "."))
+            deposit = context.user_data.pop("deposit")
+            risk_percent = context.user_data.pop("risk_percent")
+            context.user_data.pop("awaiting_sl")
+
+            risk_usd = deposit * risk_percent / 100
+            position_size = risk_usd / sl
+
+            await update.message.reply_text(
+                f"📏 Размер позиции: `{position_size:.2f}$`\n"
+                f"(риск {risk_percent:.2f}%, стоп {sl}$, депозит {deposit}$)",
+                reply_markup=REPLY_MARKUP
+            )
+        except:
+            await update.message.reply_text("❗ Введи число. Пример: 1000")
+        return
+
+    # 🔄 Прогноз по цене — шаги
     if "awaiting_asset_name" in context.user_data:
         context.user_data["price_asset"] = text.upper()
         del context.user_data["awaiting_asset_name"]
@@ -350,7 +431,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["price_value"] = text
         del context.user_data["awaiting_price_input"]
         context.user_data["awaiting_macro_input"] = True
-        await update.message.reply_text("Что сейчас происходит в мире? (например, новости, конфликты, заявления ФРС и т.д.)")
+        await update.message.reply_text("Что сейчас происходит в мире? (например, новости, конфликты, решения центробанков и т.д.)")
         return
 
     if "awaiting_macro_input" in context.user_data:
@@ -377,12 +458,12 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🖼️ Прогноз по скрину (макро после фото)
+    # 🖼️ Прогноз по скрину
     if context.user_data.get("awaiting_macro_for_image"):
         await handle_macro_for_image(update, context)
         return
 
-    # 📘 Автообъяснение термина (без префикса)
+    # 📘 Автообъяснение термина
     if 2 <= len(text) <= 40 and len(text.split()) <= 3 and all(c.isalnum() or c in "-_ " for c in text):
         prompt = (
             f"Ты — крипто-трейдер и аналитик. Объясни термин из мира криптовалют и трейдинга:\n"
@@ -401,7 +482,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🤖 Запрос не распознан
+    # 🤖 Нераспознанный запрос
     await update.message.reply_text("🤖 Я не понял запрос. Попробуй выбрать действие из меню.", reply_markup=REPLY_MARKUP)
 
 
@@ -501,7 +582,7 @@ def main():
 
     conv_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^📊 Помощь профессионала$"), help_pro),
+            MessageHandler(filters.Regex("^🧠 Помощь профессионала$"), help_pro),
             MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)
         ],
         states={
