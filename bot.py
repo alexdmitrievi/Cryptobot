@@ -316,15 +316,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
         return
 
-    # 🧠 Помощь профессионала
-    if text == "🧠 Помощь профессионала":
-        await update.message.reply_text(
-            "🧑‍💼 Напиши свой вопрос по трейдингу, инвестициям или анализу — GPT-аналитик ответит.",
-            reply_markup=REPLY_MARKUP
-        )
-        context.user_data["awaiting_pro_question"] = True
-        return
-
     # 🧘 Спокойствие
     if text == "🧘 Спокойствие":
         await update.message.reply_text(
@@ -569,9 +560,9 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await handle_main(update, context)
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()  # Сброс пользовательских флагов
+    context.user_data.clear()
     await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
-    return ConversationHandler.END  # <-- критично!
+    return ConversationHandler.END
 
 async def post_init(app):
     await app.bot.set_my_commands([
