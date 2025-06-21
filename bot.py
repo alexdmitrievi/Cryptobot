@@ -87,7 +87,9 @@ async def check_access(update: Update):
     return True
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
     await update.message.reply_text("👋 Привет! Выбери действие ниже:", reply_markup=REPLY_MARKUP)
+    return ConversationHandler.END
 
 async def help_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return ConversationHandler.END
@@ -288,27 +290,24 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # 🔄 Перезапуск из кнопки
-    if text == "🔄 Перезапустить бота":
-        context.user_data.clear()
-        await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
-        return
-
-    # Сброс лишних ожиданий, если нажата команда
+    # 🔁 Принудительно завершаем все активные разговоры, если нажата одна из кнопок
     known_buttons = [
         "📊 Прогноз по активу", "🧠 Помощь профессионала",
         "📈 График с уровнями", "🧘 Спокойствие",
         "📚 Объяснение термина", "📏 Калькулятор риска",
-        "💰 Оплатить помощника", "💵 Тарифы /prices", "🏁 Тестовый период"
+        "💰 Оплатить помощника", "💵 Тарифы /prices", "🏁 Тестовый период",
+        "🔄 Перезапустить бота"
     ]
     if text in known_buttons:
-        for key in [
-            "awaiting_deposit", "awaiting_risk", "awaiting_sl",
-            "awaiting_pro_question", "awaiting_chart",
-            "awaiting_asset_name", "awaiting_price_input", "awaiting_macro_input",
-            "awaiting_macro_for_image", "awaiting_therapy"
-        ]:
-            context.user_data.pop(key, None)
+        context.user_data.clear()
+        await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
+        return ConversationHandler.END
+
+    # 🔄 Перезапуск из кнопки
+    if text == "🔄 Перезапустить бота":
+        context.user_data.clear()
+        await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
+        return ConversationHandler.END
 
     # 📚 Объяснение термина
     if text == "📚 Объяснение термина":
@@ -436,25 +435,25 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # 🔄 Прогноз по цене — шаги
-    if "awaiting_asset_name" in context.user_data:
+    if context.user_data.get("awaiting_asset_name"):
         context.user_data["price_asset"] = text.upper()
-        del context.user_data["awaiting_asset_name"]
+        context.user_data.pop("awaiting_asset_name")
         context.user_data["awaiting_price_input"] = True
         await update.message.reply_text("Введи текущую цену актива:")
         return
 
-    if "awaiting_price_input" in context.user_data:
+    if context.user_data.get("awaiting_price_input"):
         context.user_data["price_value"] = text
-        del context.user_data["awaiting_price_input"]
+        context.user_data.pop("awaiting_price_input")
         context.user_data["awaiting_macro_input"] = True
         await update.message.reply_text("Что сейчас происходит в мире? (например, новости, конфликты, решения центробанков и т.д.)")
         return
 
-    if "awaiting_macro_input" in context.user_data:
+    if context.user_data.get("awaiting_macro_input"):
         asset = context.user_data.pop("price_asset")
         price = context.user_data.pop("price_value")
+        context.user_data.pop("awaiting_macro_input")
         macro = text
-        del context.user_data["awaiting_macro_input"]
 
         prompt = (
             f"Ты — профессиональный трейдер с опытом более 10 лет в трейдинге.\n"
