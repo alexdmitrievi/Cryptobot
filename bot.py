@@ -21,7 +21,7 @@ reply_keyboard = [
     ["📈 График с уровнями", "🧘 Спокойствие"],
     ["📚 Объяснение термина", "📏 Калькулятор риска"],
     ["💰 Оплатить помощника", "💵 Тарифы /prices"],
-    ["🏁 Тестовый период"]  # ← добавленная строка
+    ["🏁 Тестовый период", "🔄 Перезапустить бота"]  # ← добавил здесь
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
@@ -207,7 +207,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 📈 График с уровнями
     if context.user_data.get("awaiting_chart"):
         context.user_data.pop("awaiting_chart")
-
         try:
             vision_response = await client.chat.completions.create(
                 model="gpt-4o",
@@ -222,21 +221,24 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }],
                 max_tokens=600
             )
-
             analysis = vision_response.choices[0].message.content.strip()
             await update.message.reply_text(f"📉 Анализ графика:\n{analysis}", reply_markup=REPLY_MARKUP)
-
         except Exception as e:
-            logging.error(f"[CHART_LEVELS] Ошибка анализа: {e}")
+            logging.error(f"[awaiting_chart] Ошибка анализа графика: {e}")
             await update.message.reply_text("⚠️ Не удалось проанализировать график. Попробуй позже.")
         return
 
-    # 📷 Прогноз по скрину графика (через кнопку)
-    if context.user_data.get("awaiting_macro_for_image") is None:
+    # 📊 Прогноз по скрину графика (через кнопку)
+    if context.user_data.get("awaiting_macro_for_image"):
         context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
         context.user_data["awaiting_macro_for_image"] = True
-        await update.message.reply_text("🧠 Что сейчас происходит в мире? (например, новости, конфликты, решения центробанков и т.д.)")
+        await update.message.reply_text(
+            "🧠 Что сейчас происходит в мире? (например, новости, конфликты, решения центробанков и т.д.)"
+        )
         return
+
+    # Если ни один режим не был активен
+    await update.message.reply_text("🤖 Не понял, что делать с изображением. Попробуй выбрать действие из меню.")
 
 async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_macro_for_image"):
@@ -286,6 +288,12 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
+    # 🔄 Перезапуск из кнопки
+    if text == "🔄 Перезапустить бота":
+        context.user_data.clear()
+        await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
+        return
+
     # Сброс лишних ожиданий, если нажата команда
     known_buttons = [
         "📊 Прогноз по активу", "🧠 Помощь профессионала",
@@ -294,7 +302,12 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💰 Оплатить помощника", "💵 Тарифы /prices", "🏁 Тестовый период"
     ]
     if text in known_buttons:
-        for key in ["awaiting_deposit", "awaiting_risk", "awaiting_sl", "awaiting_pro_question"]:
+        for key in [
+            "awaiting_deposit", "awaiting_risk", "awaiting_sl",
+            "awaiting_pro_question", "awaiting_chart",
+            "awaiting_asset_name", "awaiting_price_input", "awaiting_macro_input",
+            "awaiting_macro_for_image", "awaiting_therapy"
+        ]:
             context.user_data.pop(key, None)
 
     # 📚 Объяснение термина
