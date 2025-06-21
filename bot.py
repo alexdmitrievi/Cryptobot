@@ -18,9 +18,9 @@ TEST_USERS = set()
 
 reply_keyboard = [
     ["📊 Прогноз по активу", "🧠 Помощь профессионала"],
-    ["🧘 Спокойствие", "🏁 Тестовый период"],
-    ["📏 Калькулятор риска", "💰 Оплатить помощника"],
-    ["💵 Тарифы /prices"]
+    ["📈 График с уровнями", "🧘 Спокойствие"],
+    ["📚 Объяснение термина", "📏 Калькулятор риска"],
+    ["💰 Оплатить помощника", "💵 Тарифы /prices"]
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
@@ -254,8 +254,62 @@ async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("⚠️ Произошла ошибка при анализе. Попробуй позже.")
 
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+    text = update.message.text.strip()
     user_id = update.effective_user.id
+
+    if text.lower().startswith("объясни:"):
+        term = text[8:].strip()
+        if not term:
+            await update.message.reply_text("❓ Напиши термин после слова 'Объясни:'")
+            return
+
+        prompt = (
+            f"Объясни трейдинговый термин простыми словами:\n"
+            f"{term}\n"
+            f"\nДай краткое, понятное определение, приведи 1 пример и не используй академический стиль."
+        )
+
+        response = await client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        await update.message.reply_text(
+            f"📘 Объяснение термина:\n{response.choices[0].message.content.strip()}",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
+    if text == "📚 Объяснение термина":
+        await update.message.reply_text("✍️ Напиши термин, который нужно объяснить. Пример: Объясни: шорт")
+        return
+
+    if text == "📈 График с уровнями":
+        await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию на рынке")
+        context.user_data["awaiting_chart"] = True
+        return
+
+    if "awaiting_chart" in context.user_data and update.message.photo:
+        context.user_data.pop("awaiting_chart")
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
+
+        vision_response = await client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "На изображении график криптовалюты. Определи уровни поддержки и сопротивления, тренд и действия трейдера."},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64.b64encode(photo_bytes).decode()}"}}
+                    ]
+                }
+            ]
+        )
+
+        analysis = vision_response.choices[0].message.content.strip()
+        await update.message.reply_text(f"📉 Анализ графика:\n{analysis}", reply_markup=REPLY_MARKUP)
+        return
 
     if text == "📊 Прогноз по активу":
         keyboard = InlineKeyboardMarkup([
@@ -267,24 +321,24 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
         return
 
-    elif "awaiting_asset_name" in context.user_data:
-        context.user_data["price_asset"] = update.message.text.strip().upper()
+    if "awaiting_asset_name" in context.user_data:
+        context.user_data["price_asset"] = text.upper()
         del context.user_data["awaiting_asset_name"]
         context.user_data["awaiting_price_input"] = True
         await update.message.reply_text("Введи текущую цену актива:")
         return
 
-    elif "awaiting_price_input" in context.user_data:
-        context.user_data["price_value"] = update.message.text.strip()
+    if "awaiting_price_input" in context.user_data:
+        context.user_data["price_value"] = text
         del context.user_data["awaiting_price_input"]
         context.user_data["awaiting_macro_input"] = True
         await update.message.reply_text("Что сейчас происходит в мире? (например, новости, конфликты, заявления ФРС и т.д.)")
         return
 
-    elif "awaiting_macro_input" in context.user_data:
+    if "awaiting_macro_input" in context.user_data:
         asset = context.user_data.pop("price_asset")
         price = context.user_data.pop("price_value")
-        macro = update.message.text.strip()
+        macro = text
         del context.user_data["awaiting_macro_input"]
 
         prompt = (
@@ -305,27 +359,29 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    elif text == "🏁 Тестовый период":
+    if text == "🏁 Тестовый период":
         if user_id in TEST_USERS or user_id in ALLOWED_USERS:
             await update.message.reply_text("⏳ Ты уже использовал тест.")
         else:
             ALLOWED_USERS.add(user_id)
             TEST_USERS.add(user_id)
             await update.message.reply_text("✅ Тестовый доступ активирован на 1 сессию.")
+        return
 
-    elif text == "💰 Оплатить помощника":
+    if text == "💰 Оплатить помощника":
         await update.message.reply_text(
             "Отправь USDT в сети TON на адрес:\n\n"
             "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\n"
             "После оплаты пришли TX hash админу или сюда для активации.",
             reply_markup=REPLY_MARKUP
         )
+        return
 
-    elif text == "💵 Тарифы /prices":
+    if text == "💵 Тарифы /prices":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Оплатить TON", callback_data="show_wallet")]
         ])
-        text = (
+        message = (
             "💰 Тарифы на подписку:\n\n"
             "• 1 месяц — $25\n"
             "• 3 месяца — $60 (экономия $15)\n"
@@ -333,7 +389,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 12 месяцев — $180 (экономия $120)\n"
             "• Пожизненно — $299\n"
         )
-        await update.message.reply_text(text, reply_markup=keyboard)
+        await update.message.reply_text(message, reply_markup=keyboard)
+        return
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
