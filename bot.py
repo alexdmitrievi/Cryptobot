@@ -227,15 +227,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Не удалось проанализировать график. Попробуй позже.")
         return
 
-    # 📷 Прогноз по скрину графика
-    if user_id in WAITING_FOR_PHOTO:
-        WAITING_FOR_PHOTO.discard(user_id)
-        if not await check_access(update):
-            return
-
+    # 📷 Прогноз по скрину графика (через кнопку)
+    if context.user_data.get("awaiting_macro_for_image") is None:
         context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
-        await update.message.reply_text("🧠 Что сейчас происходит в мире? (например, новости, конфликты, решения центробанков и т.д.)")
         context.user_data["awaiting_macro_for_image"] = True
+        await update.message.reply_text("🧠 Что сейчас происходит в мире? (например, новости, конфликты, решения центробанков и т.д.)")
         return
 
 async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -265,7 +261,9 @@ async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_T
             messages=[
                 {"role": "user", "content": [
                     {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_base64}"
+                    }}
                 ]}
             ],
             max_tokens=600
@@ -284,41 +282,18 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # 1. Обработка кнопки
+    # 📚 Объяснение термина (кнопка)
     if text == "📚 Объяснение термина":
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить. Пример: шорт")
         return
 
-    # 2. Распознавание термина без префикса (например: "лонг", "биткоин", "тейк-профит")
-    if 2 <= len(text) <= 40 and len(text.split()) <= 3 and all(c.isalnum() or c in "-_ " for c in text):
-        prompt = (
-            f"Ты — крипто-трейдер и аналитик. Объясни термин из мира криптовалют и трейдинга:\n"
-            f"{text.strip()}\n\n"
-            f"🔸 Объясни просто, без академичности.\n"
-            f"🔸 Приведи пример из крипторынка.\n"
-            f"🔸 Избегай слишком общего стиля — делай упор на практику трейдера."
-        )
-        response = await client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        await update.message.reply_text(
-            f"📘 Объяснение:\n{response.choices[0].message.content.strip()}",
-            reply_markup=REPLY_MARKUP
-        )
-        return
-
-    # 3. Все остальные случаи — стандартная логика
-    if context.user_data.get("awaiting_macro_for_image"):
-        await handle_macro_for_image(update, context)
-    else:
-        await update.message.reply_text("🤖 Я не понял запрос. Попробуй выбрать действие из меню.")
-
+    # 📈 График с уровнями
     if text == "📈 График с уровнями":
         await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию на рынке")
         context.user_data["awaiting_chart"] = True
         return
 
+    # 📊 Прогноз по активу
     if text == "📊 Прогноз по активу":
         keyboard = InlineKeyboardMarkup([
             [
@@ -329,6 +304,41 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
         return
 
+    # 💰 Оплата и тарифы
+    if text == "🏁 Тестовый период":
+        if user_id in TEST_USERS or user_id in ALLOWED_USERS:
+            await update.message.reply_text("⏳ Ты уже использовал тест.")
+        else:
+            ALLOWED_USERS.add(user_id)
+            TEST_USERS.add(user_id)
+            await update.message.reply_text("✅ Тестовый доступ активирован на 1 сессию.")
+        return
+
+    if text == "💰 Оплатить помощника":
+        await update.message.reply_text(
+            "Отправь USDT в сети TON на адрес:\n\n"
+            "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\n"
+            "После оплаты пришли TX hash админу или сюда для активации.",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
+    if text == "💵 Тарифы /prices":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Оплатить TON", callback_data="show_wallet")]
+        ])
+        message = (
+            "💰 Тарифы на подписку:\n\n"
+            "• 1 месяц — $25\n"
+            "• 3 месяца — $60 (экономия $15)\n"
+            "• 6 месяцев — $100 (экономия $50)\n"
+            "• 12 месяцев — $180 (экономия $120)\n"
+            "• Пожизненно — $299\n"
+        )
+        await update.message.reply_text(message, reply_markup=keyboard)
+        return
+
+    # 🔄 Прогноз по цене: шаги
     if "awaiting_asset_name" in context.user_data:
         context.user_data["price_asset"] = text.upper()
         del context.user_data["awaiting_asset_name"]
@@ -367,38 +377,32 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "🏁 Тестовый период":
-        if user_id in TEST_USERS or user_id in ALLOWED_USERS:
-            await update.message.reply_text("⏳ Ты уже использовал тест.")
-        else:
-            ALLOWED_USERS.add(user_id)
-            TEST_USERS.add(user_id)
-            await update.message.reply_text("✅ Тестовый доступ активирован на 1 сессию.")
+    # 🖼️ Прогноз по скрину (макро после фото)
+    if context.user_data.get("awaiting_macro_for_image"):
+        await handle_macro_for_image(update, context)
         return
 
-    if text == "💰 Оплатить помощника":
+    # 📘 Автообъяснение термина (без префикса)
+    if 2 <= len(text) <= 40 and len(text.split()) <= 3 and all(c.isalnum() or c in "-_ " for c in text):
+        prompt = (
+            f"Ты — крипто-трейдер и аналитик. Объясни термин из мира криптовалют и трейдинга:\n"
+            f"{text.strip()}\n\n"
+            f"🔸 Объясни просто, без академичности.\n"
+            f"🔸 Приведи пример из крипторынка.\n"
+            f"🔸 Избегай слишком общего стиля — делай упор на практику трейдера."
+        )
+        response = await client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
         await update.message.reply_text(
-            "Отправь USDT в сети TON на адрес:\n\n"
-            "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\n"
-            "После оплаты пришли TX hash админу или сюда для активации.",
+            f"📘 Объяснение:\n{response.choices[0].message.content.strip()}",
             reply_markup=REPLY_MARKUP
         )
         return
 
-    if text == "💵 Тарифы /prices":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 Оплатить TON", callback_data="show_wallet")]
-        ])
-        message = (
-            "💰 Тарифы на подписку:\n\n"
-            "• 1 месяц — $25\n"
-            "• 3 месяца — $60 (экономия $15)\n"
-            "• 6 месяцев — $100 (экономия $50)\n"
-            "• 12 месяцев — $180 (экономия $120)\n"
-            "• Пожизненно — $299\n"
-        )
-        await update.message.reply_text(message, reply_markup=keyboard)
-        return
+    # 🤖 Запрос не распознан
+    await update.message.reply_text("🤖 Я не понял запрос. Попробуй выбрать действие из меню.", reply_markup=REPLY_MARKUP)
 
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
