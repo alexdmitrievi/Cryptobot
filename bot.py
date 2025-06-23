@@ -302,51 +302,52 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text in command_texts:
         context.user_data.clear()
 
-    # Обработка калькулятора риска (если не было нажатий на кнопки)
-    if context.user_data.get("awaiting_deposit"):
-        try:
-            deposit = float(text.replace(",", "."))
-            context.user_data["deposit"] = deposit
-            context.user_data["awaiting_deposit"] = False
-            context.user_data["awaiting_risk"] = True
-            await update.message.reply_text("📉 Введи риск на сделку в %:")
-        except:
-            await update.message.reply_text("❗ Введи число. Пример: 1000")
-        return
+    # Обработка калькулятора риска (ТОЛЬКО если не была нажата кнопка)
+    if text not in command_texts:
+        if context.user_data.get("awaiting_deposit"):
+            try:
+                deposit = float(text.replace(",", "."))
+                context.user_data["deposit"] = deposit
+                context.user_data["awaiting_deposit"] = False
+                context.user_data["awaiting_risk"] = True
+                await update.message.reply_text("📉 Введи риск на сделку в %:")
+            except:
+                await update.message.reply_text("❗ Введи число. Пример: 1000")
+            return
 
-    if context.user_data.get("awaiting_risk"):
-        try:
-            risk_percent = float(text.replace(",", "."))
-            context.user_data["risk_percent"] = risk_percent
-            context.user_data["awaiting_risk"] = False
-            context.user_data["awaiting_sl"] = True
-            await update.message.reply_text("🛑 Введи размер стоп-лосса в $:")
-        except:
-            await update.message.reply_text("❗ Введи число. Пример: 2.5")
-        return
+        if context.user_data.get("awaiting_risk"):
+            try:
+                risk_percent = float(text.replace(",", "."))
+                context.user_data["risk_percent"] = risk_percent
+                context.user_data["awaiting_risk"] = False
+                context.user_data["awaiting_sl"] = True
+                await update.message.reply_text("🛑 Введи размер стоп-лосса в $:")
+            except:
+                await update.message.reply_text("❗ Введи число. Пример: 2.5")
+            return
 
-    if context.user_data.get("awaiting_sl"):
-        try:
-            sl = float(text.replace(",", "."))
-            deposit = context.user_data.pop("deposit")
-            risk_percent = context.user_data.pop("risk_percent")
-            context.user_data.pop("awaiting_sl", None)
+        if context.user_data.get("awaiting_sl"):
+            try:
+                sl = float(text.replace(",", "."))
+                deposit = context.user_data.pop("deposit")
+                risk_percent = context.user_data.pop("risk_percent")
+                context.user_data.pop("awaiting_sl", None)
 
-            risk_usd = deposit * risk_percent / 100
-            position_size = risk_usd / sl
+                risk_usd = deposit * risk_percent / 100
+                position_size = risk_usd / sl
 
-            await update.message.reply_text(
-                f"✅ *Результат:*\n"
-                f"• Депозит: ${deposit:.2f}\n"
-                f"• Риск на сделку: {risk_percent:.2f}% (${risk_usd:.2f})\n"
-                f"• Стоп-лосс: {sl:.2f}%\n\n"
-                f"📌 *Рекомендуемый объём позиции:* ${position_size:.2f}",
-                parse_mode="Markdown",
-                reply_markup=REPLY_MARKUP
-            )
-        except:
-            await update.message.reply_text("❗ Введи число. Пример: 1.5")
-        return
+                await update.message.reply_text(
+                    f"✅ *Результат:*\n"
+                    f"• Депозит: ${deposit:.2f}\n"
+                    f"• Риск на сделку: {risk_percent:.2f}% (${risk_usd:.2f})\n"
+                    f"• Стоп-лосс: {sl:.2f}$\n\n"
+                    f"📌 *Рекомендуемый объём позиции:* ${position_size:.2f}",
+                    parse_mode="Markdown",
+                    reply_markup=REPLY_MARKUP
+                )
+            except:
+                await update.message.reply_text("❗ Введи число. Пример: 1.5")
+            return
 
     # 🧠 Помощь профессионала
     if text == "🧠 Помощь профессионала":
@@ -410,7 +411,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Выбери способ оплаты:", reply_markup=keyboard)
         return
 
-    # 🔄 Перезапуск
+    # 🔄 Перезапустить бота
     if text == "🔄 Перезапустить бота":
         context.user_data.clear()
         await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
