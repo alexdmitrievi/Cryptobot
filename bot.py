@@ -291,76 +291,28 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # Список кнопок — команды, которые должны всегда сбрасывать состояния
-    command_texts = [
+    # Список кнопок/команд, при нажатии на которые нужно сбросить состояние
+    reset_commands = [
         "📏 Калькулятор риска", "🧘 Спокойствие", "🧠 Помощь профессионала",
         "📚 Объяснение термина", "📈 График с уровнями", "📊 Прогноз по активу",
-        "💰 Подключить за $25", "💵 О подписке", "🔄 Перезапустить бота"
+        "💰 Подключить за $25", "💵 О подписке", "🔄 Перезапустить бота", "/restart"
     ]
 
-    # Приоритет: если нажата кнопка — сбрасываем всё и обрабатываем команду
-    if text in command_texts:
+    # При любых командах — сброс user_data
+    if text in reset_commands:
         context.user_data.clear()
 
-        if text == "📏 Калькулятор риска":
-            context.user_data["awaiting_deposit"] = True
-            await update.message.reply_text("📊 Введи размер депозита в $:")
-            return
+    # 🔁 Перезапуск
+    if text in ["🔄 Перезапустить бота", "/restart"]:
+        await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
+        return
 
-        if text == "🧘 Спокойствие":
-            return await start_therapy(update, context)
+    # 📏 Калькулятор риска
+    if text == "📏 Калькулятор риска":
+        context.user_data["awaiting_deposit"] = True
+        await update.message.reply_text("📊 Введи размер депозита в $:")
+        return
 
-        if text == "🧠 Помощь профессионала":
-            if user_id not in ALLOWED_USERS:
-                await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
-                return
-            context.user_data["awaiting_pro_question"] = True
-            await update.message.reply_text(
-                "🧑‍💼 Напиши свой вопрос по трейдингу, инвестициям или аналитике — GPT-аналитик ответит.",
-                reply_markup=REPLY_MARKUP
-            )
-            return
-
-        if text == "📚 Объяснение термина":
-            await update.message.reply_text("✍️ Напиши термин, который нужно объяснить. Пример: шорт")
-            return
-
-        if text == "📈 График с уровнями":
-            context.user_data["awaiting_chart"] = True
-            await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию на рынке")
-            return
-
-        if text == "📊 Прогноз по активу":
-            keyboard = InlineKeyboardMarkup([[ 
-                InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image"),
-                InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")
-            ]])
-            await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
-            return
-
-        if text == "💰 Подключить за $25":
-            await update.message.reply_text(
-                "💸 Стоимость подписки: **навсегда за $25**\n\n"
-                "Отправь USDT в сети TON на адрес:\n\n"
-                "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\n"
-                "После оплаты пришли TX hash админу или сюда для активации.",
-                reply_markup=REPLY_MARKUP,
-                parse_mode="Markdown"
-            )
-            return
-
-        if text == "💵 О подписке":
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("💳 Оплатить через TON", callback_data="show_wallet")]
-            ])
-            await update.message.reply_text("Выбери способ оплаты:", reply_markup=keyboard)
-            return
-
-        if text == "🔄 Перезапустить бота":
-            await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
-            return
-
-    # 📌 Калькулятор риска: логика по шагам (работает только если нет нажатий на кнопки)
     if context.user_data.get("awaiting_deposit"):
         try:
             deposit = float(text.replace(",", "."))
@@ -374,8 +326,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if context.user_data.get("awaiting_risk"):
         try:
-            risk_percent = float(text.replace(",", "."))
-            context.user_data["risk_percent"] = risk_percent
+            risk = float(text.replace(",", "."))
+            context.user_data["risk_percent"] = risk
             context.user_data["awaiting_risk"] = False
             context.user_data["awaiting_sl"] = True
             await update.message.reply_text("🛑 Введи размер стоп-лосса в $:")
@@ -388,7 +340,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sl = float(text.replace(",", "."))
             deposit = context.user_data.pop("deposit")
             risk_percent = context.user_data.pop("risk_percent")
-            context.user_data.pop("awaiting_sl", None)
+            context.user_data.clear()
 
             risk_usd = deposit * risk_percent / 100
             position_size = risk_usd / sl
@@ -406,7 +358,60 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❗ Введи число. Пример: 1.5")
         return
 
-    # Всё остальное — сброс
+    # 🧠 Помощь профессионала
+    if text == "🧠 Помощь профессионала":
+        if user_id not in ALLOWED_USERS:
+            await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
+            return
+        context.user_data["awaiting_pro_question"] = True
+        await update.message.reply_text("🧑‍💼 Напиши свой вопрос — GPT-аналитик ответит.", reply_markup=REPLY_MARKUP)
+        return
+
+    # 📚 Объяснение термина
+    if text == "📚 Объяснение термина":
+        await update.message.reply_text("✍️ Напиши термин. Пример: шорт")
+        return
+
+    # 📈 График с уровнями
+    if text == "📈 График с уровнями":
+        context.user_data["awaiting_chart"] = True
+        await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию.")
+        return
+
+    # 📊 Прогноз по активу
+    if text == "📊 Прогноз по активу":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image")],
+            [InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")]
+        ])
+        await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
+        return
+
+    # 🧘 Спокойствие
+    if text == "🧘 Спокойствие":
+        return await start_therapy(update, context)
+
+    # 💰 Подключить за $25
+    if text == "💰 Подключить за $25":
+        await update.message.reply_text(
+            "💸 Стоимость подписки: **навсегда за $25**\n\n"
+            "Отправь USDT (TON) на адрес:\n\n"
+            "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\n"
+            "После оплаты пришли TX hash админу.",
+            parse_mode="Markdown",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
+    # 💵 О подписке
+    if text == "💵 О подписке":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Оплатить через TON", callback_data="show_wallet")]
+        ])
+        await update.message.reply_text("Выбери способ оплаты:", reply_markup=keyboard)
+        return
+
+    # ⛔ Всё остальное — сброс
     context.user_data.clear()
     await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
 
