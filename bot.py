@@ -291,7 +291,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # Команды, которые сбрасывают состояние
+    # Команды сброса
     reset_commands = [
         "📏 Калькулятор риска", "🧘 Спокойствие", "🧠 Помощь профессионала",
         "📚 Объяснение термина", "📈 График с уровнями", "📊 Прогноз по активу",
@@ -300,58 +300,56 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text in reset_commands:
         context.user_data.clear()
 
-    # === Команды ===
-    if text == "🧠 Помощь профессионала":
-        if user_id not in ALLOWED_USERS:
-            await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
-            return
-        context.user_data["awaiting_pro_question"] = True
-        await update.message.reply_text(
-            "🧑‍💼 Напиши свой вопрос по трейдингу, инвестициям или аналитике — GPT-аналитик ответит.",
-            reply_markup=REPLY_MARKUP
-        )
-        return
-
-    if text == "📚 Объяснение термина":
-        await update.message.reply_text("✍️ Напиши термин, который нужно объяснить. Пример: шорт")
-        return
-
-    if text == "📈 График с уровнями":
-        context.user_data["awaiting_chart"] = True
-        await update.message.reply_text("📷 Пришли скрин графика — я найду уровни и прокомментирую ситуацию на рынке")
-        return
-
-    if text == "📊 Прогноз по активу":
-        keyboard = InlineKeyboardMarkup([[ 
-            InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image"),
-            InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")
-        ]])
-        await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
-        return
-
+    # Команды
     if text == "📏 Калькулятор риска":
-        # Эта команда теперь обрабатывается ConversationHandler, ничего делать не нужно
+        # Обработка будет в ConversationHandler
         return
 
     if text == "🧘 Спокойствие":
         return await start_therapy(update, context)
 
+    if text == "🧠 Помощь профессионала":
+        if user_id not in ALLOWED_USERS:
+            await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
+            return
+        context.user_data["awaiting_pro_question"] = True
+        await update.message.reply_text("🧑‍💼 Напиши свой вопрос — GPT-аналитик ответит.", reply_markup=REPLY_MARKUP)
+        return
+
+    if text == "📚 Объяснение термина":
+        await update.message.reply_text("✍️ Напиши термин, который нужно объяснить.")
+        return
+
+    if text == "📈 График с уровнями":
+        context.user_data["awaiting_chart"] = True
+        await update.message.reply_text("📷 Пришли скрин графика — я проанализирую.")
+        return
+
+    if text == "📊 Прогноз по активу":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image")],
+            [InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")]
+        ])
+        await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
+        return
+
     if text == "💰 Подключить за $25":
         await update.message.reply_text(
-            "💸 Стоимость подписки: **навсегда за $25**\n\n"
-            "Отправь USDT в сети TON на адрес:\n\n"
-            "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n\n"
-            "После оплаты пришли TX hash админу или сюда для активации.",
-            reply_markup=REPLY_MARKUP,
-            parse_mode="Markdown"
+            "💸 Подписка — **навсегда за $25**.\n"
+            "Отправь USDT TON на адрес:\n"
+            "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n"
+            "После оплаты пришли TX hash.",
+            parse_mode="Markdown", reply_markup=REPLY_MARKUP
         )
         return
 
     if text == "💵 О подписке":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 Оплатить через TON", callback_data="show_wallet")]
-        ])
-        await update.message.reply_text("Выбери способ оплаты:", reply_markup=keyboard)
+        await update.message.reply_text(
+            "Выбери способ оплаты:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 Оплатить через TON", callback_data="show_wallet")]
+            ])
+        )
         return
 
     if text == "🔄 Перезапустить бота":
@@ -460,7 +458,7 @@ async def post_init(app):
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    # 🧘 Психолог
+    # 🧘 GPT-Психолог
     therapy_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)],
         states={
@@ -475,7 +473,7 @@ def main():
         ]
     )
 
-    # 🧠 Помощь профессионала
+    # 🧠 Помощь профессионала (аналитика)
     help_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧠 Помощь профессионала$"), help_pro)],
         states={
@@ -495,7 +493,7 @@ def main():
         ]
     )
 
-    # 📏 Риск-калькулятор
+    # 📏 Калькулятор риска
     risk_calc_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc)],
         states={
@@ -510,19 +508,19 @@ def main():
         ]
     )
 
-    # ✅ Порядок имеет значение:
-    app.add_handler(help_conv_handler)     # 🧠 GPT-аналитик
-    app.add_handler(therapy_handler)       # 🧘 Психолог
-    app.add_handler(risk_calc_handler)     # 📏 Калькулятор
+    # ✅ Порядок важен
+    app.add_handler(help_conv_handler)      # 🧠 GPT-аналитик
+    app.add_handler(therapy_handler)        # 🧘 Психолог
+    app.add_handler(risk_calc_handler)      # 📏 Риск-калькулятор
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
 
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # ✅
-    app.add_handler(CallbackQueryHandler(button_handler))         # Кнопки
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))   # 🖼 Фото-графики
+    app.add_handler(CallbackQueryHandler(button_handler))          # 🔘 Inline-кнопки
 
-    # 📲 Обработчик обычного текста (последний!)
+    # 📲 Последний — универсальный обработчик
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
 
     app.post_init = post_init
