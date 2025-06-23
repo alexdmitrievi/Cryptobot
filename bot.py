@@ -20,8 +20,7 @@ reply_keyboard = [
     ["📊 Прогноз по активу", "🧠 Помощь профессионала"],
     ["📈 График с уровнями", "🧘 Спокойствие"],
     ["📚 Объяснение термина", "📏 Калькулятор риска"],
-    ["💰 Подключить за $25", "💵 О подписке"],
-    ["🔄 Перезапустить бота"]
+    ["💰 Подключить за $25", "💵 О подписке"]
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
@@ -34,7 +33,11 @@ WAITING_FOR_THERAPY_INPUT = 100
 RISK_CALC_1, RISK_CALC_2, RISK_CALC_3 = range(101, 104)
 
 async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📊 Введи размер депозита в $:")
+    context.user_data.clear()
+    await update.message.reply_text(
+        "📊 Введи размер депозита в $:",
+        reply_markup=REPLY_MARKUP
+    )
     return RISK_CALC_1
 
 async def risk_calc_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
