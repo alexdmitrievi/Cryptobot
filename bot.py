@@ -474,7 +474,9 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.pin_chat_message(chat_id='@Cripto_inter_bot', message_id=message.message_id, disable_notification=True)
 
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("awaiting_macro_for_image"):
+    if context.user_data.get("awaiting_potential"):
+        await handle_potential(update, context)
+    elif context.user_data.get("awaiting_macro_for_image"):
         await handle_macro_for_image(update, context)
     else:
         await handle_main(update, context)
