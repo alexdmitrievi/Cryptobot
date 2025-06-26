@@ -20,18 +20,18 @@ import base64
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# Подключение к Google Sheets
 # ✅ Подключение к Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds_dict = json.loads(os.getenv("GOOGLE_CREDS"))
+
+# 🔐 Исправляем переносы строк в приватном ключе
+creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 gc = gspread.authorize(creds)
 
-# Используем ID таблицы вместо полной ссылки
 SPREADSHEET_ID = "1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs"
 sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
-
-
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
