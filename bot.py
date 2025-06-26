@@ -13,19 +13,23 @@ from openai import AsyncOpenAI
 from PIL import Image
 import io
 import base64
+import json
 
 # 📊 Google Sheets API
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # Подключение к Google Sheets
+# ✅ Подключение к Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
-gs_client = gspread.authorize(creds)
+creds_dict = json.loads(os.getenv("GOOGLE_CREDS"))
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+gc = gspread.authorize(creds)
 
-# Заменить на свой URL или ID таблицы
-SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs/edit#gid=0"
-sheet = gs_client.open_by_key("1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs").sheet1
+# Используем ID таблицы вместо полной ссылки
+SPREADSHEET_ID = "1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs"
+sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+
 
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
