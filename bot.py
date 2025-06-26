@@ -567,19 +567,18 @@ async def post_init(app):
         BotCommand("start", "Запустить бота"),
         BotCommand("restart", "🔁 Перезапустить бота")
     ])
+    # ✅ Запускаем фоновую задачу безопасно внутри event loop
     asyncio.create_task(check_ton_payments_periodically(app))
 
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     # 🧘 GPT-Психолог
     therapy_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)],
-        states={
-            WAITING_FOR_THERAPY_INPUT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, gpt_psychologist_response)
-            ]
-        },
+        states={WAITING_FOR_THERAPY_INPUT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, gpt_psychologist_response)
+        ]},
         fallbacks=[
             CommandHandler("start", start),
             CommandHandler("restart", restart),
@@ -634,11 +633,6 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
-
-    app.post_init = post_init
-
-    # 🔁 Запускаем фоновую проверку TON-платежей
-    app.create_task(check_ton_payments_periodically(app))
 
     # 🚀 Запуск бота
     app.run_polling()
