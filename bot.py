@@ -2,19 +2,39 @@ import logging
 import asyncio
 import re
 import requests
+import time
+from datetime import datetime
+
 from telegram import Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, ConversationHandler
-from config import TELEGRAM_TOKEN, OPENAI_API_KEY
+
+from config import TELEGRAM_TOKEN, OPENAI_API_KEY, TON_API_TOKEN
 from openai import AsyncOpenAI
 from PIL import Image
 import io
 import base64
 
+# 📊 Google Sheets API
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+# Подключение к Google Sheets
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
+gs_client = gspread.authorize(creds)
+
+# Заменить на свой URL или ID таблицы
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs/edit#gid=0"
+sheet = gs_client.open_by_key("1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs").sheet1
+
+
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
 
-ALLOWED_USERS = {407721399, 592270446}  # сюда вручную добавляй user_id оплативших
-TEST_USERS = set()
+TON_WALLET = "UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR"
+ALLOWED_USERS = {407721399, 592270446}
+PENDING_USERS = {}
+RECEIVED_MEMOS = set()
 
 reply_keyboard = [
     ["🔍 Потенциал монеты", "📊 Прогноз по активу", "🧠 Помощь профессионала"],
@@ -23,6 +43,48 @@ reply_keyboard = [
     ["💰 Подключить за $25", "💵 О подписке"]
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+
+# Фоновая проверка платежей по username
+RECEIVED_MEMOS = set()
+
+async def check_ton_payments_periodically(application):
+    while True:
+        try:
+            response = requests.get(
+                f"https://tonapi.io/v2/blockchain/accounts/{TON_WALLET}/transactions",
+                headers={"Authorization": f"Bearer {TON_API_TOKEN}"},
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                for tx in data.get("transactions", []):
+                    # Проверяем, что пришло ≥ 3.4 TON
+                    if tx.get("in_msg", {}).get("value", 0) >= 3_400_000_000:
+                        memo = tx["in_msg"].get("comment", "").strip()
+                        if memo.startswith("@") and memo not in RECEIVED_MEMOS:
+                            RECEIVED_MEMOS.add(memo)
+                            username = memo[1:]
+                            logging.info(f"✅ Найдена транзакция от @{username} на {tx['in_msg']['value']/1e9} TON")
+
+                            for user_id, name in PENDING_USERS.items():
+                                if name.lower() == username.lower():
+                                    if user_id not in ALLOWED_USERS:
+                                        ALLOWED_USERS.add(user_id)
+                                        log_payment(user_id, username)
+                                        logging.info(f"✅ @{username} получил доступ")
+
+                                    try:
+                                        await application.bot.send_message(
+                                            chat_id=user_id,
+                                            text="✅ Оплата получена! Доступ открыт. Можете пользоваться помощником.",
+                                            reply_markup=REPLY_MARKUP
+                                        )
+                                    except Exception as e:
+                                        logging.error(f"❌ Ошибка при уведомлении {user_id}: {e}")
+        except Exception as e:
+            logging.error(f"❌ Ошибка при проверке TON-платежей: {e}")
+
+        await asyncio.sleep(60)
 
 INTERPRET_NEWS, ASK_EVENT, ASK_FORECAST, ASK_ACTUAL, GENERAL_QUESTION, FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3 = range(8)
 user_inputs = {}
@@ -321,6 +383,7 @@ async def handle_potential(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
+    username = update.effective_user.username
 
     # Команды сброса
     reset_commands = [
@@ -369,13 +432,21 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "💰 Подключить за $25":
-        await update.message.reply_text(
-            "💸 Подписка — **навсегда за $25**.\n"
-            "Отправь USDT TON на адрес:\n"
-            "`UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR`\n"
-            "После оплаты пришли TX hash.",
-            parse_mode="Markdown", reply_markup=REPLY_MARKUP
-        )
+        if username:
+            PENDING_USERS[user_id] = username
+            await update.message.reply_text(
+                "💸 Подписка — **навсегда за $25 (~3.4 TON)**.\n"
+                "Отправь **TON** на адрес:\n"
+                f"`{TON_WALLET}`\n\n"
+                f"Обязательно укажи комментарий к платежу: `@{username}`\n"
+                "После оплаты доступ активируется автоматически.",
+                parse_mode="Markdown",
+                reply_markup=REPLY_MARKUP
+            )
+        else:
+            await update.message.reply_text(
+                "⚠️ У вас не установлен username. Установите его в Telegram и повторите попытку."
+            )
         return
 
     if text == "💵 О подписке":
@@ -491,6 +562,7 @@ async def post_init(app):
         BotCommand("start", "Запустить бота"),
         BotCommand("restart", "🔁 Перезапустить бота")
     ])
+    asyncio.create_task(check_ton_payments_periodically(app))
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
@@ -545,23 +617,34 @@ def main():
         ]
     )
 
-    # ✅ Порядок важен
-    app.add_handler(help_conv_handler)      # 🧠 GPT-аналитик
-    app.add_handler(therapy_handler)        # 🧘 Психолог
-    app.add_handler(risk_calc_handler)      # 📏 Риск-калькулятор
+    # ✅ Добавляем обработчики
+    app.add_handler(help_conv_handler)
+    app.add_handler(therapy_handler)
+    app.add_handler(risk_calc_handler)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
 
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))   # 🖼 Фото-графики
-    app.add_handler(CallbackQueryHandler(button_handler))          # 🔘 Inline-кнопки
-
-    # 📲 Последний — универсальный обработчик
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
 
     app.post_init = post_init
+
+    # 🔁 Запускаем фоновую проверку TON-платежей
+    app.create_task(check_ton_payments_periodically(app))
+
+    # 🚀 Запуск бота
     app.run_polling()
+
+def log_payment(user_id, username):
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sheet.append_row([str(user_id), username, timestamp])
+        logging.info(f"🧾 Записано в Google Sheets: {user_id}, {username}, {timestamp}")
+    except Exception as e:
+        logging.error(f"❌ Ошибка при записи в Google Sheets: {e}")
 
 if __name__ == '__main__':
     main()
