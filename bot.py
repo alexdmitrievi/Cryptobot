@@ -1,9 +1,11 @@
+import os
 import logging
 import asyncio
 import re
 import requests
 import time
 from datetime import datetime
+import json
 
 from telegram import Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, ConversationHandler
@@ -13,7 +15,6 @@ from openai import AsyncOpenAI
 from PIL import Image
 import io
 import base64
-import json
 
 # 📊 Google Sheets API
 import gspread
