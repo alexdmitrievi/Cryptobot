@@ -679,8 +679,8 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👤 Подключиться или задать вопрос 👉 [@zhbankov_alex](https://t.me/zhbankov_alex)"
     )
 
-    # Путь к картинке (относительный или абсолютный)
-    with open("static/gpt_promo.png", "rb") as photo:
+    # 🔗 Абсолютный путь к изображению
+    with open(r"C:\Users\HP\Desktop\Cryptobot\GPT-Трейдер помощник.png", "rb") as photo:
         message = await context.bot.send_photo(
             chat_id='@Cripto_inter_bot',
             photo=photo,
