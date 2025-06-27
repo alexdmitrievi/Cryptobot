@@ -569,12 +569,11 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "📊 Прогноз по активу":
-        # Не очищаем context.user_data, чтобы сохранить флаги после кнопок
+        # Только одна кнопка — скрин
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image")],
-            [InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")]
+            [InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image")]
         ])
-        await update.message.reply_text("Выбери способ прогноза:", reply_markup=keyboard)
+        await update.message.reply_text("📈 Пришли скрин графика — я дам прогноз на основе технического анализа.", reply_markup=keyboard)
         return
 
     if text == "💰 Подключить за $25":
