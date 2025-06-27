@@ -656,7 +656,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info(f"[COMMAND] /publish от {user_id}")
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Получить доступ", url="https://t.me/mamkin_treder")]
+        [InlineKeyboardButton("💰 Получить доступ", url="https://t.me/ai4traders")]
     ])
 
     caption = (
@@ -679,7 +679,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👤 Подключиться или задать вопрос 👉 [@zhbankov_alex](https://t.me/zhbankov_alex)"
     )
 
-    # 🔗 Абсолютный путь к изображению
+    # Абсолютный путь к изображению
     with open(r"C:\Users\HP\Desktop\Cryptobot\GPT-Трейдер помощник.png", "rb") as photo:
         message = await context.bot.send_photo(
             chat_id='@Cripto_inter_bot',
@@ -694,7 +694,6 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message_id=message.message_id,
         disable_notification=True
     )
-
 
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_potential"):
