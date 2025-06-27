@@ -291,14 +291,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "forecast_by_image":
         WAITING_FOR_PHOTO.add(user_id)
-        context.user_data.clear()
+        # ❌ не очищаем context.user_data.clear()
         context.user_data["awaiting_macro_for_image"] = True
         await query.edit_message_text(
             "📸 Пришли скрин графика (4H таймфрейм), и я дам прогноз на основе технического анализа."
         )
 
     elif query.data == "forecast_by_price":
-        context.user_data.clear()
+        # ❌ не очищаем context.user_data.clear()
         context.user_data["awaiting_asset_name"] = True
         await context.bot.send_message(
             chat_id=query.message.chat_id,
@@ -466,6 +466,26 @@ async def handle_potential(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"[POTENTIAL] GPT ошибка: {e}")
         await update.message.reply_text("⚠️ Не удалось проанализировать монету. Попробуй позже.")
 
+async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("awaiting_definition_term", None)
+    term = update.message.text.strip()
+
+    prompt = f"Объясни кратко и понятно, что такое: {term}. Приведи пример. Стиль — как для начинающего трейдера."
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        await update.message.reply_text(
+            f"📘 Определение:\n{response.choices[0].message.content.strip()}",
+            reply_markup=REPLY_MARKUP
+        )
+    except Exception as e:
+        logging.error(f"[DEFINITION] GPT ошибка: {e}")
+        await update.message.reply_text("⚠️ Не удалось объяснить термин. Попробуй позже.")
+
+
 async def handle_forecast_by_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("awaiting_asset_name", None)
     coin = update.message.text.strip().upper()
@@ -531,20 +551,25 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id not in ALLOWED_USERS:
             await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
             return
+        context.user_data.clear()
         context.user_data["awaiting_pro_question"] = True
         await update.message.reply_text("🧑‍💼 Напиши свой вопрос — GPT-аналитик ответит.", reply_markup=REPLY_MARKUP)
         return
 
     if text == "📚 Объяснение термина":
+        context.user_data.clear()
+        context.user_data["awaiting_definition_term"] = True
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить.")
         return
 
     if text == "📈 График с уровнями":
+        context.user_data.clear()
         context.user_data["awaiting_chart"] = True
         await update.message.reply_text("📷 Пришли скрин графика — я проанализирую.")
         return
 
     if text == "📊 Прогноз по активу":
+        # Не очищаем context.user_data, чтобы сохранить флаги после кнопок
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image")],
             [InlineKeyboardButton("🔢 Ввести цену", callback_data="forecast_by_price")]
@@ -701,7 +726,9 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif context.user_data.get("awaiting_macro_for_image"):
         await handle_macro_for_image(update, context)
     elif context.user_data.get("awaiting_asset_name"):
-        await handle_forecast_by_price(update, context)  # 👈 Новый обработчик
+        await handle_forecast_by_price(update, context)
+    elif context.user_data.get("awaiting_definition_term"):
+        await handle_definition(update, context)
     else:
         await handle_main(update, context)
 
