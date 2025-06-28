@@ -355,8 +355,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Не удалось проанализировать график. Попробуй позже.")
         return
 
-    # Ничего не ожидается
-    await update.message.reply_text("🤖 Я не понял, что делать с изображением. Выбери действие в меню.")
+    # 📸 Если пользователь просто отправил скрин без кнопок
+    context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
+    await update.message.reply_text(
+        "📸 Понял, ты прислал скрин графика.\n\n"
+        "🧠 Какие новости или события сейчас влияют на рынок? (Например: ФРС, геополитика, хардфорки, ETF)."
+    )
+    context.user_data["awaiting_macro_text"] = True
+
 
 async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_macro_text"):
