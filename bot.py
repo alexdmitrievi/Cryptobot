@@ -49,6 +49,10 @@ reply_keyboard = [
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
+CHAT_DISCUSS_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("💬 Обсудить в чате", url="https://t.me/ai4traders_chat")]
+])
+
 # Фоновая проверка платежей по username
 RECEIVED_MEMOS = set()
 
@@ -311,6 +315,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await photo.get_file()
     photo_bytes = await file.download_as_bytearray()
 
+    # 📊 Прогноз по активу (по скрину через кнопку)
+    if context.user_data.get("awaiting_macro_for_image"):
+        context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
+        await update.message.reply_text(
+            "🧠 Какие новости или события сейчас влияют на рынок? (Например: ФРС, геополитика, хардфорки, ETF)."
+        )
+        context.user_data["awaiting_macro_text"] = True
+        return
+
     # 📈 График с уровнями
     if context.user_data.get("awaiting_chart"):
         context.user_data.pop("awaiting_chart")
@@ -342,25 +355,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Не удалось проанализировать график. Попробуй позже.")
         return
 
-    # 📊 Прогноз по скрину графика (через кнопку)
-    if context.user_data.get("awaiting_macro_for_image"):
-        context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
-        context.user_data["awaiting_macro_for_image"] = True
-        await update.message.reply_text(
-            "🧠 Что происходит в мире? (например: новости, заявления ФРС, геополитика и т.д.)"
-        )
-        return
-
     # Ничего не ожидается
     await update.message.reply_text("🤖 Я не понял, что делать с изображением. Выбери действие в меню.")
 
-async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("awaiting_macro_for_image"):
+async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("awaiting_macro_text"):
         return
 
-    del context.user_data["awaiting_macro_for_image"]
     macro = update.message.text.strip()
     image_base64 = context.user_data.pop("graph_image_base64", None)
+    context.user_data.pop("awaiting_macro_text")
 
     if not image_base64:
         await update.message.reply_text("⚠️ Ошибка: изображение не найдено. Сначала пришли скрин графика.")
@@ -378,8 +382,7 @@ async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_T
         f"• Точки входа и стоп-лосс\n"
         f"• Потенциальная цель\n"
         f"• Вероятность и краткий комментарий\n\n"
-        f"Заверши вывод кратким резюме для трейдера: стоит ли входить, с каким риском и в какую сторону смотреть.\n"
-        f"Избегай неопределённых слов. Пиши конкретно и уверенно."
+        f"В конце добавь ссылки на свежие новости для трейдера: Forklog, Bits.media, RBC Crypto, Investing."
     )
 
     try:
@@ -397,13 +400,21 @@ async def handle_macro_for_image(update: Update, context: ContextTypes.DEFAULT_T
         )
 
         await update.message.reply_text(
-            f"📊 Прогноз по графику + макрофон:\n{response.choices[0].message.content.strip()}",
-            reply_markup=REPLY_MARKUP
+            f"📊 Прогноз по графику + новости:\n\n"
+            f"{response.choices[0].message.content.strip()}\n\n"
+            f"📰 Полезные ссылки для отслеживания новостей:\n"
+            f"• [Forklog](https://t.me/forklog)\n"
+            f"• [Bits.media](https://bits.media/news/)\n"
+            f"• [RBC Crypto](https://www.rbc.ru/crypto/)\n"
+            f"• [Investing](https://ru.investing.com/news/cryptocurrency-news/)",
+            reply_markup=CHAT_DISCUSS_KEYBOARD,
+            parse_mode="Markdown"
         )
 
     except Exception as e:
         logging.error(f"[MACRO_GRAPH] Ошибка анализа: {e}")
         await update.message.reply_text("⚠️ Ошибка при анализе. Попробуй ещё раз позже.")
+
 
 
 def fetch_price_from_coingecko(coin_symbol: str) -> float | None:
@@ -459,12 +470,21 @@ async def handle_potential(update: Update, context: ContextTypes.DEFAULT_TYPE):
             messages=[{"role": "user", "content": prompt}]
         )
         await update.message.reply_text(
-            f"📈 Потенциал монеты {coin}:\n{response.choices[0].message.content.strip()}",
-            reply_markup=REPLY_MARKUP
+            f"📈 Потенциал монеты {coin}:\n\n"
+            f"{response.choices[0].message.content.strip()}\n\n"
+            f"📰 Для чтения свежих новостей на русском:\n"
+            f"• [Forklog](https://t.me/forklog)\n"
+            f"• [Bits.media](https://bits.media/news/)\n"
+            f"• [RBC Crypto](https://www.rbc.ru/crypto/)\n"
+            f"• [Investing](https://ru.investing.com/news/cryptocurrency-news/)\n\n"
+            f"Подписывайся на [Forklog в Telegram](https://t.me/forklog), чтобы всегда быть в курсе.",
+            reply_markup=CHAT_DISCUSS_KEYBOARD,
+            parse_mode="Markdown"
         )
     except Exception as e:
         logging.error(f"[POTENTIAL] GPT ошибка: {e}")
         await update.message.reply_text("⚠️ Не удалось проанализировать монету. Попробуй позже.")
+
 
 async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("awaiting_definition_term", None)
@@ -514,8 +534,10 @@ async def handle_forecast_by_price(update: Update, context: ContextTypes.DEFAULT
             messages=[{"role": "user", "content": prompt}]
         )
         await update.message.reply_text(
-            f"📊 Прогноз по активу {coin}:\n{response.choices[0].message.content.strip()}",
-            reply_markup=REPLY_MARKUP
+            f"📊 Прогноз по активу {coin}:\n\n"
+            f"{response.choices[0].message.content.strip()}",
+            reply_markup=CHAT_DISCUSS_KEYBOARD,
+            parse_mode="Markdown"
         )
     except Exception as e:
         logging.error(f"[FORECAST_BY_PRICE] GPT ошибка: {e}")
@@ -722,8 +744,8 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_potential"):
         await handle_potential(update, context)
-    elif context.user_data.get("awaiting_macro_for_image"):
-        await handle_macro_for_image(update, context)
+    elif context.user_data.get("awaiting_macro_text"):
+        await handle_macro_text(update, context)
     elif context.user_data.get("awaiting_asset_name"):
         await handle_forecast_by_price(update, context)
     elif context.user_data.get("awaiting_definition_term"):
