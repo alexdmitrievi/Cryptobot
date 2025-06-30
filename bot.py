@@ -45,7 +45,8 @@ reply_keyboard = [
     ["🔍 Потенциал монеты", "📊 Прогноз по активу", "🧠 Помощь профессионала"],
     ["📈 График с уровнями", "🧘 Спокойствие"],
     ["📚 Объяснение термина", "📏 Калькулятор риска"],
-    ["💰 Подключить за $25", "💵 О подписке"]
+    ["💰 Подключить за $25", "💵 О подписке"],
+    ["📌 Сетап"]  # 👈 новая кнопка
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
@@ -110,6 +111,29 @@ WAITING_FOR_PHOTO = set()
 WAITING_FOR_THERAPY_INPUT = 100
 
 RISK_CALC_1, RISK_CALC_2, RISK_CALC_3 = range(101, 104)
+SETUP_1, SETUP_2, SETUP_3, SETUP_4, SETUP_5 = range(301, 306)
+
+async def setup_instrument(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["instrument"] = update.message.text.strip()
+    await update.message.reply_text("📉 Теперь укажи область риска (зона покупки):")
+    return SETUP_2
+
+async def setup_risk_area(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["risk_area"] = update.message.text.strip()
+    await update.message.reply_text("🎯 Какие цели (тейки) по сделке?")
+    return SETUP_3
+
+async def setup_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["targets"] = update.message.text.strip()
+    await update.message.reply_text("🚨 Где стоит стоп-лосс?")
+    return SETUP_4
+
+async def setup_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["stoploss"] = update.message.text.strip()
+    await update.message.reply_text("📷 Прикрепи скрин сетапа.")
+    return SETUP_5
+
+
 
 async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -369,6 +393,34 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.user_data["awaiting_macro_text"] = True
 
+async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo = update.message.photo[-1]
+    file = await photo.get_file()
+    photo_bytes = await file.download_as_bytearray()
+
+    instrument = context.user_data.get("instrument", "Не указано")
+    risk_area = context.user_data.get("risk_area", "Не указано")
+    targets = context.user_data.get("targets", "Не указано")
+    stoploss = context.user_data.get("stoploss", "Не указано")
+
+    caption = (
+        f"🚀 *Новый сетап от админа*\n\n"
+        f"• 📌 *Инструмент:* {instrument}\n"
+        f"• 💰 *Область риска:* {risk_area}\n"
+        f"• 🎯 *Цели:* {targets}\n"
+        f"• 🚨 *Стоп-лосс:* {stoploss}\n\n"
+        f"🧮 [Рассчитать позицию](https://t.me/ai4traders_bot)"
+    )
+
+    await context.bot.send_photo(
+        chat_id='@Cripto_inter_bot',
+        photo=photo_bytes,
+        caption=caption,
+        parse_mode="Markdown"
+    )
+
+    await update.message.reply_text("✅ Сетап опубликован в канал!", reply_markup=REPLY_MARKUP)
+    return ConversationHandler.END
 
 
 async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -606,11 +658,13 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "📊 Прогноз по активу":
-        # Только одна кнопка — скрин
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image")]
         ])
-        await update.message.reply_text("📈 Пришли скрин графика — я дам прогноз на основе технического анализа.", reply_markup=keyboard)
+        await update.message.reply_text(
+            "📈 Пришли скрин графика — я дам прогноз на основе технического анализа.",
+            reply_markup=keyboard
+        )
         return
 
     if text == "💰 Подключить за $25":
@@ -644,6 +698,14 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
         return
+
+    if text == "📌 Сетап":
+        if user_id not in ADMIN_IDS:
+            await update.message.reply_text("⛔️ Эта функция доступна только админу.")
+            return
+        context.user_data.clear()
+        await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
+        return SETUP_1
 
     # Всё остальное — сброс
     context.user_data.clear()
@@ -832,11 +894,30 @@ def main():
         ]
     )
 
-    # ✅ Добавляем обработчики
+    # 📌 Сетап (только для админа)
+    setup_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^📌 Сетап$"), handle_main)],
+        states={
+            SETUP_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_instrument)],
+            SETUP_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_risk_area)],
+            SETUP_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_targets)],
+            SETUP_4: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_stoploss)],
+            SETUP_5: [MessageHandler(filters.PHOTO, setup_photo)],
+        },
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("restart", restart),
+            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
+        ]
+    )
+
+    # ✅ Регистрируем все ConversationHandlers
     app.add_handler(help_conv_handler)
     app.add_handler(therapy_handler)
     app.add_handler(risk_calc_handler)
+    app.add_handler(setup_handler)
 
+    # ✅ Обычные обработчики
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
@@ -845,7 +926,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
 
-    # 🚀 Запуск бота
+    # 🚀 Запускаем бота
     app.run_polling()
 
 def log_payment(user_id, username):
