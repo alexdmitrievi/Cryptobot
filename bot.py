@@ -351,11 +351,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     photo = update.message.photo[-1]
     file = await photo.get_file()
-    photo_bytes = await file.download_as_bytearray()
+    original_photo_bytes = await file.download_as_bytearray()
 
-    # 📊 Прогноз по активу (если пользователь нажал кнопку)
+    # Сжимаем через PIL для стабильного Vision
+    image = Image.open(io.BytesIO(original_photo_bytes)).convert("RGB")
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=80)
+    compressed_photo_bytes = buffer.getvalue()
+
+    image_base64 = base64.b64encode(compressed_photo_bytes).decode()
+
+    # 📊 Прогноз по активу (по кнопке)
     if context.user_data.get("awaiting_macro_for_image"):
-        context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
+        context.user_data["graph_image_base64"] = image_base64
         await update.message.reply_text(
             "🧠 Какие новости или события сейчас влияют на рынок? (ФРС, ETF, геополитика, хардфорки и т.д.)"
         )
@@ -372,17 +380,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "role": "user",
                     "content": [
                         {"type": "text", "text": (
-                            "Ты — профессиональный криптотрейдер с 10+ годами опыта.\n"
-                            "На изображении график криптовалюты (4H).\n"
-                            "Ответь строго по пунктам:\n"
-                            "1) Какой сейчас тренд (восходящий / нисходящий / боковик)?\n"
-                            "2) Где ближайшие уровни поддержки и сопротивления?\n"
-                            "3) Есть ли фигуры разворота или продолжения?\n"
-                            "4) Дай краткий торговый план: где потенциальный вход, стоп и цель.\n\n"
-                            "If you find it better to be precise, also answer in short English bullet points."
+                            "Ты — профессиональный криптотрейдер с 10+ лет опыта.\n"
+                            "Analyze the 4H crypto chart strictly by:\n"
+                            "1) Trend direction (up/down/sideways)\n"
+                            "2) Key support and resistance levels\n"
+                            "3) Any reversal or continuation patterns\n"
+                            "4) Short trade plan: entry, stop, target.\n\n"
+                            "В конце скажи, что ещё стоит проверить для подтверждения (объёмы, стакан, новости)."
                         )},
                         {"type": "image_url", "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64.b64encode(photo_bytes).decode()}"
+                            "url": f"data:image/jpeg;base64,{image_base64}"
                         }}
                     ]
                 }],
@@ -394,14 +401,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=REPLY_MARKUP
             )
         except Exception as e:
-            logging.error(f"[awaiting_chart] Ошибка анализа графика: {e}")
+            logging.error(f"[awaiting_chart] Vision error: {e}")
             await update.message.reply_text(
                 "⚠️ Не удалось проанализировать график. Попробуй позже или пришли другой скрин."
             )
         return
 
-    # 🆕 Если пользователь просто прислал скрин без кнопок — запускаем сценарий прогноза
-    context.user_data["graph_image_base64"] = base64.b64encode(photo_bytes).decode("utf-8")
+    # 🆕 Если пользователь просто прислал скрин без кнопки
+    context.user_data["graph_image_base64"] = image_base64
     await update.message.reply_text(
         "📸 Понял, ты прислал скрин графика.\n\n"
         "🧠 Какие новости или события сейчас влияют на рынок? (ФРС, ETF, геополитика, хардфорки и т.д.)"
@@ -452,18 +459,16 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     prompt = (
-        "Ты — профессиональный криптотрейдер с опытом более 10 лет.\n"
-        "На изображении представлен график криптовалюты на 4H таймфрейме.\n\n"
-        "📊 Проанализируй строго по пунктам:\n"
-        "1) Расставь ключевые факторы по степени важности (тренд, уровни, паттерны, объёмы).\n"
+        "Ты — опытный криптотрейдер с 10+ лет на рынке.\n"
+        "На изображении — график криптовалюты на 4H таймфрейме.\n\n"
+        "📊 Разбери строго по пунктам:\n"
+        "1) Основные факторы: тренд, уровни, паттерны, объёмы.\n"
         "2) Есть ли признаки накопления, разворота или импульса?\n"
-        "3) Есть ли похожие паттерны на истории графика? Приведи пример.\n\n"
-        f"🌐 Учитывай фундаментальный фон: {macro}\n\n"
-        "🔁 Дай два сценария — при пробое вверх и при пробое вниз. Для каждого:\n"
-        "• где потенциальный вход, стоп-лосс и цели\n"
-        "• вероятность и краткий комментарий\n\n"
-        "📌 В конце посоветуй, какие данные ещё проверить для подтверждения (объёмы, стакан, новости).\n\n"
-        "If needed for better precision, also give short English bullet summary."
+        "3) Похожие паттерны на истории графика?\n"
+        f"🌐 Учитывай фундаментальный фон: {macro}\n"
+        "🔁 Дай два сценария: пробой вверх и пробой вниз (уровни входа, стопа, целей, вероятность).\n"
+        "📌 В конце посоветуй, что ещё проверить (объёмы, стакан, новости).\n\n"
+        "Also add short English bullet summary if needed for accuracy."
     )
 
     try:
@@ -484,7 +489,7 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"📊 Прогноз по графику + новости:\n\n"
             f"{response.choices[0].message.content.strip()}\n\n"
-            f"📰 Полезные ссылки для трейдера:\n"
+            f"📰 Полезные ссылки:\n"
             f"• [Forklog](https://t.me/forklog)\n"
             f"• [Bits.media](https://bits.media/news/)\n"
             f"• [RBC Crypto](https://www.rbc.ru/crypto/)\n"
@@ -492,13 +497,11 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=CHAT_DISCUSS_KEYBOARD,
             parse_mode="Markdown"
         )
-
     except Exception as e:
-        logging.error(f"[MACRO_GRAPH] Ошибка анализа: {e}")
+        logging.error(f"[MACRO_GRAPH] Vision error: {e}")
         await update.message.reply_text(
-            "⚠️ Ошибка при анализе. Попробуй ещё раз позже."
+            "⚠️ Не удалось составить прогноз. Попробуй позже или загрузи другой скрин."
         )
-
 
 def fetch_price_from_coingecko(coin_symbol: str) -> float | None:
     try:
