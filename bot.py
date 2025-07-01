@@ -806,8 +806,6 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔️ У тебя нет прав на публикацию.")
         return
 
-    logging.info(f"[COMMAND] /publish от {user_id}")
-
     caption = (
         "🚀 *GPT-Трейдер для Telegram* — твой аналитик, VIP-сигналы и психолог в одном боте.\n\n"
         "🔍 На рынке:\n"
@@ -830,18 +828,15 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Получить доступ", url="https://t.me/GPT_Trader_Bot")]
+        [InlineKeyboardButton("💰 Получить доступ", url="https://t.me/Cripto_inter_bot")]
     ])
 
     try:
-        # Удаляем старый пин
         chat_id = '@ai4traders'
         old_pins = await context.bot.get_chat(chat_id)
         if old_pins.pinned_message:
             await context.bot.unpin_chat_message(chat_id=chat_id, message_id=old_pins.pinned_message.message_id)
-            logging.info("📌 Старый закреп удалён.")
 
-        # Публикуем новый пост
         with open(PHOTO_PATH, "rb") as photo:
             message = await context.bot.send_photo(
                 chat_id=chat_id,
@@ -851,14 +846,13 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=keyboard
             )
 
-        # Закрепляем
         await context.bot.pin_chat_message(
             chat_id=chat_id,
             message_id=message.message_id,
             disable_notification=True
         )
 
-        await update.message.reply_text("✅ Пост опубликован и закреплён в канале с кнопкой для перехода в бот.")
+        await update.message.reply_text("✅ Пост опубликован и закреплён в канале с кнопкой для перехода в твоего бота.")
     except Exception as e:
         logging.error(f"[PUBLISH] Ошибка публикации: {e}")
         await update.message.reply_text("⚠️ Не удалось опубликовать или закрепить пост. Проверь файл, права и логи.")
