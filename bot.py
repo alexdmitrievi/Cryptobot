@@ -1,24 +1,38 @@
 import os
 import logging
 import asyncio
-import re
-import requests
+import threading
 import time
-from datetime import datetime
+import re
 import json
-
-from telegram import Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, ConversationHandler
-
-from config import TELEGRAM_TOKEN, OPENAI_API_KEY, TON_API_TOKEN
-from openai import AsyncOpenAI
-from PIL import Image
+import requests
+from datetime import datetime
 import io
 import base64
+
+from telegram import (
+    Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
+    ReplyKeyboardMarkup, ReplyKeyboardRemove
+)
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ContextTypes, filters, ConversationHandler
+)
+
+from config import (
+    TELEGRAM_TOKEN, OPENAI_API_KEY, TON_API_TOKEN,
+    CRYPTOCLOUD_API_KEY, CRYPTOCLOUD_SHOP_ID
+)
+from openai import AsyncOpenAI
+from PIL import Image
 
 # 📊 Google Sheets API
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+
+# 🔥 Flask для webhook от CryptoCloud
+from flask import Flask, request, jsonify
+
 
 # ✅ Подключение к Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -653,12 +667,15 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 🔍 Потенциал монеты
     if text == "🔍 Потенциал монеты":
+        if user_id not in ALLOWED_USERS:
+            await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
+            return
         context.user_data["awaiting_potential"] = True
         await update.message.reply_text("💡 Введи тикер криптовалюты (например: BTC):")
         return
 
     if text == "📏 Калькулятор риска":
-        return  # Обработка идёт в ConversationHandler
+        return  # ConversationHandler
 
     if text == "🧘 Спокойствие":
         return await start_therapy(update, context)
@@ -689,35 +706,31 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image")]
         ])
         await update.message.reply_text(
-            "📈 Пришли скрин графика — я дам прогноз на основе технического анализа.",
+            "📈 Пришли скрин графика — я дам прогноз на основе теханализа.",
             reply_markup=keyboard
         )
         return
 
     if text == "💰 Подключить за $25":
-        if username:
-            PENDING_USERS[user_id] = username
-            await update.message.reply_text(
-                "💸 Подписка — **навсегда за $25 (~3.4 TON)**.\n"
-                "Отправь **TON** на адрес:\n"
-                f"`{TON_WALLET}`\n\n"
-                f"Обязательно укажи комментарий к платежу: `@{username}`\n"
-                "После оплаты доступ активируется автоматически.",
-                parse_mode="Markdown",
-                reply_markup=REPLY_MARKUP
-            )
+        if user_id in ALLOWED_USERS:
+            await update.message.reply_text("✅ У тебя уже активирована подписка!", reply_markup=REPLY_MARKUP)
         else:
-            await update.message.reply_text(
-                "⚠️ У вас не установлен username. Установите его в Telegram и повторите попытку."
-            )
+            invoice_url = create_cryptocloud_invoice(user_id)
+            if invoice_url:
+                await update.message.reply_text(
+                    f"💸 Для оплаты нажми кнопку ниже и следуй инструкциям:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("💰 Оплатить через CryptoCloud", url=invoice_url)]
+                    ])
+                )
+            else:
+                await update.message.reply_text("⚠️ Не удалось создать счёт. Попробуй позже.")
         return
 
     if text == "💵 О подписке":
         await update.message.reply_text(
-            "Выбери способ оплаты:",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💳 Оплатить через TON", callback_data="show_wallet")]
-            ])
+            "Подписка активируется через CryptoCloud.\nНажми 💰 Подключить за $25 для получения ссылки на оплату.",
+            reply_markup=REPLY_MARKUP
         )
         return
 
@@ -793,6 +806,42 @@ async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
     return WAITING_FOR_THERAPY_INPUT
+
+# 🚀 Функция создания счёта через CryptoCloud
+def create_cryptocloud_invoice(user_id):
+    url = "https://api.cryptocloud.plus/v1/invoice/create"
+    payload = {
+        "shop_id": CRYPTOCLOUD_SHOP_ID,
+        "amount": 25,
+        "currency": "USDT",
+        "order_id": f"user_{user_id}",
+        "description": "Подписка GPT Trader Bot"
+    }
+    headers = {"Authorization": f"Token {CRYPTOCLOUD_API_KEY}"}
+    response = requests.post(url, json=payload, headers=headers)
+    data = response.json()
+    return data["result"]["url"] if "result" in data else None
+
+# 🚀 Flask webhook
+app_flask = Flask(__name__)
+
+@app_flask.route("/cryptocloud_webhook", methods=["POST"])
+def cryptocloud_webhook():
+    data = request.json
+    print("Webhook от CryptoCloud:", data)
+
+    if data.get("status") == "paid":
+        order_id = data.get("order_id")
+        if order_id and order_id.startswith("user_"):
+            user_id = int(order_id.replace("user_", ""))
+            ALLOWED_USERS.add(user_id)
+            print(f"✅ Пользователь {user_id} активирован через CryptoCloud!")
+
+    return jsonify({"ok": True})
+
+# Отдельный поток для Flask
+def run_flask():
+    app_flask.run(port=5000)
 
 # 👇 ВСТАВЬ ЗДЕСЬ:
 ADMIN_IDS = {407721399}  # замени на свой user_id
@@ -917,6 +966,9 @@ async def post_init(app):
     asyncio.create_task(check_ton_payments_periodically(app))
 
 def main():
+    # 🚀 Запускаем Flask webhook в отдельном потоке
+    threading.Thread(target=run_flask).start()
+
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     # 🧘 GPT-Психолог
@@ -994,14 +1046,14 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
-    app.add_handler(CommandHandler("broadcast", broadcast))  # VIP-рассылка для ALLOWED_USERS
+    app.add_handler(CommandHandler("broadcast", broadcast))
 
     # ✅ Inline кнопки, фото и универсальный текст
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
 
-    # 🚀 Запускаем бота
+    # 🚀 Запускаем Telegram polling
     app.run_polling()
 
 
