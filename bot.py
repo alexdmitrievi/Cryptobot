@@ -821,7 +821,8 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• GPT-психолог: поддержка и юмор после минусов\n\n"
         "🎁 Подключись сейчас и получи бонус: курс по скальпингу и позиционке (10+ уроков и PDF-гайды).\n\n"
         "🚀 *Доступ навсегда всего за $25 (~3.4 TON)*.\n\n"
-        "💬 *Обсуди сетапы и рынок в нашем чате:* [ai4traders_chat](https://t.me/ai4traders_chat)"
+        "👤 Задай вопрос 👉 [@zhbankov_alex](https://t.me/zhbankov_alex)\n"
+        "💬 Обсуди рынок и сетапы в чате 👉 [ai4traders_chat](https://t.me/ai4traders_chat)"
     )
 
     keyboard = InlineKeyboardMarkup([
@@ -829,23 +830,34 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     try:
+        # Сначала удалим старый закреп
+        chat_id = '@ai4traders'
+        old_pins = await context.bot.get_chat(chat_id)
+        if old_pins.pinned_message:
+            await context.bot.unpin_chat_message(chat_id=chat_id, message_id=old_pins.pinned_message.message_id)
+            logging.info("📌 Старый закреп удалён.")
+
+        # Публикуем новый пост
         with open(PHOTO_PATH, "rb") as photo:
             message = await context.bot.send_photo(
-                chat_id='@ai4traders',
+                chat_id=chat_id,
                 photo=photo,
                 caption=caption,
                 parse_mode="Markdown",
                 reply_markup=keyboard
             )
+
+        # Закрепляем новый
         await context.bot.pin_chat_message(
-            chat_id='@ai4traders',
+            chat_id=chat_id,
             message_id=message.message_id,
             disable_notification=True
         )
+
         await update.message.reply_text("✅ Пост опубликован и закреплён в канале.")
     except Exception as e:
         logging.error(f"[PUBLISH] Ошибка публикации: {e}")
-        await update.message.reply_text("⚠️ Не удалось опубликовать пост. Проверь файл и логи.")
+        await update.message.reply_text("⚠️ Не удалось опубликовать или закрепить пост. Проверь файл, права и логи.")
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
