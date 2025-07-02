@@ -851,8 +851,11 @@ async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_FOR_THERAPY_INPUT
 
 # 🚀 Функция создания счёта через CryptoCloud
+# Переменная, которую можно вынести в config.py или в ENV
+IS_TEST = True  # False для боевого режима
+
 async def create_cryptocloud_invoice(user_id, context=None):
-    url = "https://sandbox-api.cryptocloud.plus/v1/invoice/create"
+    url = "https://api.cryptocloud.plus/v1/invoice/create"
     payload = {
         "shop_id": CRYPTOCLOUD_SHOP_ID,
         "amount": 25,
@@ -865,16 +868,22 @@ async def create_cryptocloud_invoice(user_id, context=None):
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=15)
         data = response.json()
-        debug_msg = f"🔍 [SANDBOX] Ответ CryptoCloud: {data}"
 
+        # Строим красивый debug текст
+        mode = "[Тестовый режим]" if IS_TEST else "[Продакшн]"
+        debug_msg = f"🔍 {mode} Ответ CryptoCloud: {data}"
+
+        # Логируем в консоль
         print(debug_msg)
+
+        # И отправляем прямо пользователю в Telegram
         if context:
             await context.bot.send_message(chat_id=user_id, text=debug_msg[:4000])
 
         return data["result"]["url"] if "result" in data else None
 
     except Exception as e:
-        err_msg = f"❌ Исключение при создании счета (sandbox): {e}"
+        err_msg = f"❌ Исключение при создании счета {mode}: {e}"
         print(err_msg)
         if context:
             await context.bot.send_message(chat_id=user_id, text=err_msg)
