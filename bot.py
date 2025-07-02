@@ -688,7 +688,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username
 
-    # Команды сброса
     reset_commands = [
         "📏 Калькулятор риска", "🧘 Спокойствие", "🧠 Помощь профессионала",
         "📚 Объяснение термина", "📈 Получить сигнал", "📊 Прогноз по активу",
@@ -697,7 +696,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text in reset_commands:
         context.user_data.clear()
 
-    # 🔍 Потенциал монеты
     if text == "🔍 Потенциал монеты":
         if user_id not in ALLOWED_USERS:
             await update.message.reply_text("🔒 Доступ только после активации подписки за $25.", reply_markup=REPLY_MARKUP)
@@ -707,7 +705,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "📏 Калькулятор риска":
-        return  # ConversationHandler
+        return
 
     if text == "🧘 Спокойствие":
         return await start_therapy(update, context)
@@ -727,7 +725,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить.")
         return
 
-    # ⚡ Новая кнопка для сигналов
     if text == "📈 Получить сигнал":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Smart Money", callback_data="style_smc")],
@@ -754,7 +751,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id in ALLOWED_USERS:
             await update.message.reply_text("✅ У тебя уже активирована подписка!", reply_markup=REPLY_MARKUP)
         else:
-            invoice_url = create_cryptocloud_invoice(user_id)
+            invoice_url = await create_cryptocloud_invoice(user_id, context)
             if invoice_url:
                 await update.message.reply_text(
                     f"💸 Для оплаты нажми кнопку ниже и следуй инструкциям:",
@@ -786,7 +783,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
         return SETUP_1
 
-    # Всё остальное — сброс
     context.user_data.clear()
     await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
 
@@ -847,7 +843,7 @@ async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_FOR_THERAPY_INPUT
 
 # 🚀 Функция создания счёта через CryptoCloud
-def create_cryptocloud_invoice(user_id):
+async def create_cryptocloud_invoice(user_id, context=None):
     url = "https://api.cryptocloud.plus/v1/invoice/create"
     payload = {
         "shop_id": CRYPTOCLOUD_SHOP_ID,
@@ -861,18 +857,22 @@ def create_cryptocloud_invoice(user_id):
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=15)
         data = response.json()
-        print(f"🔍 Ответ CryptoCloud: {data}")  # выводим ответ API в логи
+        debug_msg = f"🔍 CryptoCloud ответ: {data}"
 
-        # если всё ок — возвращаем URL для оплаты
-        if "result" in data and "url" in data["result"]:
-            return data["result"]["url"]
+        # Выводим в логи
+        print(debug_msg)
 
-        # если что-то не так — явно показываем ошибку
-        print(f"⚠️ Ошибка создания счета: {data.get('error') or data.get('detail') or 'Неизвестная ошибка'}")
-        return None
+        # Отправим прямо в Telegram админу (или пользователю)
+        if context:
+            await context.bot.send_message(chat_id=user_id, text=debug_msg[:4000])
+
+        return data["result"]["url"] if "result" in data else None
 
     except Exception as e:
-        print(f"❌ Исключение при создании счета: {e}")
+        err_msg = f"❌ Исключение при создании счета: {e}"
+        print(err_msg)
+        if context:
+            await context.bot.send_message(chat_id=user_id, text=err_msg)
         return None
 
 
