@@ -71,51 +71,6 @@ CHAT_DISCUSS_KEYBOARD = InlineKeyboardMarkup([
 # Фоновая проверка платежей по username
 RECEIVED_MEMOS = set()
 
-async def check_ton_payments_periodically(application):
-    try:
-        while True:
-            try:
-                response = requests.get(
-                    f"https://tonapi.io/v2/blockchain/accounts/{TON_WALLET}/transactions",
-                    headers={"Authorization": f"Bearer {TON_API_TOKEN}"},
-                    timeout=10
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    for tx in data.get("transactions", []):
-                        if tx.get("in_msg", {}).get("value", 0) >= 3_400_000_000:
-                            memo = tx["in_msg"].get("comment", "").strip()
-                            if memo.startswith("@") and memo not in RECEIVED_MEMOS:
-                                RECEIVED_MEMOS.add(memo)
-                                username = memo[1:]
-                                logging.info(f"✅ Найдена транзакция от @{username} на {tx['in_msg']['value']/1e9} TON")
-
-                                for user_id, name in PENDING_USERS.items():
-                                    if name.lower() == username.lower():
-                                        if user_id not in ALLOWED_USERS:
-                                            ALLOWED_USERS.add(user_id)
-                                            log_payment(user_id, username)
-                                            logging.info(f"✅ @{username} получил доступ")
-                                        try:
-                                            await application.bot.send_message(
-                                                chat_id=user_id,
-                                                text=(
-                                                    "✅ Оплата получена! Подписка активирована навсегда 🎉\n\n"
-                                                    "🤖 GPT-помощник доступен: задавай вопросы, загружай графики, получай прогнозы.\n\n"
-                                                    "🎁 Твой бонус — курс по скальпингу и позиционке:\n"
-                                                    "👉 [Открыть курс в Google Drive](https://drive.google.com/drive/folders/1EEryIr4RDtqM4WyiMTjVP1XiGYJVxktA?clckid=3f56c187)"
-                                                ),
-                                                parse_mode="Markdown",
-                                                reply_markup=REPLY_MARKUP
-                                            )
-                                        except Exception as e:
-                                            logging.error(f"❌ Ошибка уведомления {user_id}: {e}")
-            except Exception as e:
-                logging.error(f"❌ Ошибка при проверке TON-платежей: {e}")
-
-            await asyncio.sleep(60)
-    except asyncio.CancelledError:
-        logging.info("✅ Задача check_ton_payments_periodically остановлена (бот завершает работу).")
 
 INTERPRET_NEWS, ASK_EVENT, ASK_FORECAST, ASK_ACTUAL, GENERAL_QUESTION, FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3 = range(8)
 user_inputs = {}
@@ -904,7 +859,12 @@ def create_cryptocloud_invoice(user_id):
     headers = {"Authorization": f"Token {CRYPTOCLOUD_API_KEY}"}
     response = requests.post(url, json=payload, headers=headers)
     data = response.json()
-    return data["result"]["url"] if "result" in data else None
+    if "result" in data:
+        return data["result"]["url"]
+    else:
+        print("⚠️ Ошибка создания инвойса:", data)
+        return None
+
 
 # 🚀 Flask webhook
 app_flask = Flask(__name__)
