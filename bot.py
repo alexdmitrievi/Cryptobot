@@ -859,11 +859,11 @@ def create_cryptocloud_invoice(user_id):
     headers = {"Authorization": f"Token {CRYPTOCLOUD_API_KEY}"}
     response = requests.post(url, json=payload, headers=headers)
     data = response.json()
-    if "result" in data:
-        return data["result"]["url"]
-    else:
-        print("⚠️ Ошибка создания инвойса:", data)
-        return None
+
+    # Добавляем лог
+    print("🔍 CryptoCloud response:", data)
+
+    return data["result"]["url"] if "result" in data else None
 
 
 # 🚀 Flask webhook
@@ -888,8 +888,6 @@ def cryptocloud_webhook():
             )
 
     return jsonify({"ok": True})
-
-
 
 # Отдельный поток для Flask
 def run_flask():
