@@ -857,13 +857,23 @@ def create_cryptocloud_invoice(user_id):
         "description": "Подписка GPT Trader Bot"
     }
     headers = {"Authorization": f"Token {CRYPTOCLOUD_API_KEY}"}
-    response = requests.post(url, json=payload, headers=headers)
-    data = response.json()
 
-    # Добавляем лог
-    print("🔍 CryptoCloud response:", data)
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
+        data = response.json()
+        print(f"🔍 Ответ CryptoCloud: {data}")  # выводим ответ API в логи
 
-    return data["result"]["url"] if "result" in data else None
+        # если всё ок — возвращаем URL для оплаты
+        if "result" in data and "url" in data["result"]:
+            return data["result"]["url"]
+
+        # если что-то не так — явно показываем ошибку
+        print(f"⚠️ Ошибка создания счета: {data.get('error') or data.get('detail') or 'Неизвестная ошибка'}")
+        return None
+
+    except Exception as e:
+        print(f"❌ Исключение при создании счета: {e}")
+        return None
 
 
 # 🚀 Flask webhook
