@@ -1015,8 +1015,6 @@ async def post_init(app):
         BotCommand("start", "Запустить бота"),
         BotCommand("restart", "🔁 Перезапустить бота")
     ])
-    # ✅ Запускаем фоновую задачу безопасно внутри event loop
-    asyncio.create_task(check_ton_payments_periodically(app))
 
 def main():
     # 🚀 Запускаем Flask webhook в отдельном потоке
