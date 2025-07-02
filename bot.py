@@ -9,6 +9,7 @@ import requests
 from datetime import datetime
 import io
 import base64
+from io import BytesIO  # 👈 Добавляем для работы с фото в setup_photo
 
 from telegram import (
     Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
@@ -33,7 +34,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 # 🔥 Flask для webhook от CryptoCloud
 from flask import Flask, request, jsonify
 
-
 # ✅ Подключение к Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds_dict = json.loads(os.getenv("GOOGLE_CREDS"))
@@ -57,10 +57,10 @@ RECEIVED_MEMOS = set()
 
 reply_keyboard = [
     ["🔍 Потенциал монеты", "📊 Прогноз по активу", "🧠 Помощь профессионала"],
-    ["📈 График с уровнями", "🧘 Спокойствие"],
+    ["📈 Получить сигнал", "🧘 Спокойствие"],
     ["📚 Объяснение термина", "📏 Калькулятор риска"],
     ["💰 Подключить за $25", "💵 О подписке"],
-    ["📌 Сетап"]  # 👈 новая кнопка
+    ["📌 Сетап"]
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
@@ -350,18 +350,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "forecast_by_image":
         WAITING_FOR_PHOTO.add(user_id)
-        # ❌ не очищаем context.user_data.clear()
         context.user_data["awaiting_macro_for_image"] = True
         await query.edit_message_text(
             "📸 Пришли скрин графика (4H таймфрейм), и я дам прогноз на основе технического анализа."
         )
 
     elif query.data == "forecast_by_price":
-        # ❌ не очищаем context.user_data.clear()
         context.user_data["awaiting_asset_name"] = True
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text="🔢 Введи тикер актива (например: BTC, ETH, XRP):"
+        )
+
+    elif query.data == "style_smc":
+        context.user_data["selected_strategy"] = "smc"
+        await query.edit_message_text(
+            "📈 *Smart Money Concepts (SMC)*\n\n"
+            "📌 Для SMC лучше всего подходят таймфреймы 15m, 30m, 1H и 4H.\n"
+            "Рекомендуется наложить индикатор Smart Money Concepts (LuxAlgo или WeloTrades), "
+            "чтобы я сразу увидел BOS, ликвидность и OTE.\n\n"
+            "🖼 Пришли скрин — я дам план входа, стоп и тейки с пояснением.",
+            parse_mode="Markdown"
+        )
+
+    elif query.data == "style_swing":
+        context.user_data["selected_strategy"] = "swing"
+        await query.edit_message_text(
+            "📈 *Позиционные swing сделки*\n\n"
+            "📌 Для поиска накоплений и уровней крупных игроков лучше всего подходят таймфреймы 4H и 1D.\n\n"
+            "🖼 Пришли скрин — я дам сценарии продолжения и разворота с пояснением.",
+            parse_mode="Markdown"
+        )
+
+    elif query.data == "style_breakout":
+        context.user_data["selected_strategy"] = "breakout"
+        await query.edit_message_text(
+            "📈 *Пробой диапазона*\n\n"
+            "📌 Для поиска флэта и потенциальных breakout подойдут 5m, 15m и 1H.\n\n"
+            "🖼 Пришли скрин — я найду консолидацию и дам сценарий пробоя.",
+            parse_mode="Markdown"
         )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -370,74 +397,85 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await photo.get_file()
     original_photo_bytes = await file.download_as_bytearray()
 
-    # Сжимаем через PIL для стабильного Vision
+    # Сжимаем через PIL для Vision
     image = Image.open(io.BytesIO(original_photo_bytes)).convert("RGB")
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=80)
-    compressed_photo_bytes = buffer.getvalue()
+    image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
-    image_base64 = base64.b64encode(compressed_photo_bytes).decode()
+    selected_style = context.user_data.get("selected_strategy")
 
-    # 📊 Прогноз по активу (по кнопке)
-    if context.user_data.get("awaiting_macro_for_image"):
-        context.user_data["graph_image_base64"] = image_base64
-        await update.message.reply_text(
-            "🧠 Какие новости или события сейчас влияют на рынок? (ФРС, ETF, геополитика, хардфорки и т.д.)"
+    if selected_style == "smc":
+        prompt_text = (
+            "Ты — опытный трейдер Smart Money Concepts (SMC) с 10+ лет на крипте, форексе и MOEX.\n\n"
+            "На изображении график. Найди:\n"
+            "1. Где собрана ликвидность (стопы, экстремумы).\n"
+            "2. BOS/CHoCH, imbalance, OTE.\n"
+            "3. Дай план: где вход, где стоп, где тейк.\n\n"
+            "Объясни почему именно здесь вход, как ведут себя толпа и институционалы."
         )
-        context.user_data["awaiting_macro_text"] = True
-        return
+    elif selected_style == "swing":
+        prompt_text = (
+            "Ты — трейдер позиционного swing типа с опытом на крипте, форексе и MOEX.\n\n"
+            "На графике:\n"
+            "1. Найди ключевые поддержки и сопротивления.\n"
+            "2. Определи накопления маркетмейкеров.\n"
+            "3. Дай два сценария: продолжение и разворот.\n\n"
+            "Объясни, почему эти уровни важны, где стоп, какие цели. Что проверить ещё (корреляцию индексов, отчёты)?"
+        )
+    elif selected_style == "breakout":
+        prompt_text = (
+            "Ты — скальпер и интрадей трейдер, ищешь пробои на крипте, форексе и MOEX.\n\n"
+            "На графике:\n"
+            "1. Найди диапазон (консолидацию).\n"
+            "2. Определи сценарий пробоя вверх или вниз.\n"
+            "3. Дай план входа: где стоп, тейки.\n\n"
+            "Почему тут может быть пробой? Что проверить ещё (дельта, кластера, отчёт COT)?"
+        )
+    else:
+        # fallback
+        prompt_text = (
+            "Ты — трейдер с опытом более 10 лет.\n"
+            "На изображении график. Определи тренд, ключевые уровни, риски и дай краткий план сделки."
+        )
 
-    # 📈 График с уровнями (по кнопке)
-    if context.user_data.get("awaiting_chart"):
-        context.user_data.pop("awaiting_chart")
-        try:
-            vision_response = await client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": (
-                            "Ты — профессиональный криптотрейдер с 10+ лет опыта.\n"
-                            "Analyze the 4H crypto chart strictly by:\n"
-                            "1) Trend direction (up/down/sideways)\n"
-                            "2) Key support and resistance levels\n"
-                            "3) Any reversal or continuation patterns\n"
-                            "4) Short trade plan: entry, stop, target.\n\n"
-                            "В конце скажи, что ещё стоит проверить для подтверждения (объёмы, стакан, новости)."
-                        )},
-                        {"type": "image_url", "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        }}
-                    ]
-                }],
-                max_tokens=700
-            )
-            analysis = vision_response.choices[0].message.content.strip()
-            await update.message.reply_text(
-                f"📉 Анализ графика:\n{analysis}",
-                reply_markup=REPLY_MARKUP
-            )
-        except Exception as e:
-            logging.error(f"[awaiting_chart] Vision error: {e}")
-            await update.message.reply_text(
-                "⚠️ Не удалось проанализировать график. Попробуй позже или пришли другой скрин."
-            )
-        return
+    try:
+        vision_response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt_text},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_base64}"
+                    }}
+                ]
+            }],
+            max_tokens=700
+        )
 
-    # 🆕 Если пользователь просто прислал скрин без кнопки
-    context.user_data["graph_image_base64"] = image_base64
-    await update.message.reply_text(
-        "📸 Понял, ты прислал скрин графика.\n\n"
-        "🧠 Какие новости или события сейчас влияют на рынок? (ФРС, ETF, геополитика, хардфорки и т.д.)"
-    )
-    context.user_data["awaiting_macro_text"] = True
-
+        analysis = vision_response.choices[0].message.content.strip()
+        await update.message.reply_text(
+            f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}",
+            reply_markup=REPLY_MARKUP
+        )
+    except Exception as e:
+        logging.error(f"[handle_photo] Vision error: {e}")
+        await update.message.reply_text(
+            "⚠️ Не удалось проанализировать график. Попробуй позже или пришли другой скрин."
+        )
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Получаем фото от пользователя
     photo = update.message.photo[-1]
     file = await photo.get_file()
     photo_bytes = await file.download_as_bytearray()
 
+    # Преобразуем в BytesIO для Telegram API
+    image_stream = BytesIO(photo_bytes)
+    image_stream.name = "setup.jpg"  # важно для Telegram
+
+    # Собираем описание из context.user_data
     instrument = context.user_data.get("instrument", "Не указано")
     risk_area = context.user_data.get("risk_area", "Не указано")
     targets = context.user_data.get("targets", "Не указано")
@@ -452,16 +490,32 @@ async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🧮 [Рассчитать позицию](https://t.me/ai4traders_bot)"
     )
 
-    await context.bot.send_photo(
-        chat_id='@ai4traders',
-        photo=photo_bytes,
-        caption=caption,
-        parse_mode="Markdown"
-    )
+    try:
+        # Отправляем в канал
+        chat_id = '@ai4traders'
+        message = await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=image_stream,
+            caption=caption,
+            parse_mode="Markdown"
+        )
 
-    await update.message.reply_text("✅ Сетап опубликован в канал!", reply_markup=REPLY_MARKUP)
+        # Закрепляем
+        await context.bot.pin_chat_message(
+            chat_id=chat_id,
+            message_id=message.message_id,
+            disable_notification=True
+        )
+
+        await update.message.reply_text("✅ Сетап опубликован и закреплён в канале!", reply_markup=REPLY_MARKUP)
+
+    except Exception as e:
+        logging.error(f"[SETUP_PHOTO] Ошибка публикации: {e}")
+        await update.message.reply_text(
+            "⚠️ Не удалось опубликовать сетап. Проверь права бота в канале и логи."
+        )
+
     return ConversationHandler.END
-
 
 async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_macro_text"):
@@ -659,7 +713,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Команды сброса
     reset_commands = [
         "📏 Калькулятор риска", "🧘 Спокойствие", "🧠 Помощь профессионала",
-        "📚 Объяснение термина", "📈 График с уровнями", "📊 Прогноз по активу",
+        "📚 Объяснение термина", "📈 Получить сигнал", "📊 Прогноз по активу",
         "💰 Подключить за $25", "💵 О подписке", "🔄 Перезапустить бота", "🔍 Потенциал монеты"
     ]
     if text in reset_commands:
@@ -695,10 +749,17 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить.")
         return
 
-    if text == "📈 График с уровнями":
-        context.user_data.clear()
-        context.user_data["awaiting_chart"] = True
-        await update.message.reply_text("📷 Пришли скрин графика — я проанализирую.")
+    # ⚡ Новая кнопка для сигналов
+    if text == "📈 Получить сигнал":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Smart Money", callback_data="style_smc")],
+            [InlineKeyboardButton("Позиционка", callback_data="style_swing")],
+            [InlineKeyboardButton("Пробой", callback_data="style_breakout")]
+        ])
+        await update.message.reply_text(
+            "⚡ Выбери подходящую стратегию для анализа твоего графика:",
+            reply_markup=keyboard
+        )
         return
 
     if text == "📊 Прогноз по активу":
