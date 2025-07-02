@@ -828,7 +828,7 @@ app_flask = Flask(__name__)
 @app_flask.route("/cryptocloud_webhook", methods=["POST"])
 def cryptocloud_webhook():
     data = request.json
-    print("Webhook от CryptoCloud:", data)
+    print(f"🔔 Webhook от CryptoCloud: {json.dumps(data, indent=2, ensure_ascii=False)}")
 
     if data.get("status") == "paid":
         order_id = data.get("order_id")
@@ -837,11 +837,20 @@ def cryptocloud_webhook():
             ALLOWED_USERS.add(user_id)
             print(f"✅ Пользователь {user_id} активирован через CryptoCloud!")
 
+            # Отправим пользователю уведомление
+            asyncio.run_coroutine_threadsafe(
+                notify_user_payment(user_id),
+                app.loop
+            )
+
     return jsonify({"ok": True})
+
+
 
 # Отдельный поток для Flask
 def run_flask():
-    app_flask.run(port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app_flask.run(host="0.0.0.0", port=port)
 
 # 👇 ВСТАВЬ ЗДЕСЬ:
 ADMIN_IDS = {407721399}  # замени на свой user_id
@@ -1064,6 +1073,22 @@ def log_payment(user_id, username):
         logging.info(f"🧾 Записано в Google Sheets: {user_id}, {username}, {timestamp}")
     except Exception as e:
         logging.error(f"❌ Ошибка при записи в Google Sheets: {e}")
+
+async def notify_user_payment(user_id):
+    try:
+        await app.bot.send_message(
+            chat_id=user_id,
+            text=(
+                "✅ Оплата получена! Подписка активирована навсегда 🎉\n\n"
+                "🤖 GPT-помощник доступен: задавай вопросы, загружай графики, получай прогнозы.\n\n"
+                "🎁 Твой бонус — курс по скальпингу и позиционке:\n"
+                "👉 [Открыть курс в Google Drive](https://drive.google.com/drive/folders/1EEryIr4RDtqM4WyiMTjVP1XiGYJVxktA?clckid=3f56c187)"
+            ),
+            parse_mode="Markdown",
+            reply_markup=REPLY_MARKUP
+        )
+    except Exception as e:
+        print(f"❌ Не удалось уведомить пользователя {user_id}: {e}")
 
 if __name__ == '__main__':
     main()
