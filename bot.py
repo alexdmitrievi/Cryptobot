@@ -6,10 +6,10 @@ import time
 import re
 import json
 import requests
+import hmac
+import hashlib
 from datetime import datetime
-import io
-import base64
-from io import BytesIO  # 👈 Добавляем для работы с фото в setup_photo
+from io import BytesIO
 
 from telegram import (
     Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
@@ -22,7 +22,7 @@ from telegram.ext import (
 
 from config import (
     TELEGRAM_TOKEN, OPENAI_API_KEY, TON_API_TOKEN,
-    CRYPTOCLOUD_API_KEY, CRYPTOCLOUD_SHOP_ID
+    CRYPTOCLOUD_API_KEY, CRYPTOCLOUD_SHOP_ID, API_SECRET
 )
 from openai import AsyncOpenAI
 from PIL import Image
@@ -31,7 +31,7 @@ from PIL import Image
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# 🔥 Flask для webhook от CryptoCloud
+# 🔥 Flask для webhook от CryptoCloud POS
 from flask import Flask, request, jsonify
 
 # ✅ Подключение к Google Sheets
@@ -972,68 +972,44 @@ async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return WAITING_FOR_THERAPY_INPUT
 
-# 🚀 Функция создания счёта через CryptoCloud
-# Переменная, которую можно вынести в config.py или в ENV
-IS_TEST = False  # ставим где-то вверху bot.py
+# 🚀 Функция генерации ссылки POS для Telegram
+async def send_payment_link(update, context):
+    user_id = update.effective_user.id
+    pay_link = (
+        f"https://pay.cryptocloud.plus/pos/{CRYPTOCLOUD_SHOP_ID}"
+        f"?amount=25&currency=USDT&network=TRC20&order_id=user_{user_id}&desc=GPT_Trader_Bot"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💰 Оплатить через CryptoCloud", url=pay_link)]
+    ])
+    await update.message.reply_text(
+        "💵 Перейдите по кнопке для оплаты подписки GPT Trader Bot:",
+        reply_markup=keyboard
+    )
 
-async def create_cryptocloud_invoice(user_id, context=None):
-    mode = "[Тестовый режим]" if IS_TEST else "[Продакшн]"
-
-    url = "https://api.cryptocloud.plus/v1/invoice/create"
-    payload = {
-        "shop_id": CRYPTOCLOUD_SHOP_ID,
-        "amount": 25,
-        "currency": "USDT",
-        "network": "TRC20",
-        "order_id": f"user_{user_id}",
-        "description": "Подписка GPT Trader Bot"
-    }
-    headers = {"Authorization": f"Token {CRYPTOCLOUD_API_KEY}"}
-
-    try:
-        # DEBUG print
-        print("🔍 CryptoCloud ENV & Payload:")
-        print(f" - mode: {mode}")
-        print(f" - shop_id: {CRYPTOCLOUD_SHOP_ID}")
-        print(f" - api_key: {CRYPTOCLOUD_API_KEY}")
-        print(f" - payload: {json.dumps(payload)}")
-        print(f" - headers: {headers}")
-
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        print(f"⬅️ HTTP {response.status_code} BODY: {response.text}")
-
-        data = response.json()
-        debug_msg = f"🔍 {mode} Ответ CryptoCloud:\n{json.dumps(data, indent=2, ensure_ascii=False)}"
-        
-        if context:
-            await context.bot.send_message(chat_id=user_id, text=debug_msg[:4000])
-
-        return data["result"]["url"] if "result" in data else None
-
-    except Exception as e:
-        err_msg = f"❌ Исключение при создании счета {mode}: {e}"
-        print(err_msg)
-        if context:
-            await context.bot.send_message(chat_id=user_id, text=err_msg)
-        return None
-
-
-# 🚀 Flask webhook
+# 🚀 Flask webhook для IPN от POS с проверкой HMAC
 app_flask = Flask(__name__)
 
 @app_flask.route("/cryptocloud_webhook", methods=["POST"])
 def cryptocloud_webhook():
+    body = request.get_data()
+    signature = request.headers.get("X-Signature-SHA256")
+
+    calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    if signature != calc_sig:
+        print(f"⚠ Неверная подпись IPN: {signature} != {calc_sig}")
+        return jsonify({"status": "invalid signature"})
+
     data = request.json
-    print(f"🔔 Webhook от CryptoCloud: {json.dumps(data, indent=2, ensure_ascii=False)}")
+    print(f"✅ IPN от CryptoCloud:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
 
     if data.get("status") == "paid":
         order_id = data.get("order_id")
         if order_id and order_id.startswith("user_"):
             user_id = int(order_id.replace("user_", ""))
             ALLOWED_USERS.add(user_id)
-            print(f"✅ Пользователь {user_id} активирован через CryptoCloud!")
+            print(f"🎉 Пользователь {user_id} активирован через POS!")
 
-            # Отправим пользователю уведомление
             asyncio.run_coroutine_threadsafe(
                 notify_user_payment(user_id),
                 app.loop
@@ -1041,7 +1017,7 @@ def cryptocloud_webhook():
 
     return jsonify({"ok": True})
 
-# Отдельный поток для Flask
+# 🚀 Запуск Flask в отдельном потоке
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
     app_flask.run(host="0.0.0.0", port=port)
