@@ -974,9 +974,11 @@ async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🚀 Функция создания счёта через CryptoCloud
 # Переменная, которую можно вынести в config.py или в ENV
+IS_TEST = False  # ставим где-то вверху bot.py
+
 async def create_cryptocloud_invoice(user_id, context=None):
-    mode = "[Тестовый режим]" if IS_TEST else "[Продакшн]"  # 🟢 вынесли наверх
-    
+    mode = "[Тестовый режим]" if IS_TEST else "[Продакшн]"
+
     url = "https://api.cryptocloud.plus/v1/invoice/create"
     payload = {
         "shop_id": CRYPTOCLOUD_SHOP_ID,
@@ -989,12 +991,20 @@ async def create_cryptocloud_invoice(user_id, context=None):
     headers = {"Authorization": f"Token {CRYPTOCLOUD_API_KEY}"}
 
     try:
+        # DEBUG print
+        print("🔍 CryptoCloud ENV & Payload:")
+        print(f" - mode: {mode}")
+        print(f" - shop_id: {CRYPTOCLOUD_SHOP_ID}")
+        print(f" - api_key: {CRYPTOCLOUD_API_KEY}")
+        print(f" - payload: {json.dumps(payload)}")
+        print(f" - headers: {headers}")
+
         response = requests.post(url, json=payload, headers=headers, timeout=15)
+        print(f"⬅️ HTTP {response.status_code} BODY: {response.text}")
+
         data = response.json()
-
-        debug_msg = f"🔍 {mode} Ответ CryptoCloud: {data}"
-        print(debug_msg)
-
+        debug_msg = f"🔍 {mode} Ответ CryptoCloud:\n{json.dumps(data, indent=2, ensure_ascii=False)}"
+        
         if context:
             await context.bot.send_message(chat_id=user_id, text=debug_msg[:4000])
 
@@ -1006,6 +1016,7 @@ async def create_cryptocloud_invoice(user_id, context=None):
         if context:
             await context.bot.send_message(chat_id=user_id, text=err_msg)
         return None
+
 
 # 🚀 Flask webhook
 app_flask = Flask(__name__)
