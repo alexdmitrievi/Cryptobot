@@ -974,28 +974,39 @@ async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🚀 Функция создания счёта через CryptoCloud
 # Переменная, которую можно вынести в config.py или в ENV
-IS_TEST = False  # False для боевого режима
-
 async def create_cryptocloud_invoice(user_id, context=None):
     url = "https://api.cryptocloud.plus/v1/invoice/create"
     payload = {
         "shop_id": CRYPTOCLOUD_SHOP_ID,
         "amount": 25,
         "currency": "USDT",
-        "network": "TRC20",  # 👈 ОБЯЗАТЕЛЬНО!
+        "network": "TRC20",
         "order_id": f"user_{user_id}",
         "description": "Подписка GPT Trader Bot"
     }
     headers = {"Authorization": f"Token {CRYPTOCLOUD_API_KEY}"}
 
     try:
+        # DEBUG PRINT ВСЕХ ENV и PARAMS
+        print("📝 CryptoCloud DEBUG PARAMS:")
+        print(f" - CRYPTOCLOUD_SHOP_ID: {CRYPTOCLOUD_SHOP_ID}")
+        print(f" - CRYPTOCLOUD_API_KEY: {CRYPTOCLOUD_API_KEY}")
+        print(f" - payload: {json.dumps(payload, indent=2)}")
+        print(f" - headers: {headers}")
+
+        # HTTP request
         response = requests.post(url, json=payload, headers=headers, timeout=15)
+
+        # DEBUG HTTP RESPONSE
+        print(f"⬅️ CryptoCloud HTTP {response.status_code}")
+        print(f"📦 BODY: {response.text}")
+
         data = response.json()
 
         mode = "[Тестовый режим]" if IS_TEST else "[Продакшн]"
-        debug_msg = f"🔍 {mode} Ответ CryptoCloud: {data}"
-        print(debug_msg)
+        debug_msg = f"🔍 {mode} Ответ CryptoCloud:\n{json.dumps(data, indent=2, ensure_ascii=False)}"
 
+        # Telegram DEBUG
         if context:
             await context.bot.send_message(chat_id=user_id, text=debug_msg[:4000])
 
