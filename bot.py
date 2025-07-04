@@ -821,7 +821,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_commands = [
         "📏 Калькулятор риска", "🧘 Спокойствие", "🧠 Помощь профессионала",
         "📚 Объяснение термина", "📈 Получить сигнал", "📊 Прогноз по активу",
-        "💰 Подключить за $25", "💵 О подписке", "🔄 Перезапустить бота", "🔍 Потенциал монеты"
+        "💰 Подключить за $25", "💵 О подписке", "🔍 Потенциал монеты"
     ]
     if text in reset_commands:
         context.user_data.clear()
@@ -880,16 +880,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id in ALLOWED_USERS:
             await update.message.reply_text("✅ У тебя уже активирована подписка!", reply_markup=REPLY_MARKUP)
         else:
-            invoice_url = await create_cryptocloud_invoice(user_id, context)
-            if invoice_url:
-                await update.message.reply_text(
-                    f"💸 Для оплаты нажми кнопку ниже и следуй инструкциям:",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💰 Оплатить через CryptoCloud", url=invoice_url)]
-                    ])
-                )
-            else:
-                await update.message.reply_text("⚠️ Не удалось создать счёт. Попробуй позже.")
+            await send_payment_link(update, context)
         return
 
     if text == "💵 О подписке":
@@ -897,11 +888,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Подписка активируется через CryptoCloud.\nНажми 💰 Подключить за $25 для получения ссылки на оплату.",
             reply_markup=REPLY_MARKUP
         )
-        return
-
-    if text == "🔄 Перезапустить бота":
-        context.user_data.clear()
-        await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
         return
 
     if text == "📌 Сетап":
