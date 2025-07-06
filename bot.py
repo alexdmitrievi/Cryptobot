@@ -74,7 +74,6 @@ client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
 
 TON_WALLET = "UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR"
-ALLOWED_USERS = {407721399, 592270446}
 PENDING_USERS = {}
 RECEIVED_MEMOS = set()
 
@@ -1054,18 +1053,19 @@ def cryptocloud_webhook():
     if data.get("status") == "paid":
         order_id = data.get("order_id")
         if order_id and order_id.startswith("user_"):
-            user_id = int(order_id.replace("user_", ""))
+            parts = order_id.split("_")
+            try:
+                user_id = int(parts[1])
+            except (IndexError, ValueError):
+                print(f"❌ Ошибка парсинга user_id в order_id: {order_id}")
+                return jsonify({"status": "bad order_id"})
 
-            # добавляем в ALLOWED_USERS
+            username = parts[2] if len(parts) > 2 else ""
+
             ALLOWED_USERS.add(user_id)
-
-            # записываем в Google Sheets
-            username = data.get("metadata", {}).get("username", "") or ""  # можно брать из метаданных, если передавал
             log_payment(user_id, username)
+            print(f"🎉 Пользователь {user_id} ({username}) активирован через POS!")
 
-            print(f"🎉 Пользователь {user_id} активирован через POS и записан в Google Sheets!")
-
-            # отправляем уведомление пользователю
             asyncio.run_coroutine_threadsafe(
                 notify_user_payment(user_id),
                 app.loop
