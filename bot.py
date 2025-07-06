@@ -44,6 +44,29 @@ creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 gc = gspread.authorize(creds)
 
+def load_allowed_users():
+    try:
+        records = sheet.get_all_records()
+        logging.info(f"🔄 Загружено {len(records)} строк из Google Sheets.")
+        
+        users = set()
+        for row in records:
+            if "user_id" in row and row["user_id"]:
+                try:
+                    users.add(int(row["user_id"]))
+                except ValueError:
+                    logging.warning(f"⚠️ Не удалось преобразовать user_id: {row['user_id']}")
+        
+        logging.info(f"✅ Загружено {len(users)} пользователей с доступом.")
+        return users
+
+    except Exception as e:
+        logging.error(f"❌ Ошибка при загрузке пользователей из Google Sheets: {e}")
+        return set()
+
+# 🚀 Загружаем пользователей с подпиской при старте
+ALLOWED_USERS = load_allowed_users()
+
 SPREADSHEET_ID = "1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs"
 sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 
@@ -327,6 +350,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = query.from_user.id
 
+    if query.data == "start_menu":
+        await query.message.reply_text(
+            "🚀 Возвращаемся в меню! Выбери, что сделать:",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
     if query.data == "market_crypto":
         context.user_data["selected_market"] = "crypto"
         keyboard = InlineKeyboardMarkup([
@@ -385,7 +415,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(text_msg, parse_mode="Markdown")
 
+async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ Эта команда доступна только админу.")
+        return
 
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text("⚠ Используй так: /grant user_id username")
+        return
+
+    try:
+        target_user_id = int(args[0])
+        target_username = args[1]
+
+        # Добавляем в ALLOWED_USERS
+        ALLOWED_USERS.add(target_user_id)
+
+        # Записываем в Google Sheets
+        log_payment(target_user_id, target_username)
+
+        # Уведомляем пользователя
+        await notify_user_payment(target_user_id)
+
+        await update.message.reply_text(
+            f"✅ Пользователь {target_user_id} ({target_username}) добавлен в VIP и уведомлён."
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -996,9 +1055,17 @@ def cryptocloud_webhook():
         order_id = data.get("order_id")
         if order_id and order_id.startswith("user_"):
             user_id = int(order_id.replace("user_", ""))
-            ALLOWED_USERS.add(user_id)
-            print(f"🎉 Пользователь {user_id} активирован через POS!")
 
+            # добавляем в ALLOWED_USERS
+            ALLOWED_USERS.add(user_id)
+
+            # записываем в Google Sheets
+            username = data.get("metadata", {}).get("username", "") or ""  # можно брать из метаданных, если передавал
+            log_payment(user_id, username)
+
+            print(f"🎉 Пользователь {user_id} активирован через POS и записан в Google Sheets!")
+
+            # отправляем уведомление пользователю
             asyncio.run_coroutine_threadsafe(
                 notify_user_payment(user_id),
                 app.loop
@@ -1208,20 +1275,20 @@ def main():
     app.add_handler(risk_calc_handler)
     app.add_handler(setup_handler)
 
-    # ✅ Обычные обработчики команд
+    # ✅ Обычные команды
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("grant", grant))  # <-- вот тут твой новый /grant
 
-    # ✅ Inline кнопки, фото и универсальный текст
+    # ✅ Inline кнопки, фото и текст
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
 
-    # 🚀 Запускаем Telegram polling
+    # 🚀 Запускаем polling
     app.run_polling()
-
 
 def log_payment(user_id, username):
     try:
@@ -1233,6 +1300,10 @@ def log_payment(user_id, username):
 
 async def notify_user_payment(user_id):
     try:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚀 Перейти в меню", callback_data="start_menu")]
+        ])
+
         await app.bot.send_message(
             chat_id=user_id,
             text=(
@@ -1242,10 +1313,11 @@ async def notify_user_payment(user_id):
                 "👉 [Открыть курс в Google Drive](https://drive.google.com/drive/folders/1EEryIr4RDtqM4WyiMTjVP1XiGYJVxktA?clckid=3f56c187)"
             ),
             parse_mode="Markdown",
-            reply_markup=REPLY_MARKUP
+            reply_markup=keyboard
         )
+        logging.info(f"📩 Уведомление отправлено пользователю {user_id}")
     except Exception as e:
-        print(f"❌ Не удалось уведомить пользователя {user_id}: {e}")
+        logging.error(f"❌ Не удалось уведомить пользователя {user_id}: {e}")
 
 if __name__ == '__main__':
     main()
