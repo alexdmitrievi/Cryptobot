@@ -44,6 +44,9 @@ creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 gc = gspread.authorize(creds)
 
+SPREADSHEET_ID = "1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs"
+sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+
 def load_allowed_users():
     try:
         records = sheet.get_all_records()
@@ -66,9 +69,6 @@ def load_allowed_users():
 
 # 🚀 Загружаем пользователей с подпиской при старте
 ALLOWED_USERS = load_allowed_users()
-
-SPREADSHEET_ID = "1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs"
-sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
