@@ -445,6 +445,22 @@ async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
+async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ Эта команда доступна только админу.")
+        return
+
+    try:
+        global ALLOWED_USERS
+        ALLOWED_USERS = load_allowed_users()
+        await update.message.reply_text(
+            f"✅ ALLOWED_USERS обновлен. Загружено {len(ALLOWED_USERS)} пользователей из Google Sheets."
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при обновлении пользователей: {e}")
+        logging.error(f"[reload_users] Ошибка: {e}")
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     photo = update.message.photo[-1]
@@ -1232,6 +1248,8 @@ def main():
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
+    logging.info("🚀 GPT-Трейдер стартовал!")
+
     # 🧘 GPT-Психолог
     therapy_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)],
@@ -1308,7 +1326,8 @@ def main():
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(CommandHandler("grant", grant))  # <-- вот тут твой новый /grant
+    app.add_handler(CommandHandler("grant", grant))
+    app.add_handler(CommandHandler("reload_users", reload_users))  # новая команда для админа
 
     # ✅ Inline кнопки, фото и текст
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
