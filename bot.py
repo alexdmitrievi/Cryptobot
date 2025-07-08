@@ -250,38 +250,41 @@ async def generate_interpretation(update: Update, context: ContextTypes.DEFAULT_
     data = user_inputs[update.effective_user.id]
 
     prompt = (
-        f"Событие: {data['event']}\n"
-        f"Прогноз: {data['forecast']}\n"
-        f"Факт: {data['actual']}\n\n"
-        "Ты — профессиональный трейдер с опытом более 10 лет на рынках криптовалют, форекса и акций. "
-        "Твои прогнозы учитывают фундаментальные драйверы, ликвидность, поведение маркетмейкеров и психологию толпы.\n\n"
+        f"Event: {data['event']}\n"
+        f"Forecast: {data['forecast']}\n"
+        f"Actual: {data['actual']}\n\n"
+        "You are a professional trader with over 10 years of experience in cryptocurrency, forex, and stock markets. "
+        "Your analysis considers fundamental drivers, liquidity flows, market maker behavior, and crowd psychology.\n\n"
         "---\n\n"
-        "📊 Проанализируй строго по шагам:\n\n"
-        "1️⃣ Фундаментальный и технический фон:\n"
-        "- Как событие влияет на ликвидность, волатильность и ожидания рынка?\n"
-        "- Какие ключевые техуровни могут стать точками закупок или паники?\n"
-        "- Есть ли признаки готовности к развороту или продолжению тренда?\n\n"
-        "2️⃣ Дай два сценария:\n"
-        "🟢 Положительный (bullish): где вероятно зайдёт толпа, где начнут фиксироваться крупные игроки, какие уровни будут триггером для роста?\n"
-        "🔴 Негативный (bearish): где будут ставить стопы розничные, где маркетмейкер их выбьет, где цена может найти новый баланс?\n\n"
-        "3️⃣ Спрогнозируй краткосрочную реакцию на 1–3 дня:\n"
-        "- Что сделают розничные трейдеры?\n"
-        "- Какие заголовки могут появиться в СМИ и Twitter?\n"
-        "- Какие действия могут предпринять киты и фонды?\n\n"
-        "4️⃣ Составь краткий торговый план:\n"
-        "- СтОит ли входить? Если да:\n"
+        "📊 Analyze step by step:\n\n"
+        "1️⃣ Fundamental and technical context:\n"
+        "- How does this event impact liquidity, volatility, and market expectations?\n"
+        "- What key technical levels could become zones of accumulation or panic selling?\n"
+        "- Are there any signs of a possible reversal or continuation of the trend?\n\n"
+        "2️⃣ Provide two scenarios:\n"
+        "🟢 Bullish: where is the crowd likely to enter, where will large players start taking profits, "
+        "and what levels could trigger further growth?\n"
+        "🔴 Bearish: where are retail stop losses likely to be placed, where might market makers hunt them, "
+        "and where could the price find a new balance?\n\n"
+        "3️⃣ Forecast the short-term reaction for the next 1–3 days:\n"
+        "- How might retail traders react?\n"
+        "- What headlines could appear in the media or on Twitter?\n"
+        "- How might whales and funds respond?\n\n"
+        "4️⃣ Build a concise trading plan:\n"
+        "- Should the trader enter a position? If yes, specify:\n"
         "  🎯 Entry: $_____\n"
         "  🚨 StopLoss: $_____\n"
         "  💰 TakeProfit: $_____\n"
-        "- Какой % капитала задействовать, исходя из риска?\n\n"
-        "5️⃣ Что пользователь может упустить, если проигнорирует эту новость?\n"
-        "- Объясни прямым текстом, почему это событие критично.\n\n"
-        "✅ В конце дай итоговый сигнал для трейд-чата в 1–2 строках."
+        "- What percentage of capital to allocate given the risk?\n\n"
+        "5️⃣ What might the trader miss if they ignore this event?\n"
+        "- Explain in simple terms why this event is critical.\n\n"
+        "✅ Finally, give a short signal in 1–2 lines suitable for a trader's chat.\n\n"
+        "Answer strictly in Russian."
     )
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
         await update.message.reply_text(
@@ -298,39 +301,40 @@ async def generate_interpretation(update: Update, context: ContextTypes.DEFAULT_
 
 async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
-    style = context.user_data.get("style", "трейдинг")
-    tf = context.user_data.get("timeframe", "любом")
-    market = context.user_data.get("market", "общий")
+    style = context.user_data.get("style", "trading")
+    tf = context.user_data.get("timeframe", "any")
+    market = context.user_data.get("market", "general")
 
     prompt = (
-        f"Ты — профессиональный трейдер с опытом более 10 лет на криптовалютных и фондовых рынках. "
-        f"Отвечай строго, без воды, избегай слов 'возможно', 'по-видимому', 'скорее всего'. "
-        f"Говори прямо, точно и обоснованно.\n\n"
-        f"Контекст запроса:\n"
-        f"- Стиль торговли: {style}\n"
-        f"- Таймфрейм: {tf}\n"
-        f"- Рынок: {market}\n"
-        f"- Вопрос трейдера: {user_text}\n\n"
+        f"You are a professional trader with over 10 years of experience in cryptocurrency and stock markets. "
+        "Always answer precisely, avoid vague words like 'maybe', 'probably', 'seems'. "
+        "Speak directly, clearly, and justify your reasoning.\n\n"
+        f"Context of the question:\n"
+        f"- Trading style: {style}\n"
+        f"- Timeframe: {tf}\n"
+        f"- Market: {market}\n"
+        f"- Trader's question: {user_text}\n\n"
         "---\n\n"
-        "📊 Проанализируй строго по шагам:\n\n"
-        "1️⃣ **Ключевые факторы:**\n"
-        "- Расставь их по степени важности для этого запроса.\n\n"
-        "2️⃣ **Основной сценарий действий:**\n"
-        "- Где входить, куда ставить стоп, какие цели.\n\n"
-        "3️⃣ **Альтернативный сценарий:**\n"
-        "- Если основной не сработает, что сделать и как быстро это станет понятно?\n\n"
-        "4️⃣ **Риски и потенциал:**\n"
-        "- Какие ключевые риски и каков потенциал прибыли (примерное R:R)?\n\n"
-        "5️⃣ **Твой профессиональный вывод:**\n"
-        "- Что бы ты сделал прямо сейчас, будь на месте трейдера?\n\n"
-        "6️⃣ **Что ещё проверить?**\n"
-        "- Какие отчёты, стакан, кластера, новости или уровни подтвердят этот сценарий?\n\n"
-        "✅ В конце дай итоговый сигнал для трейд-чата в 1–2 строках."
+        "📊 Analyze step by step:\n\n"
+        "1️⃣ **Key factors:**\n"
+        "- List them in order of importance for this specific case.\n\n"
+        "2️⃣ **Main action scenario:**\n"
+        "- Where to enter, where to place stop loss, what are the targets.\n\n"
+        "3️⃣ **Alternative scenario:**\n"
+        "- If the main scenario fails, what to do and how quickly will it be clear?\n\n"
+        "4️⃣ **Risks and potential:**\n"
+        "- What are the key risks and approximate profit potential (estimated R:R)?\n\n"
+        "5️⃣ **Your professional conclusion:**\n"
+        "- What would you do right now if you were in the trader's position?\n\n"
+        "6️⃣ **What else to check?**\n"
+        "- Which reports, order book data, cluster analysis, news, or levels would confirm this scenario?\n\n"
+        "✅ At the end, give a short signal for the trader's chat in 1–2 lines.\n\n"
+        "Answer strictly in Russian."
     )
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
         await update.message.reply_text(
@@ -341,7 +345,7 @@ async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     except Exception as e:
-        logging.error(f"[GENERAL_RESPONSE] GPT ошибка: {e}")
+        logging.error(f"[GENERAL_RESPONSE] GPT error: {e}")
         await update.message.reply_text("⚠️ GPT не ответил. Попробуй позже.")
         return ConversationHandler.END
 
@@ -506,110 +510,117 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
-                "Ты — профессиональный трейдер Smart Money Concepts с опытом более 10 лет на криптовалютном рынке.\n\n"
-                "На графике TradingView должны быть включены:\n"
+                "You are a professional Smart Money Concepts (SMC) trader with over 10 years of experience in cryptocurrency markets.\n\n"
+                "Ensure the TradingView chart includes:\n"
                 "- Smart Money Concepts (SMC) Lux Algo\n"
-                "- LazyScalp Board для DV.\n\n"
-                "Если DV < 200M, напиши 🚫 и закончи.\n"
-                "Если DV ≥ 200M:\n"
-                "- Найди BOS, CHoCH, зоны ликвидности и OTE.\n"
-                "- Построй торговый план:\n"
+                "- LazyScalp Board for DV.\n\n"
+                "If DV < 200M, write 🚫 and stop.\n"
+                "If DV ≥ 200M:\n"
+                "- Identify BOS, CHoCH, liquidity zones and OTE.\n"
+                "- Build a detailed trading plan:\n"
                 "  🎯 Entry: $_____\n"
                 "  🚨 StopLoss: $_____\n"
-                "  💰 TakeProfit: $_____\n"
-                "- В конце дай краткий итоговый сигнал для трейд-чата в 2 строках."
+                "  💰 TakeProfit: $_____\n\n"
+                "✅ Finally, generate a concise 2-line summary in Russian suitable for a trader's chat.\n"
+                "Answer everything strictly in Russian."
             )
         else:
             prompt_text = (
-                "Ты — трейдер Smart Money Concepts на Forex с опытом более 10 лет.\n\n"
-                "Убедись, что включён Smart Money Concepts (SMC) Lux Algo.\n"
-                "- Найди BOS, CHoCH, OTE, зоны ликвидности.\n"
-                "- Построй план:\n"
+                "You are a Smart Money Concepts (SMC) trader on Forex with over 10 years of experience.\n\n"
+                "Ensure Smart Money Concepts (SMC) Lux Algo is active.\n"
+                "- Identify BOS, CHoCH, OTE and liquidity zones.\n"
+                "- Build a detailed plan:\n"
                 "  🎯 Entry: $_____\n"
                 "  🚨 StopLoss: $_____\n"
-                "  💰 TakeProfit: $_____\n"
-                "- Итоговый сигнал в 2 строках для трейд-чата."
+                "  💰 TakeProfit: $_____\n\n"
+                "✅ Finish with a short 2-line summary in Russian for a trader's chat.\n"
+                "Answer strictly in Russian."
             )
     elif selected_style == "swing":
         if selected_market == "crypto":
             prompt_text = (
-                "Ты — опытный swing трейдер на криптовалюте.\n\n"
-                "Проверь, что включены:\n"
-                "- Auto Support & Resistance или Lux Algo Levels\n"
+                "You are an experienced swing trader in cryptocurrency markets.\n\n"
+                "Ensure the chart includes:\n"
+                "- Auto Support & Resistance or Lux Algo Levels\n"
                 "- Volume Profile\n"
                 "- LazyScalp Board.\n"
-                "Если DV < 200M, напиши 🚫 и не строй сценарий.\n"
-                "Если DV ≥ 200M:\n"
-                "- Определи накопления, уровни.\n"
-                "- Построй план:\n"
+                "If DV < 200M, write 🚫 and skip analysis.\n"
+                "If DV ≥ 200M:\n"
+                "- Identify accumulation zones and key levels.\n"
+                "- Build a detailed plan:\n"
                 "  🎯 Entry: $_____\n"
                 "  🚨 StopLoss: $_____\n"
-                "  💰 TakeProfit: $_____\n"
-                "- Итог в 2 строках для трейд-чата."
+                "  💰 TakeProfit: $_____\n\n"
+                "✅ Conclude with a concise 2-line summary in Russian for a trader's chat.\n"
+                "Answer strictly in Russian."
             )
         else:
             prompt_text = (
-                "Ты — swing трейдер на Forex.\n\n"
-                "Проверь, что включены:\n"
-                "- Auto Support & Resistance или Lux Algo Levels\n"
-                "- Volume Profile (если доступно)\n"
-                "- RSI или Stochastic.\n"
-                "- Определи накопления, уровни.\n"
-                "- Построй план:\n"
+                "You are a swing trader on Forex.\n\n"
+                "Ensure the chart includes:\n"
+                "- Auto Support & Resistance or Lux Algo Levels\n"
+                "- Volume Profile if available\n"
+                "- RSI or Stochastic indicators.\n"
+                "- Identify accumulation zones and levels.\n"
+                "- Build a detailed plan:\n"
                 "  🎯 Entry: $_____\n"
                 "  🚨 StopLoss: $_____\n"
-                "  💰 TakeProfit: $_____\n"
-                "- Итог в 2 строках для трейд-чата."
+                "  💰 TakeProfit: $_____\n\n"
+                "✅ Finish with a concise 2-line summary in Russian for a trader's chat.\n"
+                "Answer strictly in Russian."
             )
     elif selected_style == "breakout":
         if selected_market == "crypto":
             prompt_text = (
-                "Ты — скальпер и интрадей трейдер на крипте.\n\n"
-                "Проверь, что включены:\n"
-                "- Range Detection или Lux Algo\n"
-                "- LazyScalp Board для объёмов.\n"
-                "Если DV < 200M, напиши 🚫 и закончи.\n"
-                "Если DV ≥ 200M:\n"
-                "- Найди диапазон консолидации.\n"
-                "- Дай два сценария breakout:\n"
-                "  📈 Вверх:\n"
+                "You are a scalper and intraday trader in cryptocurrency markets.\n\n"
+                "Ensure the chart includes:\n"
+                "- Range Detection or Lux Algo\n"
+                "- LazyScalp Board for volumes.\n"
+                "If DV < 200M, write 🚫 and stop.\n"
+                "If DV ≥ 200M:\n"
+                "- Find the consolidation range.\n"
+                "- Provide two breakout scenarios:\n"
+                "  📈 Up:\n"
                 "    🎯 Entry: $_____\n"
                 "    🚨 StopLoss: $_____\n"
                 "    💰 TakeProfit: $_____\n"
-                "  📉 Вниз:\n"
+                "  📉 Down:\n"
                 "    🎯 Entry: $_____\n"
                 "    🚨 StopLoss: $_____\n"
-                "    💰 TakeProfit: $_____\n"
-                "- Итог для трейд-чата в 2 строках."
+                "    💰 TakeProfit: $_____\n\n"
+                "✅ Conclude with a short 2-line summary in Russian for a trader's chat.\n"
+                "Answer strictly in Russian."
             )
         else:
             prompt_text = (
-                "Ты — скальпер и интрадей трейдер на Forex.\n\n"
-                "Проверь, что включён индикатор Range (или Lux Algo Levels) и Volume Profile.\n"
-                "- Найди консолидацию.\n"
-                "- Дай два сценария breakout вверх и вниз:\n"
-                "  📈 Вверх:\n"
+                "You are a scalper and intraday trader on Forex.\n\n"
+                "Ensure the chart includes Range Detection or Lux Algo Levels and Volume Profile.\n"
+                "- Identify the consolidation range.\n"
+                "- Provide two breakout scenarios up and down:\n"
+                "  📈 Up:\n"
                 "    🎯 Entry: $_____\n"
                 "    🚨 StopLoss: $_____\n"
                 "    💰 TakeProfit: $_____\n"
-                "  📉 Вниз:\n"
+                "  📉 Down:\n"
                 "    🎯 Entry: $_____\n"
                 "    🚨 StopLoss: $_____\n"
-                "    💰 TakeProfit: $_____\n"
-                "- Итог для трейд-чата в 2 строках."
+                "    💰 TakeProfit: $_____\n\n"
+                "✅ End with a concise 2-line summary in Russian for a trader's chat.\n"
+                "Answer strictly in Russian."
             )
     else:
         prompt_text = (
-            "Ты — трейдер с опытом более 10 лет на крипте и Forex.\n\n"
-            "Для крипты убедись, что есть LazyScalp Board и Lux Algo Levels.\n"
-            "Если DV < 200M — 🚫.\n"
-            "Для крипты с DV ≥ 200M и для Forex:\n"
-            "- Определи тренд, накопления.\n"
-            "- Построй план:\n"
+            "You are a trader with over 10 years of experience in crypto and Forex markets.\n\n"
+            "For crypto ensure LazyScalp Board and Lux Algo Levels are enabled.\n"
+            "If DV < 200M, write 🚫.\n"
+            "For crypto with DV ≥ 200M and for Forex:\n"
+            "- Determine trend and accumulation zones.\n"
+            "- Build a detailed plan:\n"
             "  🎯 Entry: $_____\n"
             "  🚨 StopLoss: $_____\n"
-            "  💰 TakeProfit: $_____\n"
-            "- Итог для трейд-чата в 2 строках."
+            "  💰 TakeProfit: $_____\n\n"
+            "✅ Conclude with a concise 2-line summary in Russian for a trader's chat.\n"
+            "Answer strictly in Russian."
         )
 
     try:
@@ -710,35 +721,36 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     prompt = (
-        "Ты — профессиональный криптотрейдер с опытом более 10 лет. "
-        "На изображении представлен график криптовалюты на таймфрейме 4H.\n\n"
-        "📊 Выполни строгий пошаговый анализ:\n\n"
-        "1️⃣ **Основные рыночные факторы:**\n"
-        "- Определи тренд (вверх, вниз или боковик).\n"
-        "- Найди важные уровни поддержки и сопротивления.\n"
-        "- Есть ли очевидные паттерны (double-top, двойное дно, флаг и т.д.)?\n"
-        "- Что показывают объёмы относительно этих уровней?\n\n"
-        "2️⃣ **Структура рынка:**\n"
-        "- Есть ли признаки накопления перед движением?\n"
-        "- Видны ли сигналы разворота или усиления текущего тренда?\n"
-        "- Были ли похожие ситуации на истории графика этого актива?\n\n"
-        f"🌐 **Учитывай фундаментальный фон:** {macro}\n\n"
-        "3️⃣ **Построй два сценария:**\n"
-        "🟢 **Пробой вверх:**\n"
+        "You are a professional crypto trader with over 10 years of experience. "
+        "Analyze the provided chart carefully and perform a structured step-by-step analysis.\n\n"
+        "📊 Step-by-step:\n\n"
+        "1️⃣ **Core market factors:**\n"
+        "- Identify the trend (uptrend, downtrend, sideways).\n"
+        "- Find major support and resistance levels.\n"
+        "- Are there clear patterns (double top, double bottom, flag, etc.)?\n"
+        "- What do volumes show near these levels?\n\n"
+        "2️⃣ **Market structure:**\n"
+        "- Are there signs of accumulation before a move?\n"
+        "- Any signals of a reversal or strengthening of the current trend?\n"
+        "- Have similar situations occurred in this asset's history?\n\n"
+        f"🌐 **Also consider this fundamental background:** {macro}\n\n"
+        "3️⃣ **Build two scenarios:**\n"
+        "🟢 **Breakout upwards:**\n"
         "- 🎯 Entry: $_____\n"
         "- 🚨 StopLoss: $_____\n"
         "- 💰 TakeProfit: $_____\n"
-        "- Оцени вероятность успеха (коротко в %).\n\n"
-        "🔴 **Пробой вниз:**\n"
+        "- Briefly estimate probability of success (in %).\n\n"
+        "🔴 **Breakdown downwards:**\n"
         "- 🎯 Entry: $_____\n"
         "- 🚨 StopLoss: $_____\n"
         "- 💰 TakeProfit: $_____\n"
-        "- Оцени вероятность успеха (коротко в %).\n\n"
-        "4️⃣ **Что дополнительно стоит проверить для подтверждения сценария:**\n"
-        "- Профиль объёмов, стакан (лимитные заявки), кластера крупных сделок, актуальные новости.\n\n"
-        "✅ В конце дай краткий сигнал для трейд-чата в 1–2 строках, например:\n"
-        "> LONG от $___ со стопом $___, цели $___ — вероятно накопление перед импульсом.\n\n"
-        "Also add short bullet summary in English if needed for clarity."
+        "- Briefly estimate probability of success (in %).\n\n"
+        "4️⃣ **What else should the trader check to confirm scenarios:**\n"
+        "- Volume Profile, order book (limit orders), large cluster trades, and latest news.\n\n"
+        "✅ Finish with a concise 2-line signal for a trader's chat, e.g.:\n"
+        "> LONG from $___, stop at $___, targets $___ — likely accumulation before impulse.\n\n"
+        "Also provide a short bullet summary in English if needed for clarity.\n"
+        "Answer everything strictly in Russian."
     )
 
     try:
@@ -772,7 +784,6 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ Не удалось составить прогноз. Попробуй позже или загрузи другой скрин."
         )
-
 
 def fetch_price_from_coingecko(coin_symbol: str) -> float | None:
     try:
@@ -819,39 +830,39 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
     user_text = update.message.text.strip()
 
     prompt = (
-        f"Ты — профессиональный инвестиционный стратег с опытом более 20 лет на рынках акций, облигаций, ETF, сырья и криптовалют. "
-        f"Ты управлял активами HNWI (High-Net-Worth Individuals) и крупными портфелями, твоя задача — разработать глубокую, "
-        f"структурированную и персонализированную инвестиционную стратегию исходя из запроса клиента.\n\n"
-        f"Запрос клиента: {user_text}\n\n"
-        "🔍 Работай пошагово и подробно, избегай общих фраз, клише и бессмысленных советов. "
-        "Твой ответ должен быть максимально конкретным и выглядеть как работа профессионального консультанта.\n\n"
+        "You are a professional investment strategist with over 20 years of experience across equities, bonds, ETFs, commodities, and cryptocurrencies. "
+        "You have managed portfolios for HNWI (High-Net-Worth Individuals) and institutional clients. "
+        "Your task is to develop a deep, structured, and personalized investment strategy based on the client's request.\n\n"
+        f"Client request: {user_text}\n\n"
+        "🔍 Work step by step in detail. Avoid generic phrases, clichés, or meaningless advice. "
+        "Your answer must be precise and look like the work of a professional consultant.\n\n"
         "---\n\n"
-        "📊 Структура твоего ответа:\n\n"
-        "1️⃣ **Диагностика профиля клиента:**\n"
-        "- Определи инвестиционный горизонт (короткий, среднесрочный, долгосрочный) на основе запроса.\n"
-        "- Определи риск-профиль: агрессивный, умеренный или консервативный (и объясни почему).\n"
-        "- Сформулируй основную цель (капитализация, защита, дивидендный доход и т.д.).\n\n"
-        "2️⃣ **Оптимальная структура портфеля:**\n"
-        "- Приведи конкретные классы активов (акции, ETF, облигации, крипта, сырьё) с процентными долями.\n"
-        "- Для каждого класса укажи краткое обоснование, почему именно такая доля.\n\n"
-        "3️⃣ **Макроэкономический и рыночный контекст:**\n"
-        "- Перечисли ключевые экономические риски и тренды, которые сейчас влияют на выбранную стратегию.\n"
-        "- Объясни, как портфель защищён или, наоборот, подвержен этим факторам.\n\n"
-        "4️⃣ **Детализированный пошаговый план:**\n"
-        "- Какие действия сделать сейчас (например открыть ИИС, брокерский счёт, настроить автопополнение и т.д.).\n"
-        "- Когда пересматривать портфель (ежеквартально, раз в полгода и почему).\n"
-        "- Какие индикаторы и отчёты отслеживать для ребалансировки.\n\n"
-        "5️⃣ **Сценарный анализ:**\n"
-        "- Приведи 2 сценария: «Рынок растёт» и «Рынок падает». Опиши, что делать в каждом случае.\n\n"
-        "6️⃣ **Финальный вывод:**\n"
-        "- Сформулируй в 2-3 строках короткий и уверенный вывод для чата трейдеров (например: "
-        "«🚀 Стратегия подходит для роста с горизонтом 3+ лет, риск умеренный, пересмотр портфеля раз в полгода»).\n\n"
-        "⚠️ Отвечай строго на русском языке, избегай лишней воды, пиши ёмко и профессионально."
+        "📊 Structure your answer as follows:\n\n"
+        "1️⃣ **Client profile diagnostics:**\n"
+        "- Determine the investment horizon (short, medium, long-term) based on the request.\n"
+        "- Determine the risk profile: aggressive, moderate, or conservative (and explain why).\n"
+        "- Formulate the main goal (capital growth, capital preservation, dividend income, etc.).\n\n"
+        "2️⃣ **Optimal portfolio structure:**\n"
+        "- Provide specific asset classes (stocks, ETFs, bonds, crypto, commodities) with approximate percentage allocations.\n"
+        "- For each asset class, give a brief rationale for why this proportion.\n\n"
+        "3️⃣ **Macroeconomic and market context:**\n"
+        "- List the key economic risks and trends currently impacting this strategy.\n"
+        "- Explain how this portfolio is protected from or exposed to these factors.\n\n"
+        "4️⃣ **Detailed step-by-step plan:**\n"
+        "- What actions should be taken now (e.g., open an investment account, set up auto-deposits).\n"
+        "- How often to review the portfolio (quarterly, semi-annually, and why).\n"
+        "- Which indicators or reports to monitor for rebalancing.\n\n"
+        "5️⃣ **Scenario analysis:**\n"
+        "- Provide 2 scenarios: 'Market rises' and 'Market declines'. Describe what to do in each case.\n\n"
+        "6️⃣ **Final summary:**\n"
+        "- Formulate a concise 2-3 line conclusion suitable for a trader's chat, for example: "
+        "'🚀 Strategy fits a 3+ year horizon, moderate risk, portfolio review every 6 months.'\n\n"
+        "Answer everything strictly in Russian. Be succinct, professional, and avoid unnecessary fluff."
     )
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
         await update.message.reply_text(
@@ -860,7 +871,7 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         )
         context.user_data.clear()
     except Exception as e:
-        logging.error(f"[handle_invest_question] GPT ошибка: {e}")
+        logging.error(f"[handle_invest_question] GPT error: {e}")
         await update.message.reply_text("⚠️ Не удалось составить стратегию. Попробуй позже.")
 
 async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -868,19 +879,18 @@ async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     term = update.message.text.strip()
 
     prompt = (
-        f"Ты — профессиональный трейдер и преподаватель с опытом более 10 лет.\n"
-        f"Объясни простыми словами, что такое '{term}'. "
-        f"Объяснение должно быть так, чтобы понял даже новичок без опыта.\n\n"
-        f"- Дай короткое, ясное определение в одном-двух предложениях.\n"
-        f"- Приведи короткую аналогию (например с магазином, спортом или бытом), чтобы понятие стало интуитивно ясным.\n"
-        f"- В конце дай конкретный пример из практики трейдинга, где используется этот термин.\n\n"
-        f"Не используй лишнюю воду и профессиональный жаргон без пояснения. "
-        f"Отвечай только на русском языке."
+        f"You are a professional trader and educator with over 10 years of experience.\n\n"
+        f"Explain in very simple terms what '{term}' means, as if teaching someone who is a complete beginner with zero trading experience.\n\n"
+        "- Provide a short, clear definition in one or two sentences.\n"
+        "- Then give a simple analogy (like comparing to a store, sports, or everyday life) so the concept becomes intuitive.\n"
+        "- Finally, give a concrete example from trading practice where this term is used.\n\n"
+        "Avoid unnecessary fluff and do not use professional jargon without immediately explaining it.\n"
+        "Answer strictly in Russian."
     )
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
         await update.message.reply_text(
@@ -888,7 +898,7 @@ async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=REPLY_MARKUP
         )
     except Exception as e:
-        logging.error(f"[DEFINITION] GPT ошибка: {e}")
+        logging.error(f"[DEFINITION] GPT error: {e}")
         await update.message.reply_text("⚠️ Не удалось объяснить термин. Попробуй позже.")
 
 async def handle_forecast_by_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -897,35 +907,35 @@ async def handle_forecast_by_price(update: Update, context: ContextTypes.DEFAULT
     price = fetch_price_from_coingecko(coin)
 
     if price:
-        price_line = f"Актуальная цена {coin} — ${price:.2f}.\n\n"
+        price_line = f"The current price of {coin} is ${price:.2f}.\n\n"
     else:
-        price_line = f"(❗️ Цена {coin} не найдена. Уточни её на CoinMarketCap или Binance.)\n\n"
+        price_line = f"(❗ Price for {coin} not found. Please check it on CoinMarketCap or Binance.)\n\n"
 
     prompt = (
         price_line +
-        f"Ты — профессиональный трейдер с опытом более 10 лет на криптовалютном рынке.\n\n"
-        "📊 Проанализируй {coin} строго по шагам:\n\n"
-        "1️⃣ **Общая структура рынка:**\n"
-        "- Определи тренд (вверх, вниз, боковик) и текущее настроение.\n"
-        "- Расставь ключевые факторы по степени влияния (объёмы, ликвидность, новости).\n\n"
-        "2️⃣ **Уровни:**\n"
-        "- Укажи ближайшие уровни поддержки и сопротивления, напиши конкретные цифры.\n\n"
-        "3️⃣ **Сценарии на 1–3 дня:**\n"
-        "🟢 **Агрессивный:** Entry, StopLoss, TakeProfit, вероятность успеха.\n"
-        "🟠 **Консервативный:** Entry, StopLoss, TakeProfit, вероятность успеха.\n\n"
-        "4️⃣ **Риски и подходящий стиль входа:**\n"
-        "- Какие риски здесь ключевые?\n"
-        "- Что лучше подходит: скальпинг, интрадей или свинг?\n\n"
-        "5️⃣ **Короткая торговая рекомендация:**\n"
-        "- В 1–2 строках, как сигнал для трейд-чата, например: LONG от $___ со стопом $___, цели $___.\n\n"
-        "6️⃣ **Дополнительно:**\n"
-        "- Какие данные ещё стоит проверить трейдеру перед входом (например стакан, отчёты китов, открытый интерес)?\n\n"
-        "Отвечай строго по пунктам и только на русском языке."
+        f"You are a professional trader with over 10 years of experience in the cryptocurrency market.\n\n"
+        f"📊 Analyze {coin} strictly step by step:\n\n"
+        "1️⃣ **Overall market structure:**\n"
+        "- Determine the trend (up, down, sideways) and current sentiment.\n"
+        "- List key factors in order of impact (volumes, liquidity, news).\n\n"
+        "2️⃣ **Levels:**\n"
+        "- Identify the nearest support and resistance levels and provide concrete numbers.\n\n"
+        "3️⃣ **Scenarios for the next 1–3 days:**\n"
+        "🟢 **Aggressive:** Entry, StopLoss, TakeProfit, probability of success.\n"
+        "🟠 **Conservative:** Entry, StopLoss, TakeProfit, probability of success.\n\n"
+        "4️⃣ **Risks and suitable entry style:**\n"
+        "- What are the main risks here?\n"
+        "- Is this better suited for scalping, intraday, or swing trading?\n\n"
+        "5️⃣ **Short trading recommendation:**\n"
+        "- In 1–2 lines, like a signal for a trader's chat, e.g.: LONG from $___, stop at $___, targets at $___.\n\n"
+        "6️⃣ **Additional checks:**\n"
+        "- What else should the trader review before entering (order book, whale reports, open interest)?\n\n"
+        "Answer everything strictly in Russian, following these points exactly."
     )
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
         await update.message.reply_text(
@@ -935,7 +945,7 @@ async def handle_forecast_by_price(update: Update, context: ContextTypes.DEFAULT
             parse_mode="Markdown"
         )
     except Exception as e:
-        logging.error(f"[FORECAST_BY_PRICE] GPT ошибка: {e}")
+        logging.error(f"[FORECAST_BY_PRICE] GPT error: {e}")
         await update.message.reply_text("⚠️ Не удалось получить прогноз. Попробуй позже.")
 
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1045,23 +1055,25 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
         return ConversationHandler.END
 
     prompt = (
-        "Ты — GPT-психолог для трейдеров, с доброй иронией и лёгким юмором. "
-        "Помогаешь справляться с лудоманией, сериями убытков и эмоциональными качелями. "
-        "Избегай гендерных обращений (например 'братан', 'подруга'), используй нейтральные: 'друг', 'коллега', 'трейдер'.\n\n"
-        f"Сообщение пользователя:\n{user_text}\n\n"
-        "📌 Ответь строго по структуре:\n\n"
-        "1️⃣ **Эмпатично отреагируй**, но без жалости. Покажи, что понимаешь чувство проигрыша.\n\n"
-        "2️⃣ **Дай метафору**, чтобы трейдер понял, что просадка — это не конец. Пример: 'это как натяжение рогатки перед выстрелом'.\n\n"
-        "3️⃣ **Приведи факт или историю**, что даже у топовых трейдеров бывают серии минусов (например у Сороса или Друкенмиллера)."
-        " Это даст уверенность, что неудачи бывают у всех.\n\n"
-        "4️⃣ **Дай одно простое микро-действие**, чтобы почувствовать контроль прямо сейчас: например закрыть терминал, записать эмоции, выйти на воздух.\n\n"
-        "5️⃣ **Закрой всё трейдинг-мемом или смешной короткой цитатой**, например: '— Ты держишь позицию? — Нет, я держу слёзы 😭'.\n\n"
-        "⚠️ Не используй общие фразы типа 'не переживай' или 'всё будет хорошо'. Будь конкретным, тёплым и чуть ироничным. Отвечай только на русском языке."
+        "You are a GPT-psychologist for traders. "
+        "You respond with warm irony and light humor, helping them cope with gambling addiction tendencies, losing streaks, and emotional swings. "
+        "Avoid gender-specific words like 'bro' or 'girl', use neutral terms such as 'friend', 'colleague', or 'trader'.\n\n"
+        f"User's message:\n{user_text}\n\n"
+        "📌 Follow this exact structure:\n\n"
+        "1️⃣ **React empathetically**, but without pity. Show you understand the feeling of losses.\n\n"
+        "2️⃣ **Provide a metaphor** to help the trader realize that a drawdown isn't the end. "
+        "For example: 'it's like pulling back a slingshot before it fires.'\n\n"
+        "3️⃣ **Give a fact or story** showing that even top traders have losing streaks (like Soros or Druckenmiller). "
+        "This builds confidence that everyone experiences losses.\n\n"
+        "4️⃣ **Suggest one simple micro-action** to feel in control right now, like closing the terminal, journaling emotions, or stepping outside.\n\n"
+        "5️⃣ **Finish with a trading meme or funny short quote**, e.g.: '— Are you holding a position? — No, I'm holding back tears 😭.'\n\n"
+        "⚠️ Avoid generic phrases like 'don't worry' or 'everything will be fine'. Be specific, warm, and slightly ironic.\n"
+        "Answer everything strictly in Russian."
     )
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
 
