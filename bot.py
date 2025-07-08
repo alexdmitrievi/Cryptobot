@@ -349,6 +349,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = query.from_user.id
 
+    logging.info(f"[button_handler] Пользователь {user_id} нажал кнопку: {query.data}")
+
     if query.data == "start_menu":
         await query.message.reply_text(
             "🚀 Возвращаемся в меню! Выбери, что сделать:",
@@ -379,7 +381,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         market = context.user_data.get("selected_market")
         text_msg = (
             "📈 *Smart Money Concepts (SMC)*\n\n"
-            "📌 Для крипты включи LazyScalp Board в TradingView и убедись что DV > 200M.\n"
+            "📌 Для крипты включи LazyScalp Board и убедись что DV > 200M.\n"
             "Для форекса DV не нужен.\n\n"
             "🖼 Пришли скрин — дам план входа, стоп и тейки."
             if market == "crypto"
@@ -413,6 +415,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  "DV не нужен. Пришли скрин для анализа breakout."
         )
         await query.edit_message_text(text_msg, parse_mode="Markdown")
+
+    elif query.data == "forecast_by_image":
+        await query.message.reply_text(
+            "📸 Пришли скриншот графика — я сделаю технический разбор и прогноз."
+        )
 
 async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -921,6 +928,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username
 
+    logging.info(f"[handle_main] Пользователь {user_id} нажал кнопку: {text}")
+
     # Разрешаем бесплатно только кнопки для оплаты / информации о подписке
     if user_id not in ALLOWED_USERS and text not in ["💰 Купить", "ℹ️ О боте"]:
         await update.message.reply_text(
@@ -943,7 +952,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "🎯 Риск":
-        return
+        return await start_risk_calc(update, context)
 
     if text == "🌱 Психолог":
         return await start_therapy(update, context)
