@@ -474,8 +474,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await photo.get_file()
     original_photo_bytes = await file.download_as_bytearray()
 
-    image = Image.open(io.BytesIO(original_photo_bytes)).convert("RGB")
-    buffer = io.BytesIO()
+    image = Image.open(BytesIO(original_photo_bytes)).convert("RGB")
+    buffer = BytesIO()
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
