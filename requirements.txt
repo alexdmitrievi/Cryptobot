@@ -1,8 +1,10 @@
-python-telegram-bot[ext]==21.1
-openai>=1.0.0
+python-telegram-bot[ext] ==21.1
+openai >=1.0.0
 requests
 python-dotenv
 pillow
 gspread
 oauth2client
 flask
+aiocron
+
