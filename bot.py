@@ -8,7 +8,7 @@ import json
 import requests
 import hmac
 import hashlib
-import base64  # <-- теперь есть base64
+import base64
 from datetime import datetime
 from io import BytesIO
 
@@ -34,6 +34,9 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 # 🔥 Flask для webhook от CryptoCloud POS
 from flask import Flask, request, jsonify
+
+# 🔄 AioCron для еженедельных рассылок
+import aiocron
 
 # ✅ Подключение к Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -438,6 +441,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "forecast_by_image":
         await query.message.reply_text(
             "📸 Пришли скриншот графика — я сделаю технический разбор и прогноз."
+        )
+
+    # ✅ Новый блок для сбора email
+    elif query.data == "get_email":
+        context.user_data["awaiting_email"] = True
+        await query.message.reply_text(
+            "✉️ Напиши свой email для получения секретного PDF со стратегиями:"
         )
 
 async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1263,6 +1273,34 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ✅ Новый блок — обработка email
+    if context.user_data.get("awaiting_email"):
+        email = update.message.text.strip()
+        if "@" in email and "." in email:
+            try:
+                # Запишем user_id, username и email в Google Sheets
+                sheet.append_row([
+                    str(update.effective_user.id),
+                    update.effective_user.username or "",
+                    email
+                ])
+                await update.message.reply_text(
+                    "✅ Email сохранён! Бонус придёт в ближайшее время."
+                )
+            except Exception as e:
+                logging.error(f"[EMAIL_SAVE] {e}")
+                await update.message.reply_text(
+                    "⚠️ Не удалось сохранить. Попробуй позже."
+                )
+        else:
+            await update.message.reply_text(
+                "❌ Похоже, это не email. Попробуй снова."
+            )
+            return  # оставим ожидание email
+        context.user_data.pop("awaiting_email", None)
+        return
+
+    # ✅ Старые блоки без изменений
     if context.user_data.get("awaiting_potential"):
         await handle_potential(update, context)
     elif context.user_data.get("awaiting_macro_text"):
@@ -1293,6 +1331,30 @@ def main():
 
     logging.info("🚀 GPT-Трейдер стартовал!")
 
+    # ✅ Добавляем еженедельную рассылку через aiocron
+    import aiocron
+
+    @aiocron.crontab('0 12 * * mon')
+    async def weekly_broadcast():
+        message_text = (
+            "🚀 Еженедельный обзор:\n"
+            "• BTC сейчас около $108,700 — зона интереса $108,000–109,000, следи за реакцией на объёмах.\n"
+            "• ETH держится на $2,576 — ищем покупки в диапазоне $2,520–2,600.\n"
+            "• Стопы держи коротко, цели фиксируй по R:R ~2:1."
+        )
+        success, fails = 0, []
+        for vip_id in ALLOWED_USERS:
+            try:
+                await app.bot.send_message(
+                    chat_id=vip_id,
+                    text=message_text
+                )
+                success += 1
+            except Exception as e:
+                logging.error(f"[WEEKLY BROADCAST] {vip_id}: {e}")
+                fails.append(vip_id)
+        logging.info(f"✅ Рассылка завершена: {success} успехов, {len(fails)} ошибок.")
+
     # 🧘 GPT-Психолог
     therapy_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)],
@@ -1306,7 +1368,7 @@ def main():
         ]
     )
 
-    # 🧠 Помощь профессионала (аналитика)
+    # 🧠 Помощь профессионала
     help_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧠 Помощь профессионала$"), help_pro)],
         states={
@@ -1341,7 +1403,7 @@ def main():
         ]
     )
 
-    # 📌 Сетап (только для админа)
+    # 📌 Сетап
     setup_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📌 Сетап$"), handle_main)],
         states={
@@ -1358,21 +1420,19 @@ def main():
         ]
     )
 
-    # ✅ Регистрируем все ConversationHandlers
+    # ✅ Регистрируем всё
     app.add_handler(help_conv_handler)
     app.add_handler(therapy_handler)
     app.add_handler(risk_calc_handler)
     app.add_handler(setup_handler)
 
-    # ✅ Обычные команды
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(CommandHandler("grant", grant))
-    app.add_handler(CommandHandler("reload_users", reload_users))  # новая команда для админа
+    app.add_handler(CommandHandler("reload_users", reload_users))
 
-    # ✅ Inline кнопки, фото и текст
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
@@ -1391,7 +1451,8 @@ def log_payment(user_id, username):
 async def notify_user_payment(user_id):
     try:
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚀 Перейти в меню", callback_data="start_menu")]
+            [InlineKeyboardButton("🚀 Перейти в меню", callback_data="start_menu")],
+            [InlineKeyboardButton("🎯 Пригласить друга и получить бонус", url="https://твоя_реферальная_страница.com")]
         ])
 
         await app.bot.send_message(
@@ -1400,7 +1461,8 @@ async def notify_user_payment(user_id):
                 "✅ Оплата получена! Подписка активирована навсегда 🎉\n\n"
                 "🤖 GPT-помощник доступен: задавай вопросы, загружай графики, получай прогнозы.\n\n"
                 "🎁 Твой бонус — курс по скальпингу и позиционке:\n"
-                "👉 [Открыть курс в Google Drive](https://drive.google.com/drive/folders/1EEryIr4RDtqM4WyiMTjVP1XiGYJVxktA?clckid=3f56c187)"
+                "👉 [Открыть курс в Google Drive](https://drive.google.com/drive/folders/1EEryIr4RDtqM4WyiMTjVP1XiGYJVxktA?clckid=3f56c187)\n\n"
+                "🎯 Поделись с другом и получи секретный PDF по стратегиям!"
             ),
             parse_mode="Markdown",
             reply_markup=keyboard
