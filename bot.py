@@ -8,6 +8,7 @@ import json
 import requests
 import hmac
 import hashlib
+import base64  # <-- теперь есть base64
 from datetime import datetime
 from io import BytesIO
 
@@ -380,13 +381,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["selected_strategy"] = "smc"
         market = context.user_data.get("selected_market")
         text_msg = (
-            "📈 *Smart Money Concepts (SMC)*\n\n"
-            "📌 Для крипты включи LazyScalp Board и убедись что DV > 200M.\n"
-            "Для форекса DV не нужен.\n\n"
-            "🖼 Пришли скрин — дам план входа, стоп и тейки."
+            "📈 *Smart Money Concepts (SMC) для крипты*\n\n"
+            "📌 Включи на графике:\n"
+            "- Smart Money Concepts (SMC) Lux Algo\n"
+            "- LazyScalp Board (DV > 200M)\n\n"
+            "Пришли скрин — дам план входа, стоп и тейки."
             if market == "crypto"
-            else "📈 *Smart Money Concepts (SMC)* для форекса.\n\n"
-                 "DV не нужен. Пришли скрин — сделаю анализ SMC."
+            else "📈 *Smart Money Concepts (SMC) для форекса*\n\n"
+                 "📌 Убедись, что включён Smart Money Concepts (SMC) Lux Algo.\n"
+                 "DV не нужен.\n\n"
+                 "Пришли скрин — сделаю анализ SMC."
         )
         await query.edit_message_text(text_msg, parse_mode="Markdown")
 
@@ -394,12 +398,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["selected_strategy"] = "swing"
         market = context.user_data.get("selected_market")
         text_msg = (
-            "📈 *Позиционка (Swing)* для крипты.\n\n"
-            "📌 Включи LazyScalp Board, DV > 200M.\n"
+            "📈 *Позиционка (Swing) для крипты*\n\n"
+            "📌 Включи на графике:\n"
+            "- Lux Algo Levels\n"
+            "- LazyScalp Board (DV > 200M)\n"
+            "- Volume Profile\n\n"
             "Пришли скрин для анализа swing."
             if market == "crypto"
-            else "📈 *Позиционка (Swing)* для форекса.\n\n"
-                 "DV не нужен. Пришли скрин — дам сценарии."
+            else "📈 *Позиционка (Swing) для форекса*\n\n"
+                 "📌 Убедись, что включены:\n"
+                 "- Lux Algo Levels или Auto Support & Resistance\n"
+                 "- RSI / Stochastic\n\n"
+                 "Пришли скрин — дам сценарий swing."
         )
         await query.edit_message_text(text_msg, parse_mode="Markdown")
 
@@ -407,12 +417,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["selected_strategy"] = "breakout"
         market = context.user_data.get("selected_market")
         text_msg = (
-            "📈 *Пробой диапазона (Breakout)* для крипты.\n\n"
-            "📌 Включи LazyScalp Board и убедись DV > 200M.\n"
-            "Пришли скрин — найду зону флэта и дам сценарии."
+            "📈 *Пробой диапазона (Breakout) для крипты*\n\n"
+            "📌 Включи на графике:\n"
+            "- Range Detection\n"
+            "- LazyScalp Board (DV > 200M)\n\n"
+            "Пришли скрин — найду диапазон и дам сценарии."
             if market == "crypto"
-            else "📈 *Пробой диапазона (Breakout)* для форекса.\n\n"
-                 "DV не нужен. Пришли скрин для анализа breakout."
+            else "📈 *Пробой диапазона (Breakout) для форекса*\n\n"
+                 "📌 Убедись, что включены:\n"
+                 "- Range Detection или Lux Algo Levels\n"
+                 "- RSI / Stochastic\n\n"
+                 "Пришли скрин — построю два сценария breakout."
         )
         await query.edit_message_text(text_msg, parse_mode="Markdown")
 
@@ -940,7 +955,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reset_commands = [
         "🎯 Риск", "🌱 Психолог", "🔍 Анализ",
-        "💡 Стратегия", "📚 Термин", 
+        "💡 Стратегия", "📚 Термин",
         "🚀 Сигнал", "📈 Прогноз",
         "💰 Купить", "ℹ️ О боте", "📌 Сетап"
     ]
@@ -958,13 +973,14 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await start_therapy(update, context)
 
     if text == "🔍 Анализ":
-        context.user_data.clear()
         context.user_data["awaiting_pro_question"] = True
-        await update.message.reply_text("🧑‍💼 Напиши свой вопрос — GPT-аналитик ответит.", reply_markup=REPLY_MARKUP)
+        await update.message.reply_text(
+            "🧑‍💼 Напиши свой вопрос — GPT-аналитик ответит.",
+            reply_markup=REPLY_MARKUP
+        )
         return
 
     if text == "📚 Термин":
-        context.user_data.clear()
         context.user_data["awaiting_definition_term"] = True
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить.")
         return
@@ -992,14 +1008,18 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "💰 Купить":
         if user_id in ALLOWED_USERS:
-            await update.message.reply_text("✅ У тебя уже активирована подписка!", reply_markup=REPLY_MARKUP)
+            await update.message.reply_text(
+                "✅ У тебя уже активирована подписка!",
+                reply_markup=REPLY_MARKUP
+            )
         else:
             await send_payment_link(update, context)
         return
 
     if text == "ℹ️ О боте":
         await update.message.reply_text(
-            "Подписка активируется через CryptoCloud.\nНажми 💰 Купить для получения ссылки на оплату.",
+            "Подписка активируется через CryptoCloud.\n"
+            "Нажми 💰 Купить для получения ссылки на оплату.",
             reply_markup=REPLY_MARKUP
         )
         return
@@ -1008,12 +1028,14 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id not in ADMIN_IDS:
             await update.message.reply_text("⛔️ Эта функция доступна только админу.")
             return
-        context.user_data.clear()
         await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
         return SETUP_1
 
     context.user_data.clear()
-    await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
+    await update.message.reply_text(
+        "🔄 Сброс всех ожиданий. Продолжай.",
+        reply_markup=REPLY_MARKUP
+    )
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
