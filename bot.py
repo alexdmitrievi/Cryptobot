@@ -249,55 +249,68 @@ async def ask_actual(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK_ACTUAL
 
 async def generate_interpretation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_inputs[update.effective_user.id]["actual"] = update.message.text.strip()
-    data = user_inputs[update.effective_user.id]
-
-    prompt = (
-        f"Event: {data['event']}\n"
-        f"Forecast: {data['forecast']}\n"
-        f"Actual: {data['actual']}\n\n"
-        "You are a professional trader with over 10 years of experience in cryptocurrency, forex, and stock markets. "
-        "Your analysis considers fundamental drivers, liquidity flows, market maker behavior, and crowd psychology.\n\n"
-        "---\n\n"
-        "📊 Analyze step by step:\n\n"
-        "1️⃣ Fundamental and technical context:\n"
-        "- How does this event impact liquidity, volatility, and market expectations?\n"
-        "- What key technical levels could become zones of accumulation or panic selling?\n"
-        "- Are there any signs of a possible reversal or continuation of the trend?\n\n"
-        "2️⃣ Provide two scenarios:\n"
-        "🟢 Bullish: where is the crowd likely to enter, where will large players start taking profits, "
-        "and what levels could trigger further growth?\n"
-        "🔴 Bearish: where are retail stop losses likely to be placed, where might market makers hunt them, "
-        "and where could the price find a new balance?\n\n"
-        "3️⃣ Forecast the short-term reaction for the next 1–3 days:\n"
-        "- How might retail traders react?\n"
-        "- What headlines could appear in the media or on Twitter?\n"
-        "- How might whales and funds respond?\n\n"
-        "4️⃣ Build a concise trading plan:\n"
-        "- Should the trader enter a position? If yes, specify:\n"
-        "  🎯 Entry: $_____\n"
-        "  🚨 StopLoss: $_____\n"
-        "  💰 TakeProfit: $_____\n"
-        "- What percentage of capital to allocate given the risk?\n\n"
-        "5️⃣ What might the trader miss if they ignore this event?\n"
-        "- Explain in simple terms why this event is critical.\n\n"
-        "✅ Finally, give a short signal in 1–2 lines suitable for a trader's chat.\n\n"
-        "Answer strictly in Russian."
-    )
-
     try:
+        user_data = user_inputs.get(update.effective_user.id)
+        if not user_data or not all(k in user_data for k in ("event", "forecast")):
+            await update.message.reply_text(
+                "⚠️ Не хватает данных для анализа. Попробуй заново начать с ввода события."
+            )
+            return ConversationHandler.END
+
+        user_data["actual"] = update.message.text.strip()
+
+        prompt = (
+            f"Event: {user_data['event']}\n"
+            f"Forecast: {user_data['forecast']}\n"
+            f"Actual: {user_data['actual']}\n\n"
+            "You are a professional trader with over 10 years of experience in cryptocurrency, forex, and stock markets. "
+            "Your analysis considers fundamental drivers, liquidity flows, market maker behavior, and crowd psychology.\n\n"
+            "---\n\n"
+            "📊 Analyze step by step:\n\n"
+            "1️⃣ Fundamental and technical context:\n"
+            "- How does this event impact liquidity, volatility, and market expectations?\n"
+            "- What key technical levels could become zones of accumulation or panic selling?\n"
+            "- Are there any signs of a possible reversal or continuation of the trend?\n\n"
+            "2️⃣ Provide two scenarios:\n"
+            "🟢 Bullish: where is the crowd likely to enter, where will large players start taking profits, "
+            "and what levels could trigger further growth?\n"
+            "🔴 Bearish: where are retail stop losses likely to be placed, where might market makers hunt them, "
+            "and where could the price find a new balance?\n\n"
+            "3️⃣ Forecast the short-term reaction for the next 1–3 days:\n"
+            "- How might retail traders react?\n"
+            "- What headlines could appear in the media or on Twitter?\n"
+            "- How might whales and funds respond?\n\n"
+            "4️⃣ Build a concise trading plan:\n"
+            "- Should the trader enter a position? If yes, specify:\n"
+            "  🎯 Entry: $_____\n"
+            "  🚨 StopLoss: $_____\n"
+            "  💰 TakeProfit: $_____\n"
+            "- What percentage of capital to allocate given the risk?\n\n"
+            "5️⃣ What might the trader miss if they ignore this event?\n"
+            "- Explain in simple terms why this event is critical.\n\n"
+            "✅ Finally, give a short signal in 1–2 lines suitable for a trader's chat.\n\n"
+            "Answer strictly in Russian."
+        )
+
         response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
+
+        answer = response.choices[0].message.content.strip()
         await update.message.reply_text(
-            f"📚 GPT:\n{response.choices[0].message.content.strip()}",
+            f"📚 GPT:\n{answer}",
             reply_markup=REPLY_MARKUP
         )
+
     except Exception as e:
-        logging.error(f"[generate_interpretation] GPT error: {e}")
+        logging.error(f"[generate_interpretation] Ошибка: {e}")
         await update.message.reply_text(
-            "⚠️ Не удалось получить анализ. Попробуй позже."
+            "⚠️ GPT временно недоступен. "
+            "Могу подсказать общий план на глаз:\n"
+            "- Если событие положительное и ликвидность растёт — ищи зону отката для лонга.\n"
+            "- Если факт хуже прогноза — рынок может собрать стопы внизу перед разворотом.\n"
+            "Детали после восстановления сервиса!"
         )
 
     return ConversationHandler.END
@@ -340,17 +353,24 @@ async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
+        answer = response.choices[0].message.content.strip()
         await update.message.reply_text(
-            f"📚 GPT:\n{response.choices[0].message.content.strip()}",
+            f"📚 GPT:\n{answer}",
             reply_markup=REPLY_MARKUP,
             parse_mode="Markdown"
         )
-        return ConversationHandler.END
 
     except Exception as e:
         logging.error(f"[GENERAL_RESPONSE] GPT error: {e}")
-        await update.message.reply_text("⚠️ GPT не ответил. Попробуй позже.")
-        return ConversationHandler.END
+        await update.message.reply_text(
+            "⚠️ GPT временно недоступен. "
+            "Могу дать общий сценарий на глаз:\n"
+            "- Если рынок растёт, ищи откаты для входа.\n"
+            "- Если падает, ищи паттерн остановки.\n"
+            "Подробнее после восстановления сервиса."
+        )
+
+    return ConversationHandler.END
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -517,6 +537,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Подготовим prompt_text в зависимости от выбранной стратегии
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
@@ -532,7 +553,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "  🚨 StopLoss: $_____\n"
                 "  💰 TakeProfit: $_____\n\n"
                 "✅ Finally, generate a concise 2-line summary in Russian suitable for a trader's chat.\n"
-                "Answer everything strictly in Russian."
+                "Answer strictly in Russian."
             )
         else:
             prompt_text = (
@@ -663,7 +684,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"[handle_photo] Vision error: {e}")
         await update.message.reply_text(
-            "⚠️ Не удалось проанализировать график. Попробуй позже или пришли другой скрин."
+            "⚠️ GPT временно недоступен. "
+            "На глаз по таким графикам:\n"
+            "- Если рынок растёт, ищи консолидацию и объём для входа.\n"
+            "- Если падает, смотри реакцию на старые уровни спроса.\n"
+            "Подробный сценарий дам после восстановления сервиса!"
         )
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -778,9 +803,10 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             max_tokens=700
         )
 
+        answer = response.choices[0].message.content.strip()
         await update.message.reply_text(
             f"📊 Прогноз по графику + новости:\n\n"
-            f"{response.choices[0].message.content.strip()}\n\n"
+            f"{answer}\n\n"
             f"📰 Полезные ссылки:\n"
             f"• [Forklog](https://t.me/forklog)\n"
             f"• [Bits.media](https://bits.media/news/)\n"
@@ -789,10 +815,15 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=CHAT_DISCUSS_KEYBOARD,
             parse_mode="Markdown"
         )
+
     except Exception as e:
         logging.error(f"[MACRO_GRAPH] Vision error: {e}")
         await update.message.reply_text(
-            "⚠️ Не удалось составить прогноз. Попробуй позже или загрузи другой скрин."
+            "⚠️ GPT временно недоступен. "
+            "На глаз по таким кейсам обычно:\n"
+            "- Смотри реакцию цены на ключевые уровни + объём.\n"
+            "- При положительных новостях часто выбивают стопы вниз перед ростом.\n"
+            "Детальнее после восстановления сервиса!"
         )
 
 def fetch_price_from_coingecko(coin_symbol: str) -> float | None:
@@ -875,14 +906,26 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
+        answer = response.choices[0].message.content.strip()
         await update.message.reply_text(
-            f"📈 Инвестиционная стратегия:\n\n{response.choices[0].message.content.strip()}",
+            f"📈 Инвестиционная стратегия:\n\n{answer}",
             reply_markup=REPLY_MARKUP
         )
         context.user_data.clear()
+
     except Exception as e:
         logging.error(f"[handle_invest_question] GPT error: {e}")
-        await update.message.reply_text("⚠️ Не удалось составить стратегию. Попробуй позже.")
+        await update.message.reply_text(
+            "⚠️ GPT временно недоступен. "
+            "На глаз: для умеренного риска часто берут примерно\n"
+            "- 50% акции/ETF,\n"
+            "- 30% облигации,\n"
+            "- 10% золото и сырьё,\n"
+            "- 10% крипта.\n"
+            "Пересмотри портфель раз в 6 месяцев. Детальнее после восстановления сервиса!"
+        )
+        context.user_data.clear()
+
 
 async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("awaiting_definition_term", None)
@@ -948,15 +991,23 @@ async def handle_forecast_by_price(update: Update, context: ContextTypes.DEFAULT
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
+        answer = response.choices[0].message.content.strip()
         await update.message.reply_text(
             f"📊 Прогноз по активу {coin}:\n\n"
-            f"{response.choices[0].message.content.strip()}",
+            f"{answer}",
             reply_markup=CHAT_DISCUSS_KEYBOARD,
             parse_mode="Markdown"
         )
+
     except Exception as e:
         logging.error(f"[FORECAST_BY_PRICE] GPT error: {e}")
-        await update.message.reply_text("⚠️ Не удалось получить прогноз. Попробуй позже.")
+        await update.message.reply_text(
+            f"⚠️ GPT временно недоступен. "
+            f"На глаз по {coin}:\n"
+            "- Ищи консолидацию у ближайших уровней.\n"
+            "- Сильные новости могут выбить стопы в обе стороны перед движением.\n"
+            "Детальнее — после восстановления сервиса!"
+        )
 
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
