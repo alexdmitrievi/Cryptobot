@@ -9,6 +9,7 @@ import requests
 import hmac
 import hashlib
 import base64
+import csv
 from datetime import datetime
 from io import BytesIO
 
@@ -1322,6 +1323,61 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{'⚠️ Ошибки у некоторых пользователей.' if failed_users else ''}"
     )
 
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ Эта команда доступна только админу.")
+        return
+
+    try:
+        records = sheet.get_all_records()
+        total_records = len(records)
+        allowed_count = len(ALLOWED_USERS)
+
+        last_entry = records[-1] if records else {}
+
+        msg = (
+            f"📊 Статистика:\n\n"
+            f"• Подписчиков в ALLOWED_USERS: {allowed_count}\n"
+            f"• Всего записей в Google Sheets: {total_records}\n\n"
+            f"📝 Последняя запись:\n"
+            f"{json.dumps(last_entry, ensure_ascii=False, indent=2)}"
+        )
+        await update.message.reply_text(msg)
+    except Exception as e:
+        logging.error(f"[STATS] Ошибка: {e}")
+        await update.message.reply_text("⚠️ Не удалось получить статистику.")
+
+async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ Эта команда доступна только админу.")
+        return
+
+    try:
+        records = sheet.get_all_records()
+
+        from io import StringIO
+        csv_file = StringIO()
+        writer = csv.DictWriter(csv_file, fieldnames=["user_id", "username", "email", "date"])
+        writer.writeheader()
+        for row in records:
+            writer.writerow({
+                "user_id": row.get("user_id", ""),
+                "username": row.get("username", ""),
+                "email": row.get("email", ""),
+                "date": row.get("date", "")
+            })
+
+        csv_file.seek(0)
+        await update.message.reply_document(
+            document=("users_export.csv", csv_file.getvalue()),
+            filename="users_export.csv",
+            caption="📥 Все пользователи и email из Google Sheets"
+        )
+    except Exception as e:
+        logging.error(f"[EXPORT] Ошибка: {e}")
+        await update.message.reply_text("⚠️ Не удалось выгрузить пользователей.")
 
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ✅ Новый блок — обработка email
@@ -1382,9 +1438,7 @@ def main():
 
     logging.info("🚀 GPT-Трейдер стартовал!")
 
-    # ✅ Добавляем еженедельную рассылку через aiocron
-    import aiocron
-
+    # 🔄 Еженедельная рассылка
     @aiocron.crontab('0 12 * * mon')
     async def weekly_broadcast():
         message_text = (
@@ -1396,10 +1450,7 @@ def main():
         success, fails = 0, []
         for vip_id in ALLOWED_USERS:
             try:
-                await app.bot.send_message(
-                    chat_id=vip_id,
-                    text=message_text
-                )
+                await app.bot.send_message(chat_id=vip_id, text=message_text)
                 success += 1
             except Exception as e:
                 logging.error(f"[WEEKLY BROADCAST] {vip_id}: {e}")
@@ -1471,24 +1522,28 @@ def main():
         ]
     )
 
-    # ✅ Регистрируем всё
+    # ✅ Регистрируем ConversationHandlers
     app.add_handler(help_conv_handler)
     app.add_handler(therapy_handler)
     app.add_handler(risk_calc_handler)
     app.add_handler(setup_handler)
 
+    # ✅ Регистрируем команды
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(CommandHandler("grant", grant))
     app.add_handler(CommandHandler("reload_users", reload_users))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("export", export))
 
+    # ✅ Фото, inline кнопки и универсальный текст
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
 
-    # 🚀 Запускаем polling
+    # 🚀 Стартуем polling
     app.run_polling()
 
 def log_payment(user_id, username):
