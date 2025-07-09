@@ -827,30 +827,21 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Детальнее после восстановления сервиса!"
         )
 
-def fetch_price_from_coingecko(coin_symbol: str) -> float | None:
+def fetch_price_from_binance(symbol: str) -> float | None:
+    """
+    Получает последнюю цену с Binance через публичный REST API.
+    Пример: fetch_price_from_binance("BTC") вернёт цену BTCUSDT.
+    """
     try:
-        coin_map = {
-            "BTC": "bitcoin",
-            "ETH": "ethereum",
-            "BNB": "binancecoin",
-            "XRP": "ripple",
-            "SOL": "solana",
-            "TON": "the-open-network",
-            "DOGE": "dogecoin",
-            "ADA": "cardano",
-            "TRX": "tron"
-        }
-        coin_id = coin_map.get(coin_symbol.upper())
-        if not coin_id:
-            return None
-
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
-        response = requests.get(url, timeout=20)
+        pair = symbol.upper() + "USDT"
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={pair}"
+        response = requests.get(url, timeout=10)
         data = response.json()
-        return data[coin_id]["usd"]
+        return float(data["price"])
     except Exception as e:
-        logging.warning(f"Ошибка при получении цены для {coin_symbol}: {e}")
+        logging.warning(f"[BINANCE] Ошибка получения цены для {symbol}: {e}")
         return None
+
 
 async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -958,12 +949,12 @@ async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_forecast_by_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("awaiting_asset_name", None)
     coin = update.message.text.strip().upper()
-    price = fetch_price_from_coingecko(coin)
+    price = fetch_price_from_binance(coin)
 
     if price:
         price_line = f"The current price of {coin} is ${price:.2f}.\n\n"
     else:
-        price_line = f"(❗ Price for {coin} not found. Please check it on CoinMarketCap or Binance.)\n\n"
+        price_line = f"(❗ Price for {coin} not found. Please check it on Binance or CoinMarketCap.)\n\n"
 
     prompt = (
         price_line +
@@ -1003,7 +994,7 @@ async def handle_forecast_by_price(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         logging.error(f"[FORECAST_BY_PRICE] GPT error: {e}")
         await update.message.reply_text(
-            f"⚠️ GPT временно недоступен. "
+            f"⚠️ GPT временно недоступен.\n"
             f"На глаз по {coin}:\n"
             "- Ищи консолидацию у ближайших уровней.\n"
             "- Сильные новости могут выбить стопы в обе стороны перед движением.\n"
