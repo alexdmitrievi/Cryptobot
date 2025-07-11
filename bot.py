@@ -127,8 +127,6 @@ async def setup_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📷 Прикрепи скрин сетапа.")
     return SETUP_5
 
-
-
 async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
@@ -205,50 +203,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-
-async def help_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_access(update): return ConversationHandler.END
-    context.user_data.clear()  # <— добавь это
-    await update.message.reply_text("Ты хочешь интерпретировать новость? (да/нет)", reply_markup=ReplyKeyboardRemove())
-    return INTERPRET_NEWS
-
-async def interpret_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip().lower()
-    if text == "да":
-        await update.message.reply_text("Что за новость?")
-        return ASK_EVENT
-    elif text == "нет":
-        await update.message.reply_text("Хорошо. Для точной консультации ответь на несколько вопросов.\n\n1. Твой стиль торговли? (скальпинг, позиционка или инвестиции)")
-        return FOLLOWUP_1
-    else:
-        await update.message.reply_text("Пожалуйста, ответь 'да' или 'нет'")
-        return INTERPRET_NEWS
-
-async def followup_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["style"] = update.message.text.strip()
-    await update.message.reply_text("2. На каком таймфрейме ты чаще всего открываешь сделки?")
-    return FOLLOWUP_2
-
-async def followup_timeframe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["timeframe"] = update.message.text.strip()
-    await update.message.reply_text("3. На каком рынке ты торгуешь? (крипта, форекс, фондовый, сырьё и т.д.)")
-    return FOLLOWUP_3
-
-async def followup_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["market"] = update.message.text.strip()
-    await update.message.reply_text("Отлично. Теперь можешь задать свой вопрос:")
-    return GENERAL_QUESTION
-
-async def ask_forecast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_inputs[update.effective_user.id] = {"event": update.message.text.strip()}
-    await update.message.reply_text("Какой был прогноз?")
-    return ASK_FORECAST
-
-async def ask_actual(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_inputs[update.effective_user.id]["forecast"] = update.message.text.strip()
-    await update.message.reply_text("Какой факт? (результат)")
-    return ASK_ACTUAL
-
 async def generate_interpretation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_data = user_inputs.get(update.effective_user.id)
@@ -316,63 +270,6 @@ async def generate_interpretation(update: Update, context: ContextTypes.DEFAULT_
 
     return ConversationHandler.END
 
-async def general_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip()
-    style = context.user_data.get("style", "trading")
-    tf = context.user_data.get("timeframe", "any")
-    market = context.user_data.get("market", "general")
-
-    prompt = (
-        f"You are a professional trader with over 10 years of experience in cryptocurrency and stock markets. "
-        "Always answer precisely, avoid vague words like 'maybe', 'probably', 'seems'. "
-        "Speak directly, clearly, and justify your reasoning.\n\n"
-        f"Context of the question:\n"
-        f"- Trading style: {style}\n"
-        f"- Timeframe: {tf}\n"
-        f"- Market: {market}\n"
-        f"- Trader's question: {user_text}\n\n"
-        "---\n\n"
-        "📊 Analyze step by step:\n\n"
-        "1️⃣ **Key factors:**\n"
-        "- List them in order of importance for this specific case.\n\n"
-        "2️⃣ **Main action scenario:**\n"
-        "- Where to enter, where to place stop loss, what are the targets.\n\n"
-        "3️⃣ **Alternative scenario:**\n"
-        "- If the main scenario fails, what to do and how quickly will it be clear?\n\n"
-        "4️⃣ **Risks and potential:**\n"
-        "- What are the key risks and approximate profit potential (estimated R:R)?\n\n"
-        "5️⃣ **Your professional conclusion:**\n"
-        "- What would you do right now if you were in the trader's position?\n\n"
-        "6️⃣ **What else to check?**\n"
-        "- Which reports, order book data, cluster analysis, news, or levels would confirm this scenario?\n\n"
-        "✅ At the end, give a short signal for the trader's chat in 1–2 lines.\n\n"
-        "Answer strictly in Russian."
-    )
-
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        answer = response.choices[0].message.content.strip()
-        await update.message.reply_text(
-            f"📚 GPT:\n{answer}",
-            reply_markup=REPLY_MARKUP,
-            parse_mode="Markdown"
-        )
-
-    except Exception as e:
-        logging.error(f"[GENERAL_RESPONSE] GPT error: {e}")
-        await update.message.reply_text(
-            "⚠️ GPT временно недоступен. "
-            "Могу дать общий сценарий на глаз:\n"
-            "- Если рынок растёт, ищи откаты для входа.\n"
-            "- Если падает, ищи паттерн остановки.\n"
-            "Подробнее после восстановления сервиса."
-        )
-
-    return ConversationHandler.END
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -409,67 +306,88 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["selected_strategy"] = "smc"
         market = context.user_data.get("selected_market")
         text_msg = (
-            "📈 *Smart Money Concepts (SMC) для крипты*\n\n"
+            "📈 Smart Money Concepts (SMC) для крипты\n\n"
             "📌 Включи на графике:\n"
             "- Smart Money Concepts (SMC) Lux Algo\n"
             "- LazyScalp Board (DV > 200M)\n\n"
             "Пришли скрин — дам план входа, стоп и тейки."
             if market == "crypto"
-            else "📈 *Smart Money Concepts (SMC) для форекса*\n\n"
+            else "📈 Smart Money Concepts (SMC) для форекса\n\n"
                  "📌 Убедись, что включён Smart Money Concepts (SMC) Lux Algo.\n"
                  "DV не нужен.\n\n"
                  "Пришли скрин — сделаю анализ SMC."
         )
-        await query.edit_message_text(text_msg, parse_mode="Markdown")
+        await query.edit_message_text(text_msg)
 
     elif query.data == "style_swing":
         context.user_data["selected_strategy"] = "swing"
         market = context.user_data.get("selected_market")
         text_msg = (
-            "📈 *Позиционка (Swing) для крипты*\n\n"
+            "📈 Позиционка (Swing) для крипты\n\n"
             "📌 Включи на графике:\n"
             "- Lux Algo Levels\n"
             "- LazyScalp Board (DV > 200M)\n"
             "- Volume Profile\n\n"
             "Пришли скрин для анализа swing."
             if market == "crypto"
-            else "📈 *Позиционка (Swing) для форекса*\n\n"
+            else "📈 Позиционка (Swing) для форекса\n\n"
                  "📌 Убедись, что включены:\n"
                  "- Lux Algo Levels или Auto Support & Resistance\n"
                  "- RSI / Stochastic\n\n"
                  "Пришли скрин — дам сценарий swing."
         )
-        await query.edit_message_text(text_msg, parse_mode="Markdown")
+        await query.edit_message_text(text_msg)
 
     elif query.data == "style_breakout":
         context.user_data["selected_strategy"] = "breakout"
         market = context.user_data.get("selected_market")
         text_msg = (
-            "📈 *Пробой диапазона (Breakout) для крипты*\n\n"
+            "📈 Пробой диапазона (Breakout) для крипты\n\n"
             "📌 Включи на графике:\n"
             "- Range Detection\n"
             "- LazyScalp Board (DV > 200M)\n\n"
             "Пришли скрин — найду диапазон и дам сценарии."
             if market == "crypto"
-            else "📈 *Пробой диапазона (Breakout) для форекса*\n\n"
+            else "📈 Пробой диапазона (Breakout) для форекса\n\n"
                  "📌 Убедись, что включены:\n"
                  "- Range Detection или Lux Algo Levels\n"
                  "- RSI / Stochastic\n\n"
                  "Пришли скрин — построю два сценария breakout."
         )
-        await query.edit_message_text(text_msg, parse_mode="Markdown")
+        await query.edit_message_text(text_msg)
 
     elif query.data == "forecast_by_image":
         await query.message.reply_text(
             "📸 Пришли скриншот графика — я сделаю технический разбор и прогноз."
         )
 
-    # ✅ Новый блок для сбора email
     elif query.data == "get_email":
         context.user_data["awaiting_email"] = True
         await query.message.reply_text(
             "✉️ Напиши свой email для получения секретного PDF со стратегиями:"
         )
+
+    # ✅ Новый блок для анализа новостей
+    elif query.data == "interpret_calendar":
+        context.user_data["awaiting_news"] = "calendar"
+        await query.message.reply_text(
+            "📅 Опиши событие из экономического календаря в таком формате:\n\n"
+            "Событие: ...\n"
+            "Прогноз: ...\n"
+            "Факт: ...\n\n"
+            "Пример:\n"
+            "Событие: Данные по инфляции в США (CPI)\n"
+            "Прогноз: 3.2%\n"
+            "Факт: 3.7%\n\n"
+            "Чем яснее напишешь, тем точнее будет мой разбор."
+        )
+
+    elif query.data == "interpret_other":
+        context.user_data["awaiting_news"] = "other"
+        await query.message.reply_text(
+            "🌐 Опиши новость, которая может повлиять на финансовый рынок."
+        )
+
 
 async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -918,6 +836,64 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         )
         context.user_data.clear()
 
+async def generate_news_interpretation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 🔄 Очистим все временные ожидания пользователя
+    context.user_data.clear()
+
+    news_type = context.user_data.pop("awaiting_news", None)
+    user_text = update.message.text.strip()
+
+    logging.info(f"[NEWS_INTERPRETATION] Пользователь {update.effective_user.id}: {user_text}")
+
+    context_label = (
+        "📅 Это событие из экономического календаря."
+        if news_type == "calendar"
+        else "🌐 Это общая экономическая или геополитическая новость, которая может повлиять на финансовые рынки."
+    )
+
+    prompt = (
+        "You are a senior market strategist with over 20 years of expertise in global macro analysis, "
+        "covering economic calendar surprises, geopolitical shocks, and liquidity dynamics. "
+        "You advise institutional funds, prop desks, and advanced retail traders. "
+        "Your analysis is known for razor-sharp clarity, step-by-step logic, and real price level focus.\n\n"
+        f"Event description provided by the user:\n{user_text}\n\n"
+        f"{context_label}\n\n"
+        "Create a comprehensive multi-part market analysis strictly in Russian. "
+        "Structure it as a professional trading report with short paragraphs (1-3 sentences) for easy reading in Telegram.\n\n"
+
+        "Your report must include:\n\n"
+        "1️⃣ Brief clear summary of what this event means fundamentally. Is it positive or negative? Why?\n\n"
+        "2️⃣ Deep dive into liquidity, volatility, and trader sentiment impact over the next 1-3 days.\n\n"
+        "3️⃣ Two fully developed scenarios with nearby price levels:\n"
+        "   ➡️ Bullish: triggers, stops fueling, resistance targets.\n"
+        "   ➡️ Bearish: stop clusters, potential cascades, supports.\n\n"
+        "4️⃣ Short historical parallel (1-2 sentences) from past 1-2 years.\n\n"
+        "5️⃣ A final short direct actionable signal for traders' chat like:\n"
+        "'LONG above $XXX, SL $YYY, TP $ZZZ — wait for liquidity sweep.'\n\n"
+
+        "⚠️ Do NOT use asterisks, underscores or any Markdown formatting. "
+        "Write only in plain Russian text, with short paragraphs. "
+        "Optionally use emojis to visually anchor sections if it feels natural. "
+        "Never hedge with words like 'maybe', 'possibly' without strong justification. "
+        "Every conclusion must be tied to logic, order flow or macro reasoning."
+    )
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        await update.message.reply_text(
+            f"📊 Интерпретация новости:\n\n{response.choices[0].message.content.strip()}",
+            reply_markup=REPLY_MARKUP
+        )
+    except Exception as e:
+        logging.error(f"[NEWS_INTERPRETATION] GPT error: {e}")
+        await update.message.reply_text(
+            "⚠️ GPT временно недоступен. Попробуй позже.",
+            reply_markup=REPLY_MARKUP
+        )
+
 async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.strip() == "↩️ Выйти из обучения":
         context.user_data.pop("awaiting_teacher_question", None)
@@ -1032,7 +1008,16 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await start_therapy(update, context)
 
     if text == "🔍 Анализ":
-        return await help_pro(update, context)  # теперь анализ = интерпретация новостей
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Экономический календарь", callback_data="interpret_calendar")],
+            [InlineKeyboardButton("Другие новости", callback_data="interpret_other")]
+        ])
+        await update.message.reply_text(
+            "Ты хочешь интерпретировать новость из экономического календаря "
+            "или любые другие новости, влияющие на финансовый рынок?",
+            reply_markup=keyboard
+        )
+        return
 
     if text == "📖 Обучение":
         context.user_data["awaiting_teacher_question"] = True
@@ -1395,8 +1380,13 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop("awaiting_email", None)
         return
 
-    # ✅ Остальные блоки
-    if context.user_data.get("awaiting_potential"):
+    # ✅ Блок для интерпретации новостей (экономический календарь или любые другие новости)
+    elif context.user_data.get("awaiting_news"):
+        await generate_news_interpretation(update, context)
+        return
+
+    # ✅ Остальные режимы
+    elif context.user_data.get("awaiting_potential"):
         await handle_potential(update, context)
     elif context.user_data.get("awaiting_macro_text"):
         await handle_macro_text(update, context)
@@ -1404,8 +1394,6 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await handle_definition(update, context)
     elif context.user_data.get("awaiting_invest_question"):
         await handle_invest_question(update, context)
-    elif context.user_data.get("awaiting_pro_question"):
-        await general_response(update, context)
     elif context.user_data.get("awaiting_teacher_question"):
         await teacher_response(update, context)
     else:
