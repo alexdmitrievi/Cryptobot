@@ -83,8 +83,8 @@ PENDING_USERS = {}
 RECEIVED_MEMOS = set()
 
 reply_keyboard = [
-    ["💡 Стратегия", "📈 Прогноз", "🔍 Анализ"],
-    ["🚀 Сигнал", "🌱 Психолог"],
+    ["💡 Стратегия", "🚀 Сигнал", "🔍 Анализ"],
+    ["📖 Обучение", "🌱 Психолог"],
     ["📚 Термин", "🎯 Риск"],
     ["💰 Купить", "ℹ️ О боте"],
     ["📌 Сетап"]
@@ -918,6 +918,44 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         )
         context.user_data.clear()
 
+async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("awaiting_teacher_question", None)
+    user_text = update.message.text.strip()
+
+    prompt = (
+        "You are a professional trading and investing teacher with over 20 years of experience "
+        "across cryptocurrency, forex, stock, and commodity markets. "
+        "You have taught both retail traders and institutional clients. "
+        "Your explanations are always extremely clear, structured, and use simple language. "
+        "You immediately clarify any professional jargon with examples relevant to a trader's daily work. "
+        "You are patient and willing to break down complex concepts into simpler ideas.\n\n"
+        f"📌 Student's question:\n{user_text}\n\n"
+        "Break your answer into structured steps:\n"
+        "1️⃣ Give a short, direct thesis that answers the main question.\n"
+        "2️⃣ Provide a detailed step-by-step explanation, as if teaching a complete beginner.\n"
+        "3️⃣ Include one example from the crypto market and one from forex or stocks.\n"
+        "4️⃣ Highlight the most common mistakes beginners make in this situation and how to avoid them.\n"
+        "5️⃣ Finish with a short, practical tip (1-2 sentences) that the student can apply immediately.\n\n"
+        "⚠️ Never use empty words like 'maybe', 'seems', 'probably' without immediately backing them up. "
+        "Avoid generic phrases like 'don't worry' or 'everything will be fine'. "
+        "Justify each conclusion with logic or real-world reasoning.\n\n"
+        "Respond STRICTLY in Russian."
+    )
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        await update.message.reply_text(
+            f"📖 Обучение:\n\n{response.choices[0].message.content.strip()}",
+            reply_markup=REPLY_MARKUP
+        )
+    except Exception as e:
+        logging.error(f"[TEACHER_RESPONSE] GPT error: {e}")
+        await update.message.reply_text(
+            "⚠️ GPT временно недоступен. Попробуй позже."
+        )
 
 async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("awaiting_definition_term", None)
@@ -946,69 +984,12 @@ async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"[DEFINITION] GPT error: {e}")
         await update.message.reply_text("⚠️ Не удалось объяснить термин. Попробуй позже.")
 
-async def handle_forecast_by_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.pop("awaiting_asset_name", None)
-    coin = update.message.text.strip().upper()
-    price = fetch_price_from_binance(coin)
-
-    if price:
-        price_line = f"The current price of {coin} is ${price:.2f}.\n\n"
-    else:
-        price_line = f"(❗ Price for {coin} not found. Please check it on Binance or CoinMarketCap.)\n\n"
-
-    prompt = (
-        price_line +
-        f"You are a professional trader with over 10 years of experience in the cryptocurrency market.\n\n"
-        f"📊 Analyze {coin} strictly step by step:\n\n"
-        "1️⃣ **Overall market structure:**\n"
-        "- Determine the trend (up, down, sideways) and current sentiment.\n"
-        "- List key factors in order of impact (volumes, liquidity, news).\n\n"
-        "2️⃣ **Levels:**\n"
-        "- Identify the nearest support and resistance levels and provide concrete numbers.\n\n"
-        "3️⃣ **Scenarios for the next 1–3 days:**\n"
-        "🟢 **Aggressive:** Entry, StopLoss, TakeProfit, probability of success.\n"
-        "🟠 **Conservative:** Entry, StopLoss, TakeProfit, probability of success.\n\n"
-        "4️⃣ **Risks and suitable entry style:**\n"
-        "- What are the main risks here?\n"
-        "- Is this better suited for scalping, intraday, or swing trading?\n\n"
-        "5️⃣ **Short trading recommendation:**\n"
-        "- In 1–2 lines, like a signal for a trader's chat, e.g.: LONG from $___, stop at $___, targets at $___.\n\n"
-        "6️⃣ **Additional checks:**\n"
-        "- What else should the trader review before entering (order book, whale reports, open interest)?\n\n"
-        "Answer everything strictly in Russian, following these points exactly."
-    )
-
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        answer = response.choices[0].message.content.strip()
-        await update.message.reply_text(
-            f"📊 Прогноз по активу {coin}:\n\n"
-            f"{answer}",
-            reply_markup=CHAT_DISCUSS_KEYBOARD,
-            parse_mode="Markdown"
-        )
-
-    except Exception as e:
-        logging.error(f"[FORECAST_BY_PRICE] GPT error: {e}")
-        await update.message.reply_text(
-            f"⚠️ GPT временно недоступен.\n"
-            f"На глаз по {coin}:\n"
-            "- Ищи консолидацию у ближайших уровней.\n"
-            "- Сильные новости могут выбить стопы в обе стороны перед движением.\n"
-            "Детальнее — после восстановления сервиса!"
-        )
-
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-    username = update.effective_user.username
 
     logging.info(f"[handle_main] Пользователь {user_id} нажал кнопку: {text}")
 
-    # Разрешаем бесплатно только кнопки для оплаты / информации о подписке
     if user_id not in ALLOWED_USERS and text not in ["💰 Купить", "ℹ️ О боте"]:
         await update.message.reply_text(
             "🔒 Доступ только после активации подписки за $25.",
@@ -1019,7 +1000,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_commands = [
         "🎯 Риск", "🌱 Психолог", "🔍 Анализ",
         "💡 Стратегия", "📚 Термин",
-        "🚀 Сигнал", "📈 Прогноз",
+        "🚀 Сигнал", "📖 Обучение",
         "💰 Купить", "ℹ️ О боте", "📌 Сетап"
     ]
     if text in reset_commands:
@@ -1036,10 +1017,12 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await start_therapy(update, context)
 
     if text == "🔍 Анализ":
-        context.user_data["awaiting_pro_question"] = True
+        return await help_pro(update, context)  # теперь анализ = интерпретация новостей
+
+    if text == "📖 Обучение":
+        context.user_data["awaiting_teacher_question"] = True
         await update.message.reply_text(
-            "🧑‍💼 Напиши свой вопрос — GPT-аналитик ответит.",
-            reply_markup=REPLY_MARKUP
+            "✍️ Напиши свой вопрос — я отвечу как преподаватель с 20+ годами опыта в трейдинге и инвестициях."
         )
         return
 
@@ -1055,16 +1038,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         await update.message.reply_text(
             "⚡ Для какого рынка сделать анализ?",
-            reply_markup=keyboard
-        )
-        return
-
-    if text == "📈 Прогноз":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📷 Прислать скрин", callback_data="forecast_by_image")]
-        ])
-        await update.message.reply_text(
-            "📈 Пришли скрин графика — я дам прогноз на основе теханализа.",
             reply_markup=keyboard
         )
         return
@@ -1094,11 +1067,21 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
         return SETUP_1
 
-    context.user_data.clear()
-    await update.message.reply_text(
-        "🔄 Сброс всех ожиданий. Продолжай.",
-        reply_markup=REPLY_MARKUP
-    )
+    # 🔥 Умный сброс
+    if not any([
+        context.user_data.get("awaiting_potential"),
+        context.user_data.get("awaiting_macro_text"),
+        context.user_data.get("awaiting_definition_term"),
+        context.user_data.get("awaiting_email"),
+        context.user_data.get("awaiting_invest_question"),
+        context.user_data.get("awaiting_pro_question"),
+        context.user_data.get("awaiting_teacher_question"),
+    ]):
+        context.user_data.clear()
+        await update.message.reply_text(
+            "🔄 Сброс всех ожиданий. Продолжай.",
+            reply_markup=REPLY_MARKUP
+        )
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
@@ -1371,12 +1354,11 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Не удалось выгрузить пользователей.")
 
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ✅ Новый блок — обработка email
+    # ✅ Блок обработки email
     if context.user_data.get("awaiting_email"):
         email = update.message.text.strip()
         if "@" in email and "." in email:
             try:
-                # Запишем user_id, username и email в Google Sheets
                 sheet.append_row([
                     str(update.effective_user.id),
                     update.effective_user.username or "",
@@ -1398,15 +1380,19 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop("awaiting_email", None)
         return
 
-    # ✅ Старые блоки без изменений
+    # ✅ Остальные блоки
     if context.user_data.get("awaiting_potential"):
         await handle_potential(update, context)
     elif context.user_data.get("awaiting_macro_text"):
         await handle_macro_text(update, context)
-    elif context.user_data.get("awaiting_asset_name"):
-        await handle_forecast_by_price(update, context)
     elif context.user_data.get("awaiting_definition_term"):
         await handle_definition(update, context)
+    elif context.user_data.get("awaiting_invest_question"):
+        await handle_invest_question(update, context)
+    elif context.user_data.get("awaiting_pro_question"):
+        await general_response(update, context)
+    elif context.user_data.get("awaiting_teacher_question"):
+        await teacher_response(update, context)
     else:
         await handle_main(update, context)
 
