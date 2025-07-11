@@ -919,7 +919,14 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data.clear()
 
 async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.pop("awaiting_teacher_question", None)
+    if update.message.text.strip() == "↩️ Выйти из обучения":
+        context.user_data.pop("awaiting_teacher_question", None)
+        await update.message.reply_text(
+            "🔙 Ты вышел из режима обучения. Возвращаемся в главное меню.",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
     user_text = update.message.text.strip()
 
     prompt = (
@@ -947,14 +954,20 @@ async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
+
+        education_keyboard = [["↩️ Выйти из обучения"]]
+        reply_markup = ReplyKeyboardMarkup(education_keyboard, resize_keyboard=True)
+
         await update.message.reply_text(
             f"📖 Обучение:\n\n{response.choices[0].message.content.strip()}",
-            reply_markup=REPLY_MARKUP
+            reply_markup=reply_markup
         )
+
     except Exception as e:
         logging.error(f"[TEACHER_RESPONSE] GPT error: {e}")
         await update.message.reply_text(
-            "⚠️ GPT временно недоступен. Попробуй позже."
+            "⚠️ GPT временно недоступен. Попробуй позже.",
+            reply_markup=REPLY_MARKUP
         )
 
 async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
