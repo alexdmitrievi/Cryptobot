@@ -1444,8 +1444,8 @@ def main():
             MessageHandler(filters.TEXT & ~filters.COMMAND, gpt_psychologist_response)
         ]},
         fallbacks=[
-            CommandHandler("start", start),
-            CommandHandler("restart", restart),
+            CommandHandler("start", start, block=False),
+            CommandHandler("restart", restart, block=False),
             MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
         ]
     )
@@ -1464,8 +1464,8 @@ def main():
             GENERAL_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, general_response)],
         },
         fallbacks=[
-            CommandHandler("start", start),
-            CommandHandler("restart", restart),
+            CommandHandler("start", start, block=False),
+            CommandHandler("restart", restart, block=False),
             MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
         ]
     )
@@ -1479,8 +1479,8 @@ def main():
             RISK_CALC_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_stoploss)],
         },
         fallbacks=[
-            CommandHandler("start", start),
-            CommandHandler("restart", restart),
+            CommandHandler("start", start, block=False),
+            CommandHandler("restart", restart, block=False),
             MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
         ]
     )
@@ -1496,8 +1496,8 @@ def main():
             SETUP_5: [MessageHandler(filters.PHOTO, setup_photo)],
         },
         fallbacks=[
-            CommandHandler("start", start),
-            CommandHandler("restart", restart),
+            CommandHandler("start", start, block=False),
+            CommandHandler("restart", restart, block=False),
             MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
         ]
     )
@@ -1509,8 +1509,8 @@ def main():
     app.add_handler(setup_handler)
 
     # ✅ Регистрируем команды
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("restart", restart))
+    app.add_handler(CommandHandler("start", start, block=False))
+    app.add_handler(CommandHandler("restart", restart, block=False))
     app.add_handler(CommandHandler("publish", publish_post))
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(CommandHandler("grant", grant))
