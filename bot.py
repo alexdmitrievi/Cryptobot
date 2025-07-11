@@ -39,18 +39,29 @@ from flask import Flask, request, jsonify
 # 🔄 AioCron для еженедельных рассылок
 import aiocron
 
+# ✅ Для защиты от rate limit Google Sheets
+from tenacity import retry, wait_fixed, stop_after_attempt
+
+# 🚨 Проверка критичных ENV переменных
+required_env = ["GOOGLE_CREDS", "TELEGRAM_TOKEN", "OPENAI_API_KEY"]
+for var in required_env:
+    if not os.getenv(var):
+        raise EnvironmentError(f"🚨 Переменная окружения {var} не установлена!")
+
 # ✅ Подключение к Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds_dict = json.loads(os.getenv("GOOGLE_CREDS"))
-
-# 🔐 Исправляем переносы строк в приватном ключе
 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 gc = gspread.authorize(creds)
 
 SPREADSHEET_ID = "1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs"
 sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+
+# ✅ Rate-limit safe append для Sheets
+@retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
+def safe_append_row(row):
+    sheet.append_row(row)
 
 def load_allowed_users():
     try:
@@ -72,8 +83,16 @@ def load_allowed_users():
         logging.error(f"❌ Ошибка при загрузке пользователей из Google Sheets: {e}")
         return set()
 
-# 🚀 Загружаем пользователей с подпиской при старте
-ALLOWED_USERS = load_allowed_users()
+# 🚀 ALLOWED_USERS с TTL cache
+ALLOWED_USERS = set()
+ALLOWED_USERS_TIMESTAMP = 0
+
+def get_allowed_users():
+    global ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP
+    if time.time() - ALLOWED_USERS_TIMESTAMP > 300:
+        ALLOWED_USERS = load_allowed_users()
+        ALLOWED_USERS_TIMESTAMP = time.time()
+    return ALLOWED_USERS
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 logging.basicConfig(level=logging.INFO)
@@ -1160,44 +1179,53 @@ async def send_payment_link(update, context):
 # 🚀 Flask webhook для IPN от POS с проверкой HMAC
 app_flask = Flask(__name__)
 
+# ✅ Healthcheck endpoint
+@app_flask.route("/")
+def index():
+    return jsonify({"status": "ok", "allowed_users": len(get_allowed_users())})
+
+# ✅ Webhook от CryptoCloud
 @app_flask.route("/cryptocloud_webhook", methods=["POST"])
 def cryptocloud_webhook():
     body = request.get_data()
     signature = request.headers.get("X-Signature-SHA256")
-
     calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest()
+
     if signature != calc_sig:
-        print(f"⚠ Неверная подпись IPN: {signature} != {calc_sig}")
+        logging.warning(f"⚠ Неверная подпись IPN: {signature} != {calc_sig}")
         return jsonify({"status": "invalid signature"})
 
     data = request.json
-    print(f"✅ IPN от CryptoCloud:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+    logging.info(f"✅ IPN от CryptoCloud:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
 
     if data.get("status") == "paid":
         order_id = data.get("order_id")
         if order_id and order_id.startswith("user_"):
-            parts = order_id.split("_")
             try:
-                user_id = int(parts[1])
+                user_id = int(order_id.split("_")[1])
             except (IndexError, ValueError):
-                print(f"❌ Ошибка парсинга user_id в order_id: {order_id}")
+                logging.error(f"❌ Ошибка парсинга user_id в order_id: {order_id}")
                 return jsonify({"status": "bad order_id"})
 
-            username = parts[2] if len(parts) > 2 else ""
+            username = order_id.split("_")[2] if len(order_id.split("_")) > 2 else ""
 
+            # ✅ Добавляем пользователя в кеш
             ALLOWED_USERS.add(user_id)
-            log_payment(user_id, username)
-            print(f"🎉 Пользователь {user_id} ({username}) активирован через POS!")
+            # ✅ Записываем в Google Sheets
+            safe_append_row([str(user_id), username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
 
+            # ✅ Уведомляем через Telegram
             asyncio.run_coroutine_threadsafe(
                 notify_user_payment(user_id),
-                app.loop
+                app_flask.loop
             )
+            logging.info(f"🎉 Пользователь {user_id} ({username}) активирован через POS!")
 
     return jsonify({"ok": True})
 
-# 🚀 Запуск Flask в отдельном потоке
-def run_flask():
+# 🚀 Запуск Flask в отдельном потоке с loop
+def run_flask(loop):
+    app_flask.loop = loop
     port = int(os.environ.get("PORT", 5000))
     app_flask.run(host="0.0.0.0", port=port)
 
@@ -1411,24 +1439,35 @@ async def post_init(app):
     ])
 
 def main():
-    # 🚀 Запускаем Flask webhook в отдельном потоке
-    threading.Thread(target=run_flask).start()
+    # 🚀 Создаём главный loop
+    loop = asyncio.get_event_loop()
 
+    # 🚀 Запускаем Flask webhook в отдельном потоке с loop
+    threading.Thread(target=run_flask, args=(loop,)).start()
+
+    # ✅ Инициализация Telegram бота
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
-
     logging.info("🚀 GPT-Трейдер стартовал!")
 
-    # 🔄 Еженедельная рассылка
-    @aiocron.crontab('0 12 * * mon')
+    # ✅ Глобальный error handler
+    async def error_handler(update, context):
+        logging.error(f"❌ Exception: {context.error}")
+        if update and update.message:
+            await update.message.reply_text("⚠️ Произошла внутренняя ошибка. Попробуйте позже.")
+    app.add_error_handler(error_handler)
+
+    # 🔄 Еженедельная рассылка через ENV cron
+    CRON_TIME = os.getenv("CRON_TIME", "0 12 * * mon")
+    @aiocron.crontab(CRON_TIME)
     async def weekly_broadcast():
         message_text = (
             "🚀 Еженедельный обзор:\n"
-            "• BTC сейчас около $108,700 — зона интереса $108,000–109,000, следи за реакцией на объёмах.\n"
+            "• BTC сейчас около $108,700 — зона интереса $108,000–109,000.\n"
             "• ETH держится на $2,576 — ищем покупки в диапазоне $2,520–2,600.\n"
             "• Стопы держи коротко, цели фиксируй по R:R ~2:1."
         )
         success, fails = 0, []
-        for vip_id in ALLOWED_USERS:
+        for vip_id in get_allowed_users():
             try:
                 await app.bot.send_message(chat_id=vip_id, text=message_text)
                 success += 1
@@ -1523,7 +1562,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
 
-    # 🚀 Стартуем polling
+    # 🚀 Запускаем polling
     app.run_polling()
 
 def log_payment(user_id, username):
