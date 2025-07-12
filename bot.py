@@ -1388,9 +1388,19 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Не удалось выгрузить пользователей.")
 
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+
+    # ✅ Явная проверка на текстовые "/start" и "/restart"
+    if text == "/start":
+        await start(update, context)
+        return
+    elif text == "/restart":
+        await restart(update, context)
+        return
+
     # ✅ Блок обработки email
     if context.user_data.get("awaiting_email"):
-        email = update.message.text.strip()
+        email = text
         if "@" in email and "." in email:
             try:
                 sheet.append_row([
@@ -1410,11 +1420,11 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text(
                 "❌ Похоже, это не email. Попробуй снова."
             )
-            return  # оставим ожидание email
+            return
         context.user_data.pop("awaiting_email", None)
         return
 
-    # ✅ Блок для интерпретации новостей (экономический календарь или любые другие новости)
+    # ✅ Блок для интерпретации новостей
     elif context.user_data.get("awaiting_news"):
         await generate_news_interpretation(update, context)
         return
