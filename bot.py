@@ -42,6 +42,8 @@ import aiocron
 # ✅ Для защиты от rate limit Google Sheets
 from tenacity import retry, wait_fixed, stop_after_attempt
 
+global_bot = None
+
 # 🚨 Проверка критичных ENV переменных
 required_env = ["GOOGLE_CREDS", "TELEGRAM_TOKEN", "OPENAI_API_KEY"]
 for var in required_env:
@@ -1439,15 +1441,20 @@ async def post_init(app):
     ])
 
 def main():
-    # 🚀 Создаём главный loop
+    global global_bot  # объявляем что будем использовать глобальный bot
+
+    # 🚀 Создаём главный asyncio loop
     loop = asyncio.get_event_loop()
 
-    # 🚀 Запускаем Flask webhook в отдельном потоке с loop
+    # 🚀 Запускаем Flask webhook в отдельном потоке, передаём loop
     threading.Thread(target=run_flask, args=(loop,)).start()
 
     # ✅ Инициализация Telegram бота
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     logging.info("🚀 GPT-Трейдер стартовал!")
+
+    # ✅ Сохраняем bot глобально для функций notify_user_payment и др.
+    global_bot = app.bot
 
     # ✅ Глобальный error handler
     async def error_handler(update, context):
@@ -1580,7 +1587,7 @@ async def notify_user_payment(user_id):
             [InlineKeyboardButton("🎯 Пригласить друга и получить бонус", url="https://твоя_реферальная_страница.com")]
         ])
 
-        await app.bot.send_message(
+        await global_bot.send_message(
             chat_id=user_id,
             text=(
                 "✅ Оплата получена! Подписка активирована навсегда 🎉\n\n"
