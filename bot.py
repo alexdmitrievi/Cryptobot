@@ -428,6 +428,10 @@ async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Добавляем в ALLOWED_USERS
         ALLOWED_USERS.add(target_user_id)
 
+        # Обновляем TTL, чтобы не слетело при автозагрузке через 5 мин
+        global ALLOWED_USERS_TIMESTAMP
+        ALLOWED_USERS_TIMESTAMP = time.time()
+
         # Записываем в Google Sheets
         log_payment(target_user_id, target_username)
 
@@ -1575,7 +1579,7 @@ def main():
 def log_payment(user_id, username):
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        sheet.append_row([str(user_id), username, timestamp])
+        safe_append_row([str(user_id), username, timestamp])
         logging.info(f"🧾 Записано в Google Sheets: {user_id}, {username}, {timestamp}")
     except Exception as e:
         logging.error(f"❌ Ошибка при записи в Google Sheets: {e}")
