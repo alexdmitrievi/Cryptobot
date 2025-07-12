@@ -7,4 +7,6 @@ gspread
 oauth2client
 flask
 aiocron
+tenacity>=8.2
+
 
