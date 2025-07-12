@@ -622,89 +622,6 @@ async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
-async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("awaiting_macro_text"):
-        return
-
-    macro = update.message.text.strip()
-    image_base64 = context.user_data.pop("graph_image_base64", None)
-    context.user_data.pop("awaiting_macro_text")
-
-    if not image_base64:
-        await update.message.reply_text("⚠️ Ошибка: изображение не найдено. Сначала пришли скрин графика.")
-        return
-
-    prompt = (
-        "You are a professional crypto trader with over 10 years of experience. "
-        "Analyze the provided chart carefully and prepare a structured, beginner-friendly step-by-step analysis with emojis. "
-        "Do NOT use asterisks. Use dashes and emojis to structure lists. "
-        "Keep sentences short, explain terms simply, and answer in Russian only.\n\n"
-        f"🌐 Here's some fundamental context to consider: {macro}\n\n"
-        "🔍 Analysis plan:\n\n"
-        "👀 Core market factors\n"
-        "- Determine trend (up, down, sideways)\n"
-        "- Show key support and resistance levels\n"
-        "- Look for patterns like double tops, flags, etc.\n"
-        "- Check volumes near these levels\n\n"
-        "🏗 Market structure\n"
-        "- Is there accumulation before a move?\n"
-        "- Any signals for reversal or continuation?\n"
-        "- Did similar setups happen before on this asset?\n\n"
-        "🟢 Scenario: breakout upwards\n"
-        "- 🎯 Entry: $_____\n"
-        "- 🚨 StopLoss: $_____\n"
-        "- 💰 TakeProfit: $_____\n"
-        "- Estimate success chances in %\n\n"
-        "🔴 Scenario: breakdown downwards\n"
-        "- 🎯 Entry: $_____\n"
-        "- 🚨 StopLoss: $_____\n"
-        "- 💰 TakeProfit: $_____\n"
-        "- Estimate success chances in %\n\n"
-        "🛠 Extra checks\n"
-        "- Volume Profile, order book, clusters, latest news\n\n"
-        "✅ Finish with a short 2-line trading signal for a chat, like:\n"
-        "🚀 Long from $___, stop at $___, target $___ — likely accumulation before move.\n\n"
-        "Provide a quick bullet summary in English only if truly necessary for clarity."
-    )
-
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {
-                        "url": f"data:image/jpeg;base64,{image_base64}"
-                    }}
-                ]
-            }],
-            max_tokens=700
-        )
-
-        answer = response.choices[0].message.content.strip()
-        await update.message.reply_text(
-            f"📊 Прогноз по графику с учётом новостей:\n\n"
-            f"{answer}\n\n"
-            f"📰 Полезные ссылки:\n"
-            f"• [Forklog](https://t.me/forklog)\n"
-            f"• [Bits.media](https://bits.media/news/)\n"
-            f"• [RBC Crypto](https://www.rbc.ru/crypto/)\n"
-            f"• [Investing](https://ru.investing.com/news/cryptocurrency-news/)",
-            reply_markup=CHAT_DISCUSS_KEYBOARD,
-            parse_mode="Markdown"
-        )
-
-    except Exception as e:
-        logging.error(f"[MACRO_GRAPH] Vision error: {e}")
-        await update.message.reply_text(
-            "⚠️ GPT временно недоступен.\n\n"
-            "На глаз такие ситуации обычно требуют:\n"
-            "- Смотреть реакцию цены на ключевые уровни с объёмом\n"
-            "- При позитивных новостях часто выбивают стопы вниз перед ростом\n"
-            "Детальнее расскажу после восстановления сервиса!"
-        )
-
 def fetch_price_from_binance(symbol: str) -> float | None:
     """
     Получает последнюю цену с Binance через публичный REST API.
@@ -741,18 +658,40 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
     user_id = update.effective_user.id
     user_text = update.message.text.strip()
 
+    # 🪝 Подтягиваем котировки Binance для BTC и ETH
+    try:
+        btc_data = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()
+        eth_data = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT").json()
+        btc_price = float(btc_data["price"])
+        eth_price = float(eth_data["price"])
+    except Exception as e:
+        logging.error(f"[handle_invest_question] Binance price fetch error: {e}")
+        btc_price = eth_price = None
+
+    # 📝 Формируем prompt
     prompt = (
         "Imagine you are a top-tier investment strategist with over 20 years of experience in managing multi-asset portfolios, "
         "covering stocks, bonds, Forex, precious metals, and cryptocurrencies. "
         "You create robust, practical investment strategies specifically for clients from Russia who have access to Moscow Exchange (MOEX) instruments, "
         "Forex accounts through local brokers, and cryptocurrency exchanges.\n\n"
         f"Here is the client's question or goal: {user_text}\n\n"
+    )
+
+    # Если цены подтянулись — вставим их прямо в prompt
+    if btc_price and eth_price:
+        prompt += (
+            f"📊 For your reference, the current prices are:\n"
+            f"- BTC: ${btc_price}\n"
+            f"- ETH: ${eth_price}\n\n"
+        )
+
+    prompt += (
         "Your task is to provide a highly detailed, step-by-step personal investment strategy that feels like a professional, private consultation. "
         "Structure it clearly with short paragraphs, dashes and emojis — do NOT use asterisks or long-winded paragraphs. "
         "Make your tone friendly and human, with simple explanations that a beginner can easily grasp, while still sounding like an expert.\n\n"
         "Be sure to cover these points exactly, without skipping:\n\n"
         "👀 Profile snapshot\n"
-        "- Estimate the client's investment horizon (short, medium, long-term) and risk profile (aggressive, moderate, conservative) based on their request, with a brief explanation.\n"
+        "- Estimate the client's investment horizon (short, medium, long-term) and risk profile (aggressive, moderate, conservative) with a brief explanation.\n"
         "- Define their primary goal: capital growth, protection, or passive income.\n\n"
         "📊 Recommended portfolio breakdown\n"
         "- Suggest a balanced allocation only using instruments realistically available to Russian clients: MOEX stocks (Sberbank, Gazprom, etc.), OFZ bonds, Eurobonds, FinEx ETFs on MOEX, Forex pairs (EUR/USD, GBP/USD), cryptocurrencies (BTC, ETH, USDT), and protective assets like gold (XAU) and silver (XAG) via MOEX futures or bank metal accounts.\n"
@@ -975,7 +914,11 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
 
     if text == "💡 Стратегия":
-        await help_invest(update, context)
+        context.user_data["awaiting_invest_question"] = True
+        await update.message.reply_text(
+            "✍️ Напиши свой вопрос или опиши свою инвестиционную цель, "
+            "чтобы я составил стратегию с учётом текущих цен BTC/ETH и рекомендациями по диверсификации."
+        )
         return
 
     if text == "🎯 Риск":
@@ -1047,12 +990,11 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🔥 Умный сброс
     if not any([
         context.user_data.get("awaiting_potential"),
-        context.user_data.get("awaiting_macro_text"),
-        context.user_data.get("awaiting_definition_term"),
         context.user_data.get("awaiting_email"),
         context.user_data.get("awaiting_invest_question"),
         context.user_data.get("awaiting_pro_question"),
         context.user_data.get("awaiting_teacher_question"),
+        context.user_data.get("awaiting_definition_term"),
     ]):
         context.user_data.clear()
         await update.message.reply_text(
