@@ -1455,7 +1455,7 @@ async def post_init(app):
     ])
 
 def main():
-    global global_bot  # объявляем что будем использовать глобальный bot
+    global global_bot  # объявляем глобальный bot для notify_user_payment
 
     # 🚀 Создаём главный asyncio loop
     loop = asyncio.get_event_loop()
@@ -1467,7 +1467,7 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     logging.info("🚀 GPT-Трейдер стартовал!")
 
-    # ✅ Сохраняем bot глобально для функций notify_user_payment и др.
+    # ✅ Сохраняем bot глобально для всех уведомлений
     global_bot = app.bot
 
     # ✅ Глобальный error handler
@@ -1510,26 +1510,6 @@ def main():
         ]
     )
 
-    # 🧠 Помощь профессионала
-    help_conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^🧠 Помощь профессионала$"), help_pro)],
-        states={
-            INTERPRET_NEWS: [MessageHandler(filters.TEXT & ~filters.COMMAND, interpret_decision)],
-            ASK_EVENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_forecast)],
-            ASK_FORECAST: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_actual)],
-            ASK_ACTUAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, generate_interpretation)],
-            FOLLOWUP_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, followup_strategy)],
-            FOLLOWUP_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, followup_timeframe)],
-            FOLLOWUP_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, followup_market)],
-            GENERAL_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, general_response)],
-        },
-        fallbacks=[
-            CommandHandler("start", start, block=False),
-            CommandHandler("restart", restart, block=False),
-            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
-        ]
-    )
-
     # 📏 Калькулятор риска
     risk_calc_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc)],
@@ -1563,7 +1543,6 @@ def main():
     )
 
     # ✅ Регистрируем ConversationHandlers
-    app.add_handler(help_conv_handler)
     app.add_handler(therapy_handler)
     app.add_handler(risk_calc_handler)
     app.add_handler(setup_handler)
