@@ -224,73 +224,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-async def generate_interpretation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        user_data = user_inputs.get(update.effective_user.id)
-        if not user_data or not all(k in user_data for k in ("event", "forecast")):
-            await update.message.reply_text(
-                "⚠️ Не хватает данных для анализа. Попробуй заново начать с ввода события."
-            )
-            return ConversationHandler.END
-
-        user_data["actual"] = update.message.text.strip()
-
-        prompt = (
-            f"Event: {user_data['event']}\n"
-            f"Forecast: {user_data['forecast']}\n"
-            f"Actual: {user_data['actual']}\n\n"
-            "You are a professional trader with over 10 years of experience in cryptocurrency, forex, and stock markets. "
-            "Your analysis considers fundamental drivers, liquidity flows, market maker behavior, and crowd psychology.\n\n"
-            "---\n\n"
-            "📊 Analyze step by step:\n\n"
-            "1️⃣ Fundamental and technical context:\n"
-            "- How does this event impact liquidity, volatility, and market expectations?\n"
-            "- What key technical levels could become zones of accumulation or panic selling?\n"
-            "- Are there any signs of a possible reversal or continuation of the trend?\n\n"
-            "2️⃣ Provide two scenarios:\n"
-            "🟢 Bullish: where is the crowd likely to enter, where will large players start taking profits, "
-            "and what levels could trigger further growth?\n"
-            "🔴 Bearish: where are retail stop losses likely to be placed, where might market makers hunt them, "
-            "and where could the price find a new balance?\n\n"
-            "3️⃣ Forecast the short-term reaction for the next 1–3 days:\n"
-            "- How might retail traders react?\n"
-            "- What headlines could appear in the media or on Twitter?\n"
-            "- How might whales and funds respond?\n\n"
-            "4️⃣ Build a concise trading plan:\n"
-            "- Should the trader enter a position? If yes, specify:\n"
-            "  🎯 Entry: $_____\n"
-            "  🚨 StopLoss: $_____\n"
-            "  💰 TakeProfit: $_____\n"
-            "- What percentage of capital to allocate given the risk?\n\n"
-            "5️⃣ What might the trader miss if they ignore this event?\n"
-            "- Explain in simple terms why this event is critical.\n\n"
-            "✅ Finally, give a short signal in 1–2 lines suitable for a trader's chat.\n\n"
-            "Answer strictly in Russian."
-        )
-
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        answer = response.choices[0].message.content.strip()
-        await update.message.reply_text(
-            f"📚 GPT:\n{answer}",
-            reply_markup=REPLY_MARKUP
-        )
-
-    except Exception as e:
-        logging.error(f"[generate_interpretation] Ошибка: {e}")
-        await update.message.reply_text(
-            "⚠️ GPT временно недоступен. "
-            "Могу подсказать общий план на глаз:\n"
-            "- Если событие положительное и ликвидность растёт — ищи зону отката для лонга.\n"
-            "- Если факт хуже прогноза — рынок может собрать стопы внизу перед разворотом.\n"
-            "Детали после восстановления сервиса!"
-        )
-
-    return ConversationHandler.END
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -467,6 +400,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await photo.get_file()
     original_photo_bytes = await file.download_as_bytearray()
 
+    # Конвертируем изображение в base64 для Vision
     image = Image.open(BytesIO(original_photo_bytes)).convert("RGB")
     buffer = BytesIO()
     image.save(buffer, format="JPEG", quality=80)
@@ -481,7 +415,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Подготовим prompt_text в зависимости от выбранной стратегии
+    # Полностью твои промпты
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
@@ -599,6 +533,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     try:
+        # Самая важная часть — правильный формат для Vision
         vision_response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[{
@@ -630,8 +565,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ GPT временно недоступен. "
             "На глаз по таким графикам:\n"
-            "- Если рынок растёт, ищи консолидацию и объём для входа.\n"
-            "- Если падает, смотри реакцию на старые уровни спроса.\n"
+            "- Если рынок растёт, ищи консолидацию и объём.\n"
+            "- Если падает, смотри реакцию на старые уровни.\n"
             "Подробный сценарий дам после восстановления сервиса!"
         )
 
@@ -701,35 +636,35 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     prompt = (
         "You are a professional crypto trader with over 10 years of experience. "
-        "Analyze the provided chart carefully and perform a structured step-by-step analysis.\n\n"
-        "📊 Step-by-step:\n\n"
-        "1️⃣ **Core market factors:**\n"
-        "- Identify the trend (uptrend, downtrend, sideways).\n"
-        "- Find major support and resistance levels.\n"
-        "- Are there clear patterns (double top, double bottom, flag, etc.)?\n"
-        "- What do volumes show near these levels?\n\n"
-        "2️⃣ **Market structure:**\n"
-        "- Are there signs of accumulation before a move?\n"
-        "- Any signals of a reversal or strengthening of the current trend?\n"
-        "- Have similar situations occurred in this asset's history?\n\n"
-        f"🌐 **Also consider this fundamental background:** {macro}\n\n"
-        "3️⃣ **Build two scenarios:**\n"
-        "🟢 **Breakout upwards:**\n"
+        "Analyze the provided chart carefully and prepare a structured, beginner-friendly step-by-step analysis with emojis. "
+        "Do NOT use asterisks. Use dashes and emojis to structure lists. "
+        "Keep sentences short, explain terms simply, and answer in Russian only.\n\n"
+        f"🌐 Here's some fundamental context to consider: {macro}\n\n"
+        "🔍 Analysis plan:\n\n"
+        "👀 Core market factors\n"
+        "- Determine trend (up, down, sideways)\n"
+        "- Show key support and resistance levels\n"
+        "- Look for patterns like double tops, flags, etc.\n"
+        "- Check volumes near these levels\n\n"
+        "🏗 Market structure\n"
+        "- Is there accumulation before a move?\n"
+        "- Any signals for reversal or continuation?\n"
+        "- Did similar setups happen before on this asset?\n\n"
+        "🟢 Scenario: breakout upwards\n"
         "- 🎯 Entry: $_____\n"
         "- 🚨 StopLoss: $_____\n"
         "- 💰 TakeProfit: $_____\n"
-        "- Briefly estimate probability of success (in %).\n\n"
-        "🔴 **Breakdown downwards:**\n"
+        "- Estimate success chances in %\n\n"
+        "🔴 Scenario: breakdown downwards\n"
         "- 🎯 Entry: $_____\n"
         "- 🚨 StopLoss: $_____\n"
         "- 💰 TakeProfit: $_____\n"
-        "- Briefly estimate probability of success (in %).\n\n"
-        "4️⃣ **What else should the trader check to confirm scenarios:**\n"
-        "- Volume Profile, order book (limit orders), large cluster trades, and latest news.\n\n"
-        "✅ Finish with a concise 2-line signal for a trader's chat, e.g.:\n"
-        "> LONG from $___, stop at $___, targets $___ — likely accumulation before impulse.\n\n"
-        "Also provide a short bullet summary in English if needed for clarity.\n"
-        "Answer everything strictly in Russian."
+        "- Estimate success chances in %\n\n"
+        "🛠 Extra checks\n"
+        "- Volume Profile, order book, clusters, latest news\n\n"
+        "✅ Finish with a short 2-line trading signal for a chat, like:\n"
+        "🚀 Long from $___, stop at $___, target $___ — likely accumulation before move.\n\n"
+        "Provide a quick bullet summary in English only if truly necessary for clarity."
     )
 
     try:
@@ -749,7 +684,7 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         answer = response.choices[0].message.content.strip()
         await update.message.reply_text(
-            f"📊 Прогноз по графику + новости:\n\n"
+            f"📊 Прогноз по графику с учётом новостей:\n\n"
             f"{answer}\n\n"
             f"📰 Полезные ссылки:\n"
             f"• [Forklog](https://t.me/forklog)\n"
@@ -763,11 +698,11 @@ async def handle_macro_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"[MACRO_GRAPH] Vision error: {e}")
         await update.message.reply_text(
-            "⚠️ GPT временно недоступен. "
-            "На глаз по таким кейсам обычно:\n"
-            "- Смотри реакцию цены на ключевые уровни + объём.\n"
-            "- При положительных новостях часто выбивают стопы вниз перед ростом.\n"
-            "Детальнее после восстановления сервиса!"
+            "⚠️ GPT временно недоступен.\n\n"
+            "На глаз такие ситуации обычно требуют:\n"
+            "- Смотреть реакцию цены на ключевые уровни с объёмом\n"
+            "- При позитивных новостях часто выбивают стопы вниз перед ростом\n"
+            "Детальнее расскажу после восстановления сервиса!"
         )
 
 def fetch_price_from_binance(symbol: str) -> float | None:
@@ -803,61 +738,78 @@ async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
 async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     user_text = update.message.text.strip()
 
     prompt = (
-        "You are a professional investment strategist with over 20 years of experience across equities, bonds, ETFs, commodities, and cryptocurrencies. "
-        "You have managed portfolios for HNWI (High-Net-Worth Individuals) and institutional clients. "
-        "Your task is to develop a deep, structured, and personalized investment strategy based on the client's request.\n\n"
-        f"Client request: {user_text}\n\n"
-        "🔍 Work step by step in detail. Avoid generic phrases, clichés, or meaningless advice. "
-        "Your answer must be precise and look like the work of a professional consultant.\n\n"
-        "---\n\n"
-        "📊 Structure your answer as follows:\n\n"
-        "1️⃣ **Client profile diagnostics:**\n"
-        "- Determine the investment horizon (short, medium, long-term) based on the request.\n"
-        "- Determine the risk profile: aggressive, moderate, or conservative (and explain why).\n"
-        "- Formulate the main goal (capital growth, capital preservation, dividend income, etc.).\n\n"
-        "2️⃣ **Optimal portfolio structure:**\n"
-        "- Provide specific asset classes (stocks, ETFs, bonds, crypto, commodities) with approximate percentage allocations.\n"
-        "- For each asset class, give a brief rationale for why this proportion.\n\n"
-        "3️⃣ **Macroeconomic and market context:**\n"
-        "- List the key economic risks and trends currently impacting this strategy.\n"
-        "- Explain how this portfolio is protected from or exposed to these factors.\n\n"
-        "4️⃣ **Detailed step-by-step plan:**\n"
-        "- What actions should be taken now (e.g., open an investment account, set up auto-deposits).\n"
-        "- How often to review the portfolio (quarterly, semi-annually, and why).\n"
-        "- Which indicators or reports to monitor for rebalancing.\n\n"
-        "5️⃣ **Scenario analysis:**\n"
-        "- Provide 2 scenarios: 'Market rises' and 'Market declines'. Describe what to do in each case.\n\n"
-        "6️⃣ **Final summary:**\n"
-        "- Formulate a concise 2-3 line conclusion suitable for a trader's chat, for example: "
-        "'🚀 Strategy fits a 3+ year horizon, moderate risk, portfolio review every 6 months.'\n\n"
-        "Answer everything strictly in Russian. Be succinct, professional, and avoid unnecessary fluff."
+        "Imagine you are a top-tier investment strategist with over 20 years of experience in managing multi-asset portfolios, "
+        "covering stocks, bonds, Forex, precious metals, and cryptocurrencies. "
+        "You create robust, practical investment strategies specifically for clients from Russia who have access to Moscow Exchange (MOEX) instruments, "
+        "Forex accounts through local brokers, and cryptocurrency exchanges.\n\n"
+        f"Here is the client's question or goal: {user_text}\n\n"
+        "Your task is to provide a highly detailed, step-by-step personal investment strategy that feels like a professional, private consultation. "
+        "Structure it clearly with short paragraphs, dashes and emojis — do NOT use asterisks or long-winded paragraphs. "
+        "Make your tone friendly and human, with simple explanations that a beginner can easily grasp, while still sounding like an expert.\n\n"
+        "Be sure to cover these points exactly, without skipping:\n\n"
+        "👀 Profile snapshot\n"
+        "- Estimate the client's investment horizon (short, medium, long-term) and risk profile (aggressive, moderate, conservative) based on their request, with a brief explanation.\n"
+        "- Define their primary goal: capital growth, protection, or passive income.\n\n"
+        "📊 Recommended portfolio breakdown\n"
+        "- Suggest a balanced allocation only using instruments realistically available to Russian clients: MOEX stocks (Sberbank, Gazprom, etc.), OFZ bonds, Eurobonds, FinEx ETFs on MOEX, Forex pairs (EUR/USD, GBP/USD), cryptocurrencies (BTC, ETH, USDT), and protective assets like gold (XAU) and silver (XAG) via MOEX futures or bank metal accounts.\n"
+        "- Give approximate percentages for each asset class, explain in simple terms why it’s included.\n"
+        "- Highlight the role of gold and silver especially during uncertainty and crises.\n\n"
+        "💡 Risk management & averaging tactics\n"
+        "- Explain dollar-cost averaging (DCA) in plain language: buying gradually to smooth out prices.\n"
+        "- Offer advice on partial profit taking (e.g. after +20-30% gains) and using simple stop-losses to protect capital.\n\n"
+        "🌍 Macro & market realities\n"
+        "- List key macroeconomic and geopolitical risks relevant for Russian investors: Central Bank rates, inflation, RUB fluctuations, global tensions.\n"
+        "- Explain in simple words how this portfolio helps protect against these risks.\n\n"
+        "🚀 Immediate next steps\n"
+        "- Clearly state what the client should do now: open a brokerage account on MOEX, activate Forex, sign up on a crypto exchange.\n"
+        "- How to set up automatic deposits or plan regular partial buys.\n"
+        "- How often to review the portfolio (like every 3-6 months) and which metrics or events to watch.\n\n"
+        "📈 Scenario playbook\n"
+        "- What to do if markets rise: consider taking partial profits, maybe adding more positions.\n"
+        "- What to do if markets drop: don’t panic, consider averaging down or holding.\n\n"
+        "✅ Final friendly summary\n"
+        "- End with a short 2-3 line conclusion using emojis, such as: "
+        "🚀 Strategy for 3+ years, balanced risk, golden safety net, rebalance twice a year, building wealth step by step.\n\n"
+        "IMPORTANT: Respond entirely in Russian. Be ultra-friendly, use plenty of emojis, keep sentences short and clear, explain all financial terms in plain words so even a total beginner can easily follow."
     )
 
     try:
-        response = await client.chat.completions.create(
+        gpt_response = await client.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000
         )
-        answer = response.choices[0].message.content.strip()
+
+        analysis = gpt_response.choices[0].message.content.strip()
+        if not analysis:
+            await update.message.reply_text(
+                "⚠️ GPT не дал ответа. Попробуй задать вопрос ещё раз."
+            )
+            return
+
         await update.message.reply_text(
-            f"📈 Инвестиционная стратегия:\n\n{answer}",
+            f"💼 Вот твоя персональная инвестиционная стратегия:\n\n{analysis}",
             reply_markup=REPLY_MARKUP
         )
-        context.user_data.clear()
 
     except Exception as e:
         logging.error(f"[handle_invest_question] GPT error: {e}")
         await update.message.reply_text(
-            "⚠️ GPT временно недоступен. "
-            "На глаз: для умеренного риска часто берут примерно\n"
-            "- 50% акции/ETF,\n"
-            "- 30% облигации,\n"
-            "- 10% золото и сырьё,\n"
-            "- 10% крипта.\n"
-            "Пересмотри портфель раз в 6 месяцев. Детальнее после восстановления сервиса!"
+            "⚠️ GPT временно недоступен.\n\n"
+            "На глаз: для умеренного риска обычно делают так 📊\n"
+            "- 40-50% акции MOEX (Сбер, Газпром и др.)\n"
+            "- 20-30% облигации ОФЗ или еврооблигации\n"
+            "- 10-15% золото и серебро (XAU, XAG)\n"
+            "- 10-15% крипта (BTC, ETH)\n"
+            "- и часть в Forex (EUR/USD, GBP/USD) для валютной подушки.\n\n"
+            "📝 Пересматривай портфель раз в 6 месяцев, усредняй покупки частями и фиксируй часть прибыли при росте +20-30%.\n"
+            "Детальнее подскажу после восстановления сервиса!"
         )
         context.user_data.clear()
 
@@ -1432,8 +1384,6 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # ✅ Остальные режимы
     elif context.user_data.get("awaiting_potential"):
         await handle_potential(update, context)
-    elif context.user_data.get("awaiting_macro_text"):
-        await handle_macro_text(update, context)
     elif context.user_data.get("awaiting_definition_term"):
         await handle_definition(update, context)
     elif context.user_data.get("awaiting_invest_question"):
