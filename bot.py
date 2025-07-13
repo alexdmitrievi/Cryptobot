@@ -918,7 +918,9 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💰 Купить", "ℹ️ О боте", "📌 Сетап"
     ]
     if text in reset_commands:
+        saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
         context.user_data.clear()
+        context.user_data.update(saved_data)
 
     if text == "💡 Стратегия":
         context.user_data["awaiting_invest_question"] = True
@@ -994,7 +996,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
         return SETUP_1
 
-    # 🔥 Умный сброс
+    # 🔥 Умный сброс, но сохраняем выбор стратегии/рынка
     if not any([
         context.user_data.get("awaiting_potential"),
         context.user_data.get("awaiting_email"),
@@ -1003,7 +1005,9 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.get("awaiting_teacher_question"),
         context.user_data.get("awaiting_definition_term"),
     ]):
+        saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
         context.user_data.clear()
+        context.user_data.update(saved_data)
         await update.message.reply_text(
             "🔄 Сброс всех ожиданий. Продолжай.",
             reply_markup=REPLY_MARKUP
