@@ -597,6 +597,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Подробный сценарий дам после восстановления сервиса!"
         )
 
+import re
+
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
     photo = update.message.photo[-1]
@@ -605,22 +607,37 @@ async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Преобразуем в BytesIO для Telegram API
     image_stream = BytesIO(photo_bytes)
-    image_stream.name = "setup.jpg"  # важно для Telegram
+    image_stream.name = "setup.jpg"
 
-    # Собираем описание из context.user_data
+    # Собираем данные
     instrument = context.user_data.get("instrument", "Не указано")
-    risk_area = context.user_data.get("risk_area", "Не указано")
+    risk_area = context.user_data.get("risk_area")
     targets = context.user_data.get("targets", "Не указано")
     stoploss = context.user_data.get("stoploss", "Не указано")
+    entry = context.user_data.get("entry")
+
+    # Авторасчёт области риска
+    if not risk_area or risk_area == "Не указано":
+        try:
+            entry_value = float(entry)
+            stop_value = float(stoploss)
+            risk_percent = abs((entry_value - stop_value) / entry_value * 100)
+            risk_area = f"{risk_percent:.2f}% (авторасчёт)"
+        except:
+            risk_area = "Не указана — оценивай внимательно"
 
     caption = (
-        f"🚀 *Новый сетап от админа*\n\n"
-        f"• 📌 *Инструмент:* {instrument}\n"
-        f"• 💰 *Область риска:* {risk_area}\n"
-        f"• 🎯 *Цели:* {targets}\n"
-        f"• 🚨 *Стоп-лосс:* {stoploss}\n\n"
-        f"🧮 [Рассчитать позицию](https://t.me/ai4traders_bot)"
+        f"🚀 Новый сетап от админа\n\n"
+        f"• 📌 Инструмент: {instrument}\n"
+        f"• 💰 Область риска: {risk_area}\n"
+        f"• 🎯 Цели: {targets}\n"
+        f"• 🚨 Стоп-лосс: {stoploss}"
     )
+
+    # Кнопка для рассчета риска
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
+    ])
 
     try:
         # Отправляем в канал
@@ -629,7 +646,7 @@ async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id,
             photo=image_stream,
             caption=caption,
-            parse_mode="Markdown"
+            reply_markup=keyboard
         )
 
         # Закрепляем
