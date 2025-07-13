@@ -321,7 +321,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✉️ Напиши свой email для получения секретного PDF со стратегиями:"
         )
 
-    # ✅ Новый блок для анализа новостей
     elif query.data == "interpret_calendar":
         context.user_data["awaiting_news"] = "calendar"
         await query.message.reply_text(
@@ -342,6 +341,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🌐 Опиши новость, которая может повлиять на финансовый рынок."
         )
 
+    # ✅ Новый блок для кнопки "📏 Рассчитать риск"
+    elif query.data == "start_risk_calc":
+        await start_risk_calc(update, context)
 
 async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
