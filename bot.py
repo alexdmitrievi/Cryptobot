@@ -415,6 +415,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # 💪 Самые твёрдые промпты для всех стилей
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
@@ -422,9 +423,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "You deeply understand BOS, CHoCH, liquidity hunts, OTE, premium/discount zones.\n\n"
                 "Look at the TradingView chart. Ensure it contains:\n"
                 "- Smart Money Concepts (SMC) Lux Algo\n"
-                "- LazyScalp Board showing DV (might be in M or B).\n"
-                "⚠️ If DV < 200M, clearly warn but ALWAYS continue with full analysis.\n\n"
-                "Then answer in this structure:\n"
+                "- LazyScalp Board showing DV (might be in M or B).\n\n"
+                "⚠️ If DV < 200M or unclear, WARN but ALWAYS build a detailed SMC plan anyway. "
+                "Never apologize or say you can't analyze — ALWAYS provide Entry, StopLoss and TakeProfit levels, even if roughly estimated with a caution.\n\n"
+                "Then structure your answer:\n"
                 "1️⃣ Observations (BOS/CHoCH/liquidity)\n"
                 "2️⃣ Trading plan:\n"
                 "  🎯 Entry: $_____\n"
@@ -438,8 +440,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             prompt_text = (
                 "You are a highly skilled Smart Money Concepts (SMC) trader on Forex with 10+ years of experience. "
                 "You master BOS, CHoCH, OTE, liquidity zones and order flow.\n\n"
-                "Ensure Smart Money Concepts Lux Algo is active. Note: DV might be in M or B. "
-                "⚠️ If DV < 200M, warn but proceed.\n\n"
+                "Ensure Smart Money Concepts Lux Algo is active. Note: DV might be in M or B.\n"
+                "⚠️ If DV < 200M or uncertain, warn but ALWAYS build a full plan. Never say you can't — ALWAYS give Entry, StopLoss and TakeProfit.\n\n"
                 "Format:\n"
                 "1️⃣ Observations\n"
                 "2️⃣ Trading plan:\n"
@@ -457,7 +459,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "- Auto Support & Resistance or Lux Algo Levels\n"
                 "- Volume Profile\n"
                 "- LazyScalp Board (DV may be in M or B).\n"
-                "⚠️ If DV < 200M, warn but proceed.\n\n"
+                "⚠️ If DV < 200M or unclear, warn but ALWAYS continue with Entry, StopLoss, TakeProfit, even if approximate.\n\n"
                 "Provide:\n"
                 "1️⃣ Observations (zones & volume)\n"
                 "2️⃣ Swing plan:\n"
@@ -474,7 +476,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "- Auto Support & Resistance or Lux Algo Levels\n"
                 "- Volume Profile if present\n"
                 "- RSI or Stochastic.\n"
-                "⚠️ If DV < 200M, warn but give full analysis.\n\n"
+                "⚠️ If DV < 200M or missing, warn but ALWAYS build the full plan.\n\n"
                 "Structure:\n"
                 "1️⃣ Observations\n"
                 "2️⃣ Plan:\n"
@@ -491,7 +493,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Chart should include:\n"
                 "- Range Detection or Lux Algo\n"
                 "- LazyScalp Board (DV may be in M or B).\n"
-                "⚠️ If DV < 200M, warn but STILL give two breakout scenarios.\n\n"
+                "⚠️ If DV < 200M or data incomplete, WARN but ALWAYS give two breakout scenarios with Entry, StopLoss, TakeProfit.\n\n"
                 "Answer format:\n"
                 "- 📈 Up:\n"
                 "    🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
@@ -508,7 +510,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Ensure:\n"
                 "- Range Detection or Lux Algo Levels\n"
                 "- Volume Profile.\n"
-                "⚠️ If DV < 200M, warn but still give two scenarios.\n\n"
+                "⚠️ If DV < 200M or unclear, WARN but STILL build two scenarios.\n\n"
                 "- 📈 Up: Entry / StopLoss / TakeProfit\n"
                 "- 📉 Down: Entry / StopLoss / TakeProfit\n"
                 "Risk comment.\n"
@@ -518,7 +520,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         prompt_text = (
             "You are a professional trader with over 10 years in crypto and Forex. "
-            "If DV < 200M, warn but proceed.\n\n"
+            "If DV < 200M or missing, WARN but ALWAYS proceed with the plan.\n\n"
             "Provide:\n"
             "- Observations (trend, accumulation, volume)\n"
             "- 🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
@@ -539,7 +541,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     }}
                 ]
             }],
-            max_tokens=700
+            max_tokens=900
         )
 
         analysis = vision_response.choices[0].message.content.strip()
@@ -549,7 +551,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        risk_match = re.search(r'(\d+(?:\.\d+)?)(?:\s*-\s*(\d+(?:\.\d+)?))?\s*%', analysis)
+        # Ультра-точный regex для любого варианта "≈3%", "~3%", "от 3% до 5%", "3-5%"
+        risk_match = re.search(
+            r'(?:≈|~|от)?\s*(\d+(?:\.\d+)?)\s*(?:-|до)?\s*(\d+(?:\.\d+)?)?\s*%',
+            analysis,
+            flags=re.IGNORECASE
+        )
         if risk_match:
             if risk_match.group(2):
                 risk_line = f"📌 Область риска ≈ {risk_match.group(1)}-{risk_match.group(2)}%"
@@ -576,6 +583,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "- Если падает, смотри реакцию на старые уровни.\n"
             "Подробный сценарий дам после восстановления сервиса!"
         )
+
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
