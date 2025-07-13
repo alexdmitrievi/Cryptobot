@@ -415,125 +415,119 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Полностью твои промпты
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
-                "You are a professional Smart Money Concepts (SMC) trader with over 10 years of experience in cryptocurrency markets.\n\n"
-                "Ensure the TradingView chart includes:\n"
+                "You are a world-class professional Smart Money Concepts (SMC) trader with 10+ years of experience in cryptocurrency markets. "
+                "You deeply understand BOS, CHoCH, liquidity hunts, OTE, premium/discount zones.\n\n"
+                "Look at the TradingView chart. Ensure it contains:\n"
                 "- Smart Money Concepts (SMC) Lux Algo\n"
-                "- LazyScalp Board for DV.\n\n"
-                "If DV < 200M, write 🚫 and stop.\n"
-                "If DV ≥ 200M:\n"
-                "- Identify BOS, CHoCH, liquidity zones and OTE.\n"
-                "- Build a detailed trading plan:\n"
+                "- LazyScalp Board showing DV (might be in M or B).\n"
+                "⚠️ If DV < 200M, clearly warn but ALWAYS continue with full analysis.\n\n"
+                "Then answer in this structure:\n"
+                "1️⃣ Observations (BOS/CHoCH/liquidity)\n"
+                "2️⃣ Trading plan:\n"
                 "  🎯 Entry: $_____\n"
                 "  🚨 StopLoss: $_____\n"
-                "  💰 TakeProfit: $_____\n\n"
-                "✅ Finally, generate a concise 2-line summary in Russian suitable for a trader's chat.\n"
-                "Answer strictly in Russian."
+                "  💰 TakeProfit: $_____\n"
+                "3️⃣ Risk commentary on current DV.\n"
+                "✅ Finally, give a concise 2-line summary in Russian with emojis.\n"
+                "IMPORTANT: Answer strictly in Russian."
             )
         else:
             prompt_text = (
-                "You are a Smart Money Concepts (SMC) trader on Forex with over 10 years of experience.\n\n"
-                "Ensure Smart Money Concepts (SMC) Lux Algo is active.\n"
-                "- Identify BOS, CHoCH, OTE and liquidity zones.\n"
-                "- Build a detailed plan:\n"
-                "  🎯 Entry: $_____\n"
-                "  🚨 StopLoss: $_____\n"
-                "  💰 TakeProfit: $_____\n\n"
-                "✅ Finish with a short 2-line summary in Russian for a trader's chat.\n"
-                "Answer strictly in Russian."
+                "You are a highly skilled Smart Money Concepts (SMC) trader on Forex with 10+ years of experience. "
+                "You master BOS, CHoCH, OTE, liquidity zones and order flow.\n\n"
+                "Ensure Smart Money Concepts Lux Algo is active. Note: DV might be in M or B. "
+                "⚠️ If DV < 200M, warn but proceed.\n\n"
+                "Format:\n"
+                "1️⃣ Observations\n"
+                "2️⃣ Trading plan:\n"
+                "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
+                "3️⃣ Short risk note.\n"
+                "✅ Finish with a concise 2-line Russian summary with emojis.\n"
+                "IMPORTANT: Answer strictly in Russian."
             )
     elif selected_style == "swing":
         if selected_market == "crypto":
             prompt_text = (
-                "You are an experienced swing trader in cryptocurrency markets.\n\n"
-                "Ensure the chart includes:\n"
+                "You are a seasoned swing trader in cryptocurrency markets with over 10 years of experience. "
+                "Specialize in accumulation, break structures, volume confluence.\n\n"
+                "Chart must show:\n"
                 "- Auto Support & Resistance or Lux Algo Levels\n"
                 "- Volume Profile\n"
-                "- LazyScalp Board.\n"
-                "If DV < 200M, write 🚫 and skip analysis.\n"
-                "If DV ≥ 200M:\n"
-                "- Identify accumulation zones and key levels.\n"
-                "- Build a detailed plan:\n"
-                "  🎯 Entry: $_____\n"
-                "  🚨 StopLoss: $_____\n"
-                "  💰 TakeProfit: $_____\n\n"
-                "✅ Conclude with a concise 2-line summary in Russian for a trader's chat.\n"
-                "Answer strictly in Russian."
+                "- LazyScalp Board (DV may be in M or B).\n"
+                "⚠️ If DV < 200M, warn but proceed.\n\n"
+                "Provide:\n"
+                "1️⃣ Observations (zones & volume)\n"
+                "2️⃣ Swing plan:\n"
+                "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
+                "3️⃣ Quick risk note.\n"
+                "✅ Conclude with 2-line Russian summary with emojis.\n"
+                "IMPORTANT: Answer strictly in Russian."
             )
         else:
             prompt_text = (
-                "You are a swing trader on Forex.\n\n"
-                "Ensure the chart includes:\n"
+                "You are an advanced swing trader on Forex with over 10 years of expertise. "
+                "You spot accumulation, momentum shifts.\n\n"
+                "Ensure:\n"
                 "- Auto Support & Resistance or Lux Algo Levels\n"
-                "- Volume Profile if available\n"
-                "- RSI or Stochastic indicators.\n"
-                "- Identify accumulation zones and levels.\n"
-                "- Build a detailed plan:\n"
-                "  🎯 Entry: $_____\n"
-                "  🚨 StopLoss: $_____\n"
-                "  💰 TakeProfit: $_____\n\n"
-                "✅ Finish with a concise 2-line summary in Russian for a trader's chat.\n"
-                "Answer strictly in Russian."
+                "- Volume Profile if present\n"
+                "- RSI or Stochastic.\n"
+                "⚠️ If DV < 200M, warn but give full analysis.\n\n"
+                "Structure:\n"
+                "1️⃣ Observations\n"
+                "2️⃣ Plan:\n"
+                "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
+                "3️⃣ Risk comment.\n"
+                "✅ End with 2-line Russian summary with emojis.\n"
+                "IMPORTANT: Answer strictly in Russian."
             )
     elif selected_style == "breakout":
         if selected_market == "crypto":
             prompt_text = (
-                "You are a scalper and intraday trader in cryptocurrency markets.\n\n"
-                "Ensure the chart includes:\n"
+                "You are a scalper and intraday breakout trader in cryptocurrency with over 10 years of experience. "
+                "You read consolidation, volume pushes, stop hunts.\n\n"
+                "Chart should include:\n"
                 "- Range Detection or Lux Algo\n"
-                "- LazyScalp Board for volumes.\n"
-                "If DV < 200M, write 🚫 and stop.\n"
-                "If DV ≥ 200M:\n"
-                "- Find the consolidation range.\n"
-                "- Provide two breakout scenarios:\n"
-                "  📈 Up:\n"
-                "    🎯 Entry: $_____\n"
-                "    🚨 StopLoss: $_____\n"
-                "    💰 TakeProfit: $_____\n"
-                "  📉 Down:\n"
-                "    🎯 Entry: $_____\n"
-                "    🚨 StopLoss: $_____\n"
-                "    💰 TakeProfit: $_____\n\n"
-                "✅ Conclude with a short 2-line summary in Russian for a trader's chat.\n"
-                "Answer strictly in Russian."
+                "- LazyScalp Board (DV may be in M or B).\n"
+                "⚠️ If DV < 200M, warn but STILL give two breakout scenarios.\n\n"
+                "Answer format:\n"
+                "- 📈 Up:\n"
+                "    🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
+                "- 📉 Down:\n"
+                "    🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
+                "Short risk note.\n"
+                "✅ Then a concise 2-line Russian summary with emojis.\n"
+                "IMPORTANT: Answer strictly in Russian."
             )
         else:
             prompt_text = (
-                "You are a scalper and intraday trader on Forex.\n\n"
-                "Ensure the chart includes Range Detection or Lux Algo Levels and Volume Profile.\n"
-                "- Identify the consolidation range.\n"
-                "- Provide two breakout scenarios up and down:\n"
-                "  📈 Up:\n"
-                "    🎯 Entry: $_____\n"
-                "    🚨 StopLoss: $_____\n"
-                "    💰 TakeProfit: $_____\n"
-                "  📉 Down:\n"
-                "    🎯 Entry: $_____\n"
-                "    🚨 StopLoss: $_____\n"
-                "    💰 TakeProfit: $_____\n\n"
-                "✅ End with a concise 2-line summary in Russian for a trader's chat.\n"
-                "Answer strictly in Russian."
+                "You are a scalper and intraday breakout trader on Forex with 10+ years of expertise. "
+                "Spot ranges, breakouts, liquidity traps.\n\n"
+                "Ensure:\n"
+                "- Range Detection or Lux Algo Levels\n"
+                "- Volume Profile.\n"
+                "⚠️ If DV < 200M, warn but still give two scenarios.\n\n"
+                "- 📈 Up: Entry / StopLoss / TakeProfit\n"
+                "- 📉 Down: Entry / StopLoss / TakeProfit\n"
+                "Risk comment.\n"
+                "✅ Conclude with 2-line Russian summary with emojis.\n"
+                "IMPORTANT: Answer strictly in Russian."
             )
     else:
         prompt_text = (
-            "You are a trader with over 10 years of experience in crypto and Forex markets.\n\n"
-            "For crypto ensure LazyScalp Board and Lux Algo Levels are enabled.\n"
-            "If DV < 200M, write 🚫.\n"
-            "For crypto with DV ≥ 200M and for Forex:\n"
-            "- Determine trend and accumulation zones.\n"
-            "- Build a detailed plan:\n"
-            "  🎯 Entry: $_____\n"
-            "  🚨 StopLoss: $_____\n"
-            "  💰 TakeProfit: $_____\n\n"
-            "✅ Conclude with a concise 2-line summary in Russian for a trader's chat.\n"
-            "Answer strictly in Russian."
+            "You are a professional trader with over 10 years in crypto and Forex. "
+            "If DV < 200M, warn but proceed.\n\n"
+            "Provide:\n"
+            "- Observations (trend, accumulation, volume)\n"
+            "- 🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
+            "Short risk comment.\n"
+            "✅ Conclude with 2-line Russian summary with emojis.\n"
+            "IMPORTANT: Answer strictly in Russian."
         )
 
     try:
-        # Самая важная часть — правильный формат для Vision
         vision_response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[{
@@ -555,15 +549,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        risk_match = re.search(r'(\d+(?:\.\d+)?)(?:\s*-\s*(\d+(?:\.\d+)?))?\s*%', analysis)
+        if risk_match:
+            if risk_match.group(2):
+                risk_line = f"📌 Область риска ≈ {risk_match.group(1)}-{risk_match.group(2)}%"
+            else:
+                risk_line = f"📌 Область риска ≈ {risk_match.group(1)}%"
+        else:
+            risk_line = "📌 Область риска не указана явно — оценивай внимательно."
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
+        ])
+
         await update.message.reply_text(
-            f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}",
-            reply_markup=REPLY_MARKUP
+            f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}\n\n{risk_line}",
+            reply_markup=keyboard
         )
 
     except Exception as e:
         logging.error(f"[handle_photo] Vision error: {e}")
         await update.message.reply_text(
-            "⚠️ GPT временно недоступен. "
+            "⚠️ GPT временно недоступен.\n\n"
             "На глаз по таким графикам:\n"
             "- Если рынок растёт, ищи консолидацию и объём.\n"
             "- Если падает, смотри реакцию на старые уровни.\n"
