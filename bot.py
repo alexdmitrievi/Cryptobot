@@ -60,6 +60,11 @@ gc = gspread.authorize(creds)
 SPREADSHEET_ID = "1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs"
 sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 
+def save_referral_data(user_id, username, ref_program, broker, uid):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    row = [str(user_id), username, now, ref_program, broker, uid]
+    sheet.append_row(row)
+
 # ✅ Rate-limit safe append для Sheets
 @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
 def safe_append_row(row):
@@ -344,6 +349,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ✅ Новый блок для кнопки "📏 Рассчитать риск"
     elif query.data == "start_risk_calc":
         await start_risk_calc(update, context)
+
+    # ✅ Новый блок для кнопок реферальной программы
+    elif query.data == "ref_bybit":
+        context.user_data["ref_program"] = "bybit"
+        context.user_data["broker"] = "Bybit"
+        context.user_data["awaiting_uid"] = True
+        await query.message.reply_text(
+            "📈 Отлично!\n"
+            "Перейдите по моей реферальной ссылке и зарегистрируйтесь на Bybit:\n"
+            "👉 https://www.bybit.com/invite?ref=YYVME8\n\n"
+            "Внесите депозит от $150 и пришлите сюда свой UID с Bybit для проверки."
+        )
+
+    elif query.data == "ref_forex4you":
+        context.user_data["ref_program"] = "forex4you"
+        context.user_data["broker"] = "Forex4You"
+        context.user_data["awaiting_uid"] = True
+        await query.message.reply_text(
+            "📊 Отлично!\n"
+            "Перейдите по моей реферальной ссылке и зарегистрируйтесь на Forex4You:\n"
+            "👉 https://www.forex4you.org/?affid=hudpyc9\n\n"
+            "Внесите депозит от $200 и пришлите сюда свой UID с Forex4You для проверки."
+        )
 
 async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -943,9 +971,9 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logging.info(f"[handle_main] Пользователь {user_id} нажал кнопку: {text}")
 
-    if user_id not in ALLOWED_USERS and text not in ["💰 Купить", "ℹ️ О боте"]:
+    if user_id not in ALLOWED_USERS and text not in ["💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера"]:
         await update.message.reply_text(
-            "🔒 Доступ только после активации подписки за $25.",
+            "🔒 Доступ только после активации подписки за $25 или через брокера.",
             reply_markup=REPLY_MARKUP
         )
         return
@@ -954,7 +982,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎯 Риск", "🌱 Психолог", "🔍 Анализ",
         "💡 Стратегия", "📚 Термин",
         "🚀 Сигнал", "📖 Обучение",
-        "💰 Купить", "ℹ️ О боте", "📌 Сетап"
+        "💰 Купить", "ℹ️ О боте", "📌 Сетап",
+        "🔗 Бесплатный доступ через брокера"
     ]
     if text in reset_commands:
         saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
@@ -1022,9 +1051,23 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "ℹ️ О боте":
         await update.message.reply_text(
-            "Подписка активируется через CryptoCloud.\n"
-            "Нажми 💰 Купить для получения ссылки на оплату.",
+            "Подписка активируется через CryptoCloud или через регистрацию у брокера.\n"
+            "Нажми 💰 Купить для получения ссылки на оплату или 🔗 Бесплатный доступ через брокера.",
             reply_markup=REPLY_MARKUP
+        )
+        return
+
+    if text == "🔗 Бесплатный доступ через брокера":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Bybit", callback_data="ref_bybit")],
+            [InlineKeyboardButton("Forex4You", callback_data="ref_forex4you")]
+        ])
+        await update.message.reply_text(
+            "🚀 Выберите брокера для регистрации по моей реферальной ссылке:\n"
+            "- Для Bybit минимальный депозит $150\n"
+            "- Для Forex4You минимальный депозит $200\n\n"
+            "После регистрации пришлите сюда свой UID для проверки.",
+            reply_markup=keyboard
         )
         return
 
@@ -1043,6 +1086,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.get("awaiting_pro_question"),
         context.user_data.get("awaiting_teacher_question"),
         context.user_data.get("awaiting_definition_term"),
+        context.user_data.get("awaiting_uid")
     ]):
         saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
         context.user_data.clear()
