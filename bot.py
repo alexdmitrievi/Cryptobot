@@ -415,7 +415,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💪 Самые твёрдые промпты для всех стилей
+    # 💪 Строго твоя структура промптов
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
@@ -551,19 +551,32 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Ультра-точный regex для любого варианта "≈3%", "~3%", "от 3% до 5%", "3-5%"
+        # Сначала ultra regex
         risk_match = re.search(
             r'(?:≈|~|от)?\s*(\d+(?:\.\d+)?)\s*(?:-|до)?\s*(\d+(?:\.\d+)?)?\s*%',
             analysis,
             flags=re.IGNORECASE
         )
+
         if risk_match:
             if risk_match.group(2):
                 risk_line = f"📌 Область риска ≈ {risk_match.group(1)}-{risk_match.group(2)}%"
             else:
                 risk_line = f"📌 Область риска ≈ {risk_match.group(1)}%"
         else:
-            risk_line = "📌 Область риска не указана явно — оценивай внимательно."
+            # Авторасчёт если не найдено
+            entry_match = re.search(r'Entry.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
+            stop_match = re.search(r'StopLoss.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
+            if entry_match and stop_match:
+                try:
+                    entry = float(entry_match.group(1))
+                    stop = float(stop_match.group(1))
+                    risk_percent = abs((entry - stop) / entry * 100)
+                    risk_line = f"📌 Область риска ≈ {risk_percent:.2f}% (авторасчёт)"
+                except:
+                    risk_line = "📌 Область риска не указана явно — оценивай внимательно."
+            else:
+                risk_line = "📌 Область риска не указана явно — оценивай внимательно."
 
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
@@ -583,7 +596,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "- Если падает, смотри реакцию на старые уровни.\n"
             "Подробный сценарий дам после восстановления сервиса!"
         )
-
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
