@@ -113,6 +113,7 @@ reply_keyboard = [
     ["📖 Обучение", "🌱 Психолог"],
     ["📚 Термин", "🎯 Риск"],
     ["💰 Купить", "ℹ️ О боте"],
+    ["🔗 Бесплатный доступ через брокера"],
     ["📌 Сетап"]
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
@@ -1441,19 +1442,19 @@ async def post_init(app):
     ])
 
 def main():
-    global global_bot  # объявляем глобальный bot для notify_user_payment
+    global global_bot
 
-    # 🚀 Создаём главный asyncio loop
+    # 🚀 Главный asyncio loop
     loop = asyncio.get_event_loop()
 
-    # 🚀 Запускаем Flask webhook в отдельном потоке, передаём loop
+    # 🚀 Flask webhook (для CryptoCloud) в отдельном потоке
     threading.Thread(target=run_flask, args=(loop,)).start()
 
     # ✅ Инициализация Telegram бота
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     logging.info("🚀 GPT-Трейдер стартовал!")
 
-    # ✅ Сохраняем bot глобально для всех уведомлений
+    # ✅ Глобальный bot для уведомлений
     global_bot = app.bot
 
     # ✅ Глобальный error handler
@@ -1463,7 +1464,7 @@ def main():
             await update.message.reply_text("⚠️ Произошла внутренняя ошибка. Попробуйте позже.")
     app.add_error_handler(error_handler)
 
-    # 🔄 Еженедельная рассылка через ENV cron
+    # 🔄 Еженедельная рассылка
     CRON_TIME = os.getenv("CRON_TIME", "0 12 * * mon")
     @aiocron.crontab(CRON_TIME)
     async def weekly_broadcast():
@@ -1533,7 +1534,7 @@ def main():
     app.add_handler(risk_calc_handler)
     app.add_handler(setup_handler)
 
-    # ✅ Регистрируем команды
+    # ✅ Стандартные команды
     app.add_handler(CommandHandler("start", start, block=False))
     app.add_handler(CommandHandler("restart", restart, block=False))
     app.add_handler(CommandHandler("publish", publish_post))
@@ -1543,10 +1544,10 @@ def main():
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("export", export))
 
-    # ✅ Фото, inline кнопки и универсальный текст
+    # ✅ Обработчики фото, inline кнопок и текста
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_text_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
 
     # 🚀 Запускаем polling
     app.run_polling()
