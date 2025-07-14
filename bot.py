@@ -155,41 +155,45 @@ async def setup_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SETUP_5
 
 async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message or update.callback_query.message
     context.user_data.clear()
-    await update.message.reply_text(
+    await msg.reply_text(
         "📊 Введи размер депозита в $:",
         reply_markup=REPLY_MARKUP
     )
     return RISK_CALC_1
 
 async def risk_calc_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message or update.callback_query.message
     try:
-        context.user_data["deposit"] = float(update.message.text.strip())
-        await update.message.reply_text("💡 Теперь введи процент риска на сделку (%):")
+        context.user_data["deposit"] = float(msg.text.strip())
+        await msg.reply_text("💡 Теперь введи процент риска на сделку (%):")
         return RISK_CALC_2
-    except ValueError:
-        await update.message.reply_text("❗️ Введи число. Пример: 1000")
+    except (ValueError, AttributeError):
+        await msg.reply_text("❗️ Введи число. Пример: 1000")
         return RISK_CALC_1
 
 async def risk_calc_risk_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message or update.callback_query.message
     try:
-        context.user_data["risk_percent"] = float(update.message.text.strip())
-        await update.message.reply_text("⚠️ Введи стоп-лосс по сделке (%):")
+        context.user_data["risk_percent"] = float(msg.text.strip())
+        await msg.reply_text("⚠️ Введи стоп-лосс по сделке (%):")
         return RISK_CALC_3
-    except ValueError:
-        await update.message.reply_text("❗️ Введи число. Пример: 2")
+    except (ValueError, AttributeError):
+        await msg.reply_text("❗️ Введи число. Пример: 2")
         return RISK_CALC_2
 
 async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message or update.callback_query.message
     try:
-        stoploss_percent = float(update.message.text.strip())
+        stoploss_percent = float(msg.text.strip())
         deposit = context.user_data["deposit"]
         risk_percent = context.user_data["risk_percent"]
 
         risk_amount = deposit * risk_percent / 100
         position_size = risk_amount / (stoploss_percent / 100)
 
-        await update.message.reply_text(
+        await msg.reply_text(
             f"✅ Результат:\n"
             f"• Депозит: ${deposit:.2f}\n"
             f"• Риск на сделку: {risk_percent:.2f}% (${risk_amount:.2f})\n"
@@ -200,8 +204,8 @@ async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return ConversationHandler.END
 
-    except ValueError:
-        await update.message.reply_text("❗️ Введи число. Пример: 1.5")
+    except (ValueError, AttributeError):
+        await msg.reply_text("❗️ Введи число. Пример: 1.5")
         return RISK_CALC_3
 
 async def check_access(update: Update):
@@ -426,6 +430,12 @@ async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка при обновлении пользователей: {e}")
         logging.error(f"[reload_users] Ошибка: {e}")
 
+import re
+import asyncio
+from io import BytesIO
+from PIL import Image
+import base64
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     photo = update.message.photo[-1]
@@ -447,7 +457,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💪 Твои исходные промпты без изменений
+    # 💪 Строгие промпты + усиление
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
@@ -471,7 +481,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             prompt_text = (
                 "You are a highly skilled Smart Money Concepts (SMC) trader on Forex with 10+ years of experience. "
-                "You master BOS, CHoCH, OTE, liquidity zones and order flow.\n\n"
                 "Ensure Smart Money Concepts Lux Algo is active. Note: DV might be in M or B.\n"
                 "⚠️ If DV < 200M or uncertain, warn but ALWAYS build a full plan. Never say you can't — ALWAYS give Entry, StopLoss and TakeProfit.\n\n"
                 "Format:\n"
@@ -486,7 +495,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if selected_market == "crypto":
             prompt_text = (
                 "You are a seasoned swing trader in cryptocurrency markets with over 10 years of experience. "
-                "Specialize in accumulation, break structures, volume confluence.\n\n"
                 "Chart must show:\n"
                 "- Auto Support & Resistance or Lux Algo Levels\n"
                 "- Volume Profile\n"
@@ -502,9 +510,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             prompt_text = (
-                "You are an advanced swing trader on Forex with over 10 years of expertise. "
-                "You spot accumulation, momentum shifts.\n\n"
-                "Ensure:\n"
+                "You are an advanced swing trader on Forex. Ensure:\n"
                 "- Auto Support & Resistance or Lux Algo Levels\n"
                 "- Volume Profile if present\n"
                 "- RSI or Stochastic.\n"
@@ -521,28 +527,23 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if selected_market == "crypto":
             prompt_text = (
                 "You are a scalper and intraday breakout trader in cryptocurrency with over 10 years of experience. "
-                "You read consolidation, volume pushes, stop hunts.\n\n"
                 "Chart should include:\n"
                 "- Range Detection or Lux Algo\n"
                 "- LazyScalp Board (DV may be in M or B).\n"
-                "⚠️ If DV < 200M or data incomplete, WARN but ALWAYS give two breakout scenarios with Entry, StopLoss, TakeProfit.\n\n"
-                "Answer format:\n"
-                "- 📈 Up:\n"
-                "    🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
-                "- 📉 Down:\n"
-                "    🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
+                "⚠️ If DV < 200M or incomplete, WARN but ALWAYS give two breakout scenarios.\n\n"
+                "- 📈 Up: Entry / StopLoss / TakeProfit\n"
+                "- 📉 Down: Entry / StopLoss / TakeProfit\n"
                 "Short risk note.\n"
-                "✅ Then a concise 2-line Russian summary with emojis.\n"
+                "✅ Then concise 2-line Russian summary with emojis.\n"
                 "IMPORTANT: Answer strictly in Russian."
             )
         else:
             prompt_text = (
                 "You are a scalper and intraday breakout trader on Forex with 10+ years of expertise. "
-                "Spot ranges, breakouts, liquidity traps.\n\n"
                 "Ensure:\n"
                 "- Range Detection or Lux Algo Levels\n"
                 "- Volume Profile.\n"
-                "⚠️ If DV < 200M or unclear, WARN but STILL build two scenarios.\n\n"
+                "⚠️ If DV < 200M or unclear, STILL build two scenarios.\n\n"
                 "- 📈 Up: Entry / StopLoss / TakeProfit\n"
                 "- 📉 Down: Entry / StopLoss / TakeProfit\n"
                 "Risk comment.\n"
@@ -552,8 +553,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         prompt_text = (
             "You are a professional trader with over 10 years in crypto and Forex. "
-            "If DV < 200M or missing, WARN but ALWAYS proceed with the plan.\n\n"
-            "Provide:\n"
+            "If DV < 200M or missing, WARN but ALWAYS proceed with plan.\n\n"
             "- Observations (trend, accumulation, volume)\n"
             "- 🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
             "Short risk comment.\n"
@@ -561,74 +561,71 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "IMPORTANT: Answer strictly in Russian."
         )
 
-    # 🔥 Усилитель для любого стиля
-    prompt_text += "\n\nIMPORTANT: Even if there are NO clear signals or DV is too low, ALWAYS produce a conservative trading plan with Entry, StopLoss and TakeProfit. Never refuse. Answer strictly in Russian."
+    # 💪 Финальное усиление
+    prompt_text += "\n\nIMPORTANT: Even if NO signals or DV is unclear, ALWAYS give Entry, StopLoss, TakeProfit. Never refuse. Answer in Russian."
 
-    # GPT Vision
-    try:
-        vision_response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt_text},
-                    {"type": "image_url", "image_url": {
-                        "url": f"data:image/jpeg;base64,{image_base64}"
-                    }}
-                ]
-            }],
-            max_tokens=900
-        )
-
-        analysis = vision_response.choices[0].message.content.strip()
-        if not analysis:
-            await update.message.reply_text(
-                "⚠️ GPT не дал ответа. Попробуй снова или пришли другой скрин."
+    # 🚀 Авто-ретрай
+    analysis = ""
+    for attempt in range(2):
+        try:
+            vision_response = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image_url", "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_base64}"
+                        }}
+                    ]
+                }],
+                max_tokens=900
             )
-            return
+            analysis = vision_response.choices[0].message.content.strip()
+            # 🔍 Проверим не отказ ли это
+            if analysis and "sorry" not in analysis.lower() and "can't assist" not in analysis.lower():
+                break
+            await asyncio.sleep(0.5)  # чуть подождём перед повтором
+        except Exception as e:
+            logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
 
-        # Ultra regex
-        risk_match = re.search(
-            r'(?:≈|~|от)?\s*(\d+(?:\.\d+)?)\s*(?:-|до)?\s*(\d+(?:\.\d+)?)?\s*%',
-            analysis,
-            flags=re.IGNORECASE
+    if not analysis:
+        await update.message.reply_text(
+            "⚠️ GPT не дал ответа. Попробуй снова или пришли другой скрин."
         )
-        if risk_match:
-            if risk_match.group(2):
-                risk_line = f"📌 Область риска ≈ {risk_match.group(1)}-{risk_match.group(2)}%"
-            else:
-                risk_line = f"📌 Область риска ≈ {risk_match.group(1)}%"
+        return
+
+    # 🔎 Regex для риска
+    risk_match = re.search(
+        r'(?:≈|~|от)?\s*(\d+(?:\.\d+)?)\s*(?:-|до)?\s*(\d+(?:\.\d+)?)?\s*%',
+        analysis, flags=re.IGNORECASE
+    )
+    if risk_match:
+        if risk_match.group(2):
+            risk_line = f"📌 Область риска ≈ {risk_match.group(1)}-{risk_match.group(2)}%"
         else:
-            entry_match = re.search(r'Entry.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
-            stop_match = re.search(r'StopLoss.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
-            if entry_match and stop_match:
-                try:
-                    entry = float(entry_match.group(1))
-                    stop = float(stop_match.group(1))
-                    risk_percent = abs((entry - stop) / entry * 100)
-                    risk_line = f"📌 Область риска ≈ {risk_percent:.2f}% (авторасчёт)"
-                except:
-                    risk_line = "📌 Область риска не указана явно — оценивай внимательно."
-            else:
+            risk_line = f"📌 Область риска ≈ {risk_match.group(1)}%"
+    else:
+        entry_match = re.search(r'Entry.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
+        stop_match = re.search(r'StopLoss.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
+        if entry_match and stop_match:
+            try:
+                entry = float(entry_match.group(1))
+                stop = float(stop_match.group(1))
+                risk_percent = abs((entry - stop) / entry * 100)
+                risk_line = f"📌 Область риска ≈ {risk_percent:.2f}% (авторасчёт)"
+            except:
                 risk_line = "📌 Область риска не указана явно — оценивай внимательно."
+        else:
+            risk_line = "📌 Область риска не указана явно — оценивай внимательно."
 
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
-        ])
-        await update.message.reply_text(
-            f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}\n\n{risk_line}",
-            reply_markup=keyboard
-        )
-
-    except Exception as e:
-        logging.error(f"[handle_photo] Vision error: {e}")
-        await update.message.reply_text(
-            "⚠️ GPT временно недоступен.\n\n"
-            "На глаз по таким графикам:\n"
-            "- Если рынок растёт, ищи консолидацию и объём.\n"
-            "- Если падает, смотри реакцию на старые уровни.\n"
-            "Подробный сценарий дам после восстановления сервиса!"
-        )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
+    ])
+    await update.message.reply_text(
+        f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}\n\n{risk_line}",
+        reply_markup=keyboard
+    )
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
