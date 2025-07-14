@@ -971,18 +971,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    reset_commands = [
-        "🎯 Риск", "🌱 Психолог", "🔍 Анализ",
-        "💡 Стратегия", "📚 Термин",
-        "🚀 Сигнал", "📖 Обучение",
-        "💰 Купить", "ℹ️ О боте", "📌 Сетап",
-        "🔗 Бесплатный доступ через брокера"
-    ]
-    if text in reset_commands:
-        saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
-        context.user_data.clear()
-        context.user_data.update(saved_data)
-
+    # 🎯 Стратегия инвестиций
     if text == "💡 Стратегия":
         context.user_data["awaiting_invest_question"] = True
         await update.message.reply_text(
@@ -991,12 +980,15 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # 📏 Калькулятор риска
     if text == "🎯 Риск":
         return await start_risk_calc(update, context)
 
+    # 🧘 GPT-Психолог
     if text == "🌱 Психолог":
         return await start_therapy(update, context)
 
+    # 🔍 Анализ новостей
     if text == "🔍 Анализ":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Экономический календарь", callback_data="interpret_calendar")],
@@ -1009,6 +1001,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # 📖 Обучение
     if text == "📖 Обучение":
         context.user_data["awaiting_teacher_question"] = True
         await update.message.reply_text(
@@ -1016,11 +1009,13 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # 📚 Термин
     if text == "📚 Термин":
         context.user_data["awaiting_definition_term"] = True
         await update.message.reply_text("✍️ Напиши термин, который нужно объяснить.")
         return
 
+    # 🚀 Сигнал
     if text == "🚀 Сигнал":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💎 Crypto", callback_data="market_crypto")],
@@ -1032,6 +1027,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # 💰 Купить
     if text == "💰 Купить":
         if user_id in ALLOWED_USERS:
             await update.message.reply_text(
@@ -1042,14 +1038,16 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_payment_link(update, context)
         return
 
+    # ℹ️ О боте
     if text == "ℹ️ О боте":
         await update.message.reply_text(
             "Подписка активируется через CryptoCloud или через регистрацию у брокера.\n"
-            "Нажми 💰 Купить для получения ссылки на оплату или 🔗 Бесплатный доступ через брокера.",
+            "Нажми 💰 Купить для оплаты или 🔗 Бесплатный доступ через брокера.",
             reply_markup=REPLY_MARKUP
         )
         return
 
+    # 🔗 Бесплатный доступ через брокера
     if text == "🔗 Бесплатный доступ через брокера":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Bybit", callback_data="ref_bybit")],
@@ -1064,6 +1062,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # 📌 Сетап
     if text == "📌 Сетап":
         if user_id not in ADMIN_IDS:
             await update.message.reply_text("⛔️ Эта функция доступна только админу.")
@@ -1071,23 +1070,24 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
         return SETUP_1
 
-    # 🔥 Умный сброс, но сохраняем выбор стратегии/рынка
-    if not any([
-        context.user_data.get("awaiting_potential"),
-        context.user_data.get("awaiting_email"),
-        context.user_data.get("awaiting_invest_question"),
-        context.user_data.get("awaiting_pro_question"),
-        context.user_data.get("awaiting_teacher_question"),
-        context.user_data.get("awaiting_definition_term"),
-        context.user_data.get("awaiting_uid")
-    ]):
-        saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
-        context.user_data.clear()
-        context.user_data.update(saved_data)
-        await update.message.reply_text(
-            "🔄 Сброс всех ожиданий. Продолжай.",
-            reply_markup=REPLY_MARKUP
-        )
+    # ✅ Обработка открытых диалогов для инвестиционных вопросов, обучения и терминов
+    if context.user_data.get("awaiting_invest_question"):
+        return await handle_invest_question(update, context)
+    if context.user_data.get("awaiting_teacher_question"):
+        return await handle_teacher_question(update, context)
+    if context.user_data.get("awaiting_definition_term"):
+        return await handle_definition_term(update, context)
+    if context.user_data.get("awaiting_uid"):
+        return await handle_uid_submission(update, context)
+
+    # 🔄 Если ничего не ожидаем - сброс
+    saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
+    context.user_data.clear()
+    context.user_data.update(saved_data)
+    await update.message.reply_text(
+        "🔄 Сброс всех ожиданий. Продолжай.",
+        reply_markup=REPLY_MARKUP
+    )
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
