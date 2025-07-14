@@ -155,45 +155,45 @@ async def setup_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SETUP_5
 
 async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message or update.callback_query.message
     context.user_data.clear()
-    await msg.reply_text(
+
+    # Универсальный объект message (работает и для CallbackQuery, и для обычного Message)
+    message = update.message if update.message else update.callback_query.message
+
+    await message.reply_text(
         "📊 Введи размер депозита в $:",
         reply_markup=REPLY_MARKUP
     )
     return RISK_CALC_1
 
 async def risk_calc_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message or update.callback_query.message
     try:
-        context.user_data["deposit"] = float(msg.text.strip())
-        await msg.reply_text("💡 Теперь введи процент риска на сделку (%):")
+        context.user_data["deposit"] = float(update.message.text.strip())
+        await update.message.reply_text("💡 Теперь введи процент риска на сделку (%):")
         return RISK_CALC_2
-    except (ValueError, AttributeError):
-        await msg.reply_text("❗️ Введи число. Пример: 1000")
+    except ValueError:
+        await update.message.reply_text("❗️ Введи число. Пример: 1000")
         return RISK_CALC_1
 
 async def risk_calc_risk_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message or update.callback_query.message
     try:
-        context.user_data["risk_percent"] = float(msg.text.strip())
-        await msg.reply_text("⚠️ Введи стоп-лосс по сделке (%):")
+        context.user_data["risk_percent"] = float(update.message.text.strip())
+        await update.message.reply_text("⚠️ Введи стоп-лосс по сделке (%):")
         return RISK_CALC_3
-    except (ValueError, AttributeError):
-        await msg.reply_text("❗️ Введи число. Пример: 2")
+    except ValueError:
+        await update.message.reply_text("❗️ Введи число. Пример: 2")
         return RISK_CALC_2
 
 async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message or update.callback_query.message
     try:
-        stoploss_percent = float(msg.text.strip())
+        stoploss_percent = float(update.message.text.strip())
         deposit = context.user_data["deposit"]
         risk_percent = context.user_data["risk_percent"]
 
         risk_amount = deposit * risk_percent / 100
         position_size = risk_amount / (stoploss_percent / 100)
 
-        await msg.reply_text(
+        await update.message.reply_text(
             f"✅ Результат:\n"
             f"• Депозит: ${deposit:.2f}\n"
             f"• Риск на сделку: {risk_percent:.2f}% (${risk_amount:.2f})\n"
@@ -204,8 +204,8 @@ async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return ConversationHandler.END
 
-    except (ValueError, AttributeError):
-        await msg.reply_text("❗️ Введи число. Пример: 1.5")
+    except ValueError:
+        await update.message.reply_text("❗️ Введи число. Пример: 1.5")
         return RISK_CALC_3
 
 async def check_access(update: Update):
