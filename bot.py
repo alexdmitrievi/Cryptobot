@@ -271,14 +271,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         market = context.user_data.get("selected_market")
         text_msg = (
             "📈 Smart Money Concepts (SMC) для крипты\n\n"
-            "📌 Включи на графике:\n"
-            "- Smart Money Concepts (SMC) Lux Algo\n"
+            "📌 На бесплатной подписке TradingView включи ТОЛЬКО два индикатора:\n"
+            "- Lux Algo SMC\n"
             "- LazyScalp Board (DV > 200M)\n\n"
             "Пришли скрин — дам план входа, стоп и тейки."
             if market == "crypto"
             else "📈 Smart Money Concepts (SMC) для форекса\n\n"
-                 "📌 Убедись, что включён Smart Money Concepts (SMC) Lux Algo.\n"
-                 "DV не нужен.\n\n"
+                 "📌 Используй максимум два индикатора:\n"
+                 "- Lux Algo SMC\n"
+                 "- (DV не нужен для форекса)\n\n"
                  "Пришли скрин — сделаю анализ SMC."
         )
         await query.edit_message_text(text_msg)
@@ -288,17 +289,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         market = context.user_data.get("selected_market")
         text_msg = (
             "📈 Позиционка (Swing) для крипты\n\n"
-            "📌 Включи на графике:\n"
+            "📌 На бесплатном TradingView включи только два индикатора:\n"
             "- Lux Algo Levels\n"
-            "- LazyScalp Board (DV > 200M)\n"
-            "- Volume Profile\n\n"
-            "Пришли скрин для анализа swing."
+            "- LazyScalp Board (DV > 200M)\n\n"
+            "Пришли скрин — составлю swing-план."
             if market == "crypto"
             else "📈 Позиционка (Swing) для форекса\n\n"
-                 "📌 Убедись, что включены:\n"
-                 "- Lux Algo Levels или Auto Support & Resistance\n"
-                 "- RSI / Stochastic\n\n"
-                 "Пришли скрин — дам сценарий swing."
+                 "📌 Используй не больше двух индикаторов:\n"
+                 "- Lux Levels или Auto S&R\n"
+                 "- RSI или Stochastic\n\n"
+                 "Пришли скрин — дам swing-сценарий."
         )
         await query.edit_message_text(text_msg)
 
@@ -307,16 +307,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         market = context.user_data.get("selected_market")
         text_msg = (
             "📈 Пробой диапазона (Breakout) для крипты\n\n"
-            "📌 Включи на графике:\n"
+            "📌 На бесплатном TradingView включи только два индикатора:\n"
             "- Range Detection\n"
             "- LazyScalp Board (DV > 200M)\n\n"
-            "Пришли скрин — найду диапазон и дам сценарии."
+            "Пришли скрин — построю два сценария breakout."
             if market == "crypto"
             else "📈 Пробой диапазона (Breakout) для форекса\n\n"
-                 "📌 Убедись, что включены:\n"
-                 "- Range Detection или Lux Algo Levels\n"
-                 "- RSI / Stochastic\n\n"
-                 "Пришли скрин — построю два сценария breakout."
+                 "📌 Используй максимум два индикатора:\n"
+                 "- Range Detection или Lux Levels\n"
+                 "- RSI или Stochastic\n\n"
+                 "Пришли скрин — дам два сценария breakout."
         )
         await query.edit_message_text(text_msg)
 
@@ -351,21 +351,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🌐 Опиши новость, которая может повлиять на финансовый рынок."
         )
 
-    # ✅ Гарантированно запускаем калькулятор риска по inline кнопке
+    # ✅ Калькулятор риска
     elif query.data == "start_risk_calc":
         context.user_data.clear()
         await start_risk_calc(update, context)
 
-    # ✅ Новый блок для кнопок реферальной программы
+    # ✅ Рефералы
     elif query.data == "ref_bybit":
         context.user_data["ref_program"] = "bybit"
         context.user_data["broker"] = "Bybit"
         context.user_data["awaiting_uid"] = True
         await query.message.reply_text(
             "📈 Отлично!\n"
-            "Перейдите по моей реферальной ссылке и зарегистрируйтесь на Bybit:\n"
+            "Перейди по моей реферальной ссылке и зарегистрируйся на Bybit:\n"
             "👉 https://www.bybit.com/invite?ref=YYVME8\n\n"
-            "Внесите депозит от $150 и пришлите сюда свой UID с Bybit для проверки."
+            "Внеси депозит от $150 и пришли сюда свой UID для проверки."
         )
 
     elif query.data == "ref_forex4you":
@@ -374,9 +374,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_uid"] = True
         await query.message.reply_text(
             "📊 Отлично!\n"
-            "Перейдите по моей реферальной ссылке и зарегистрируйтесь на Forex4You:\n"
+            "Перейди по моей реферальной ссылке и зарегистрируйся на Forex4You:\n"
             "👉 https://www.forex4you.org/?affid=hudpyc9\n\n"
-            "Внесите депозит от $200 и пришлите сюда свой UID с Forex4You для проверки."
+            "Внеси депозит от $200 и пришли сюда свой UID для проверки."
         )
 
 async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -451,17 +451,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💪 Твои строгие промпты без изменений
+    # 💪 Строгие промпты (адаптированы под 2 индикатора)
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
                 "You are a world-class professional Smart Money Concepts (SMC) trader with 10+ years of experience in cryptocurrency markets. "
                 "You deeply understand BOS, CHoCH, liquidity hunts, OTE, premium/discount zones.\n\n"
                 "Look at the TradingView chart. Ensure it contains:\n"
-                "- Smart Money Concepts (SMC) Lux Algo\n"
-                "- LazyScalp Board showing DV (might be in M or B).\n\n"
+                "- Lux Algo SMC\n"
+                "- LazyScalp Board (for DV > 200M).\n\n"
                 "⚠️ If DV < 200M or unclear, WARN but ALWAYS build a detailed SMC plan anyway. "
-                "Never apologize or say you can't analyze — ALWAYS provide Entry, StopLoss and TakeProfit levels, even if roughly estimated with a caution.\n\n"
+                "Always provide Entry, StopLoss and TakeProfit levels, even if roughly estimated.\n\n"
                 "Then structure your answer:\n"
                 "1️⃣ Observations (BOS/CHoCH/liquidity)\n"
                 "2️⃣ Trading plan:\n"
@@ -475,8 +475,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             prompt_text = (
                 "You are a highly skilled Smart Money Concepts (SMC) trader on Forex with 10+ years of experience. "
-                "Ensure Smart Money Concepts Lux Algo is active. Note: DV might be in M or B.\n"
-                "⚠️ If DV < 200M or uncertain, warn but ALWAYS build a full plan. Never say you can't — ALWAYS give Entry, StopLoss and TakeProfit.\n\n"
+                "Ensure Lux Algo SMC is active (only 1-2 indicators max on chart). DV may be ignored.\n\n"
+                "⚠️ Always build a full plan with Entry, StopLoss and TakeProfit.\n\n"
                 "Format:\n"
                 "1️⃣ Observations\n"
                 "2️⃣ Trading plan:\n"
@@ -489,11 +489,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if selected_market == "crypto":
             prompt_text = (
                 "You are a seasoned swing trader in cryptocurrency markets with over 10 years of experience. "
-                "Chart must show:\n"
-                "- Auto Support & Resistance or Lux Algo Levels\n"
-                "- Volume Profile\n"
-                "- LazyScalp Board (DV may be in M or B).\n"
-                "⚠️ If DV < 200M or unclear, warn but ALWAYS continue with Entry, StopLoss, TakeProfit, even if approximate.\n\n"
+                "Chart must show only two indicators:\n"
+                "- Lux Algo Levels\n"
+                "- LazyScalp Board (for DV > 200M).\n\n"
+                "⚠️ If DV < 200M or unclear, warn but ALWAYS continue with Entry, StopLoss, TakeProfit.\n\n"
                 "Provide:\n"
                 "1️⃣ Observations (zones & volume)\n"
                 "2️⃣ Swing plan:\n"
@@ -504,11 +503,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             prompt_text = (
-                "You are an advanced swing trader on Forex. Ensure:\n"
-                "- Auto Support & Resistance or Lux Algo Levels\n"
-                "- Volume Profile if present\n"
-                "- RSI or Stochastic.\n"
-                "⚠️ If DV < 200M or missing, warn but ALWAYS build the full plan.\n\n"
+                "You are an advanced swing trader on Forex. Ensure chart shows only two indicators:\n"
+                "- Lux Algo Levels or Auto S&R\n"
+                "- RSI or Stochastic.\n\n"
+                "⚠️ Always build the plan with Entry, StopLoss and TakeProfit.\n\n"
                 "Structure:\n"
                 "1️⃣ Observations\n"
                 "2️⃣ Plan:\n"
@@ -521,33 +519,30 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if selected_market == "crypto":
             prompt_text = (
                 "You are a scalper and intraday breakout trader in cryptocurrency with over 10 years of experience. "
-                "Chart should include:\n"
-                "- Range Detection or Lux Algo\n"
-                "- LazyScalp Board (DV may be in M or B).\n"
-                "⚠️ If DV < 200M or incomplete, WARN but ALWAYS give two breakout scenarios.\n\n"
+                "Chart must show only two indicators:\n"
+                "- Range Detection\n"
+                "- LazyScalp Board (DV > 200M).\n\n"
+                "⚠️ Always give two breakout scenarios:\n"
                 "- 📈 Up: Entry / StopLoss / TakeProfit\n"
                 "- 📉 Down: Entry / StopLoss / TakeProfit\n"
                 "Short risk note.\n"
-                "✅ Then concise 2-line Russian summary with emojis.\n"
+                "✅ Conclude with 2-line Russian summary with emojis.\n"
                 "IMPORTANT: Answer strictly in Russian."
             )
         else:
             prompt_text = (
                 "You are a scalper and intraday breakout trader on Forex with 10+ years of expertise. "
-                "Ensure:\n"
-                "- Range Detection or Lux Algo Levels\n"
-                "- Volume Profile.\n"
-                "⚠️ If DV < 200M or unclear, STILL build two scenarios.\n\n"
-                "- 📈 Up: Entry / StopLoss / TakeProfit\n"
-                "- 📉 Down: Entry / StopLoss / TakeProfit\n"
-                "Risk comment.\n"
-                "✅ Conclude with 2-line Russian summary with emojis.\n"
+                "Ensure chart shows only two indicators:\n"
+                "- Range Detection or Lux Levels\n"
+                "- RSI or Stochastic.\n\n"
+                "⚠️ Always build two scenarios with Entry, StopLoss, TakeProfit.\n"
+                "✅ Conclude with a 2-line Russian summary with emojis.\n"
                 "IMPORTANT: Answer strictly in Russian."
             )
     else:
         prompt_text = (
             "You are a professional trader with over 10 years in crypto and Forex. "
-            "If DV < 200M or missing, WARN but ALWAYS proceed with plan.\n\n"
+            "If chart unclear, WARN but ALWAYS proceed with plan.\n\n"
             "- Observations (trend, accumulation, volume)\n"
             "- 🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
             "Short risk comment.\n"
@@ -589,7 +584,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔎 Regex на русском и английском
+    # 🔎 Regex для определения области риска
     risk_match = re.search(
         r'(?:≈|~|от)?\s*(\d+(?:\.\d+)?)\s*(?:-|до)?\s*(\d+(?:\.\d+)?)?\s*%',
         analysis, flags=re.IGNORECASE
@@ -620,7 +615,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}\n\n{risk_line}",
         reply_markup=keyboard
     )
-
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
