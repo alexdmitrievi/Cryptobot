@@ -430,12 +430,6 @@ async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка при обновлении пользователей: {e}")
         logging.error(f"[reload_users] Ошибка: {e}")
 
-import re
-import asyncio
-from io import BytesIO
-from PIL import Image
-import base64
-
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     photo = update.message.photo[-1]
@@ -457,7 +451,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💪 Строгие промпты + усиление
+    # 💪 Твои строгие промпты без изменений
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
@@ -561,10 +555,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "IMPORTANT: Answer strictly in Russian."
         )
 
-    # 💪 Финальное усиление
+    # 💪 Усилитель
     prompt_text += "\n\nIMPORTANT: Even if NO signals or DV is unclear, ALWAYS give Entry, StopLoss, TakeProfit. Never refuse. Answer in Russian."
 
-    # 🚀 Авто-ретрай
+    # 🚀 Авто-ретрай + страховка
     analysis = ""
     for attempt in range(2):
         try:
@@ -581,11 +575,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }],
                 max_tokens=900
             )
-            analysis = vision_response.choices[0].message.content.strip()
-            # 🔍 Проверим не отказ ли это
+            message_obj = vision_response.choices[0].message
+            analysis = message_obj.content.strip() if message_obj and message_obj.content else ""
             if analysis and "sorry" not in analysis.lower() and "can't assist" not in analysis.lower():
                 break
-            await asyncio.sleep(0.5)  # чуть подождём перед повтором
+            await asyncio.sleep(0.5)
         except Exception as e:
             logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
 
@@ -595,7 +589,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔎 Regex для риска
+    # 🔎 Regex на русском и английском
     risk_match = re.search(
         r'(?:≈|~|от)?\s*(\d+(?:\.\d+)?)\s*(?:-|до)?\s*(\d+(?:\.\d+)?)?\s*%',
         analysis, flags=re.IGNORECASE
@@ -606,12 +600,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             risk_line = f"📌 Область риска ≈ {risk_match.group(1)}%"
     else:
-        entry_match = re.search(r'Entry.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
-        stop_match = re.search(r'StopLoss.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
+        entry_match = re.search(r'(Entry|Вход).*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
+        stop_match = re.search(r'(StopLoss|Стоп).*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
         if entry_match and stop_match:
             try:
-                entry = float(entry_match.group(1))
-                stop = float(stop_match.group(1))
+                entry = float(entry_match.group(2))
+                stop = float(stop_match.group(2))
                 risk_percent = abs((entry - stop) / entry * 100)
                 risk_line = f"📌 Область риска ≈ {risk_percent:.2f}% (авторасчёт)"
             except:
@@ -626,6 +620,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}\n\n{risk_line}",
         reply_markup=keyboard
     )
+
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
