@@ -347,8 +347,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🌐 Опиши новость, которая может повлиять на финансовый рынок."
         )
 
-    # ✅ Новый блок для кнопки "📏 Рассчитать риск"
+    # ✅ Гарантированно запускаем калькулятор риска по inline кнопке
     elif query.data == "start_risk_calc":
+        context.user_data.clear()
         await start_risk_calc(update, context)
 
     # ✅ Новый блок для кнопок реферальной программы
@@ -446,7 +447,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💪 Строго твоя структура промптов
+    # 💪 Твои исходные промпты без изменений
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
@@ -560,6 +561,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "IMPORTANT: Answer strictly in Russian."
         )
 
+    # 🔥 Усилитель для любого стиля
+    prompt_text += "\n\nIMPORTANT: Even if there are NO clear signals or DV is too low, ALWAYS produce a conservative trading plan with Entry, StopLoss and TakeProfit. Never refuse. Answer strictly in Russian."
+
+    # GPT Vision
     try:
         vision_response = await client.chat.completions.create(
             model="gpt-4o",
@@ -582,20 +587,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Сначала ultra regex
+        # Ultra regex
         risk_match = re.search(
             r'(?:≈|~|от)?\s*(\d+(?:\.\d+)?)\s*(?:-|до)?\s*(\d+(?:\.\d+)?)?\s*%',
             analysis,
             flags=re.IGNORECASE
         )
-
         if risk_match:
             if risk_match.group(2):
                 risk_line = f"📌 Область риска ≈ {risk_match.group(1)}-{risk_match.group(2)}%"
             else:
                 risk_line = f"📌 Область риска ≈ {risk_match.group(1)}%"
         else:
-            # Авторасчёт если не найдено
             entry_match = re.search(r'Entry.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
             stop_match = re.search(r'StopLoss.*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
             if entry_match and stop_match:
@@ -612,7 +615,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
         ])
-
         await update.message.reply_text(
             f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}\n\n{risk_line}",
             reply_markup=keyboard
@@ -627,8 +629,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "- Если падает, смотри реакцию на старые уровни.\n"
             "Подробный сценарий дам после восстановления сервиса!"
         )
-
-import re
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
