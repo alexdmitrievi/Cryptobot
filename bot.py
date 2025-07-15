@@ -157,7 +157,9 @@ async def setup_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Сохраняем выбранные ранее strategy и market
     keys_to_keep = {"selected_market", "selected_strategy"}
-    context.user_data = {k: v for k, v in context.user_data.items() if k in keys_to_keep}
+    saved_data = {k: v for k, v in context.user_data.items() if k in keys_to_keep}
+    context.user_data.clear()
+    context.user_data.update(saved_data)
 
     # Универсальный объект message (работает и для CallbackQuery, и для обычного Message)
     message = update.message if update.message else update.callback_query.message
