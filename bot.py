@@ -459,7 +459,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💪 Строгие промпты с явным RSI, без звёздочек, с эмодзи
+    # 💪 Строгие промпты без markdown
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
@@ -478,7 +478,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "  💰 TakeProfit: $_____\n"
                 "3️⃣ Short risk commentary on DV.\n"
                 "✅ Finally, give a concise 2-line summary in Russian with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian."
+                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
             )
         else:
             prompt_text = (
@@ -493,7 +493,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
                 "3️⃣ Short risk note.\n"
                 "✅ Finish with a concise 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian."
+                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
             )
     elif selected_style == "swing":
         if selected_market == "crypto":
@@ -509,7 +509,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
                 "3️⃣ Quick risk note.\n"
                 "✅ Conclude with a 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian."
+                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
             )
         else:
             prompt_text = (
@@ -523,7 +523,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
                 "3️⃣ Risk comment.\n"
                 "✅ End with a 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian."
+                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
             )
     elif selected_style == "breakout":
         if selected_market == "crypto":
@@ -537,7 +537,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "- 📉 Down: Entry / StopLoss / TakeProfit\n"
                 "Short risk note.\n"
                 "✅ Conclude with a 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian."
+                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
             )
         else:
             prompt_text = (
@@ -547,7 +547,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "- Индекс относительной силы (RSI)\n\n"
                 "Check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build two scenarios with Entry, StopLoss, TakeProfit.\n"
                 "✅ Conclude with a 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian."
+                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
             )
     else:
         prompt_text = (
@@ -557,12 +557,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "- 🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
             "Short risk comment.\n"
             "✅ Conclude with a 2-line Russian summary with emojis.\n"
-            "IMPORTANT: Answer strictly in Russian."
+            "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
         )
 
     prompt_text += "\n\nIMPORTANT: Even if DV < 300M or no signals, ALWAYS give Entry, StopLoss, TakeProfit. Never refuse. Answer in Russian."
 
-    # 🚀 GPT-vision вызов (оставляем твой цикл ретраев)
+    # GPT Vision вызов
     analysis = ""
     for attempt in range(2):
         try:
@@ -593,7 +593,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔎 Определяем риск
+    # Авторасчёт риска
     risk_match = re.search(r'(?:≈|~|от)?\s*(\d+(?:\.\d+)?)\s*(?:-|до)?\s*(\d+(?:\.\d+)?)?\s*%', analysis, flags=re.IGNORECASE)
     if risk_match:
         if risk_match.group(2):
@@ -621,6 +621,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}\n\n{risk_line}",
         reply_markup=keyboard
     )
+
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
