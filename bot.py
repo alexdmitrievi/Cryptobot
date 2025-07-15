@@ -253,81 +253,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "market_crypto":
         context.user_data["selected_market"] = "crypto"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Smart Money", callback_data="style_smc")],
-            [InlineKeyboardButton("Позиционка", callback_data="style_swing")],
-            [InlineKeyboardButton("Пробой", callback_data="style_breakout")]
-        ])
-        await query.edit_message_text("📈 Отлично, выбери стратегию для крипты:", reply_markup=keyboard)
-
-    elif query.data == "market_forex":
-        context.user_data["selected_market"] = "forex"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Smart Money", callback_data="style_smc")],
-            [InlineKeyboardButton("Позиционка", callback_data="style_swing")],
-            [InlineKeyboardButton("Пробой", callback_data="style_breakout")]
-        ])
-        await query.edit_message_text("📈 Отлично, выбери стратегию для форекса:", reply_markup=keyboard)
-
-    elif query.data == "style_smc":
-        context.user_data["selected_strategy"] = "smc"
-        market = context.user_data.get("selected_market")
-        text_msg = (
+        await query.edit_message_text(
             "📈 Smart Money Concepts (SMC) для крипты\n\n"
             "1️⃣ Сначала включи индикатор LazyScalp Board и проверь DV ≥ 300M.\n"
             "2️⃣ Если DV подходит, отключи LazyScalp и включи только два индикатора:\n"
             "- LuxAlgo SMC\n"
             "- Support & Resistance Levels\n\n"
             "Пришли скрин — дам план входа, стоп и тейки."
-            if market == "crypto"
-            else "📈 Smart Money Concepts (SMC) для форекса\n\n"
-                 "1️⃣ Сначала включи LazyScalp Board и оцени DV ≥ 300M.\n"
-                 "2️⃣ Затем отключи LazyScalp и включи:\n"
-                 "- LuxAlgo SMC\n"
-                 "- Support & Resistance Levels\n\n"
-                 "Пришли скрин — сделаю анализ SMC."
         )
-        await query.edit_message_text(text_msg)
 
-    elif query.data == "style_swing":
-        context.user_data["selected_strategy"] = "swing"
-        market = context.user_data.get("selected_market")
-        text_msg = (
-            "📈 Позиционка (Swing) для крипты\n\n"
-            "1️⃣ Сначала включи LazyScalp Board и проверь DV ≥ 300M.\n"
-            "2️⃣ Затем отключи LazyScalp и включи только два индикатора:\n"
-            "- Support & Resistance Levels [LuxAlgo]\n"
-            "- RSI или Stochastic\n\n"
-            "Пришли скрин — составлю swing-план."
-            if market == "crypto"
-            else "📈 Позиционка (Swing) для форекса\n\n"
-                 "1️⃣ Сначала включи LazyScalp и оцени DV ≥ 300M.\n"
-                 "2️⃣ Затем отключи его и включи:\n"
-                 "- Support & Resistance Levels или Liquidity Levels\n"
-                 "- RSI или Stochastic\n\n"
-                 "Пришли скрин — дам swing-сценарий."
+    elif query.data == "market_forex":
+        context.user_data["selected_market"] = "forex"
+        await query.edit_message_text(
+            "📈 Smart Money Concepts (SMC) для форекса\n\n"
+            "⚠️ На Forex нет централизованного DV, поэтому пропусти LazyScalp и сразу включи два индикатора:\n"
+            "- LuxAlgo SMC\n"
+            "- Support & Resistance Levels\n\n"
+            "Пришли скрин — сделаю анализ SMC."
         )
-        await query.edit_message_text(text_msg)
-
-    elif query.data == "style_breakout":
-        context.user_data["selected_strategy"] = "breakout"
-        market = context.user_data.get("selected_market")
-        text_msg = (
-            "📈 Пробой диапазона (Breakout) для крипты\n\n"
-            "1️⃣ Сначала включи LazyScalp Board и проверь DV ≥ 300M.\n"
-            "2️⃣ Если всё ок, отключи LazyScalp и включи:\n"
-            "- Range Detection\n"
-            "- RSI или Stochastic\n\n"
-            "Пришли скрин — построю два сценария breakout."
-            if market == "crypto"
-            else "📈 Пробой диапазона (Breakout) для форекса\n\n"
-                 "1️⃣ Сначала включи LazyScalp для DV ≥ 300M.\n"
-                 "2️⃣ Потом отключи LazyScalp и включи:\n"
-                 "- Range Detection или Lux Levels\n"
-                 "- RSI или Stochastic\n\n"
-                 "Пришли скрин — дам два сценария breakout."
-        )
-        await query.edit_message_text(text_msg)
 
     elif query.data == "forecast_by_image":
         await query.message.reply_text(
@@ -361,7 +304,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == "start_risk_calc":
+        keys_to_keep = {"selected_market"}
+        saved_data = {k: v for k, v in context.user_data.items() if k in keys_to_keep}
         context.user_data.clear()
+        context.user_data.update(saved_data)
         await start_risk_calc(update, context)
 
     elif query.data == "ref_bybit":
@@ -385,7 +331,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👉 https://www.forex4you.org/?affid=hudpyc9\n\n"
             "Внеси депозит от $200 и пришли сюда свой UID для проверки."
         )
-
 
 async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -451,116 +396,51 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
     selected_market = context.user_data.get("selected_market")
-    selected_style = context.user_data.get("selected_strategy")
 
-    if not selected_market or not selected_style:
+    if not selected_market:
         await update.message.reply_text(
-            "📝 Сначала выбери стратегию и рынок через кнопки в меню, чтобы я знал, какой анализ тебе нужен."
+            "📝 Сначала выбери рынок через кнопки в меню, чтобы я знал, какой анализ тебе нужен."
         )
         return
 
-    # 💪 Строгие промпты без markdown
-    if selected_style == "smc":
-        if selected_market == "crypto":
-            prompt_text = (
-                "You are a world-class professional Smart Money Concepts (SMC) trader with 10+ years of experience in cryptocurrency markets. "
-                "You deeply understand BOS, CHoCH, liquidity hunts, OTE, premium/discount zones.\n\n"
-                "Look at the TradingView chart. Ensure it contains ONLY TWO indicators:\n"
-                "- LuxAlgo SMC\n"
-                "- Support & Resistance Levels\n\n"
-                "First check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build a detailed SMC plan anyway. "
-                "Never apologize or say you can't analyze — ALWAYS provide Entry, StopLoss and TakeProfit levels.\n\n"
-                "Then structure your answer:\n"
-                "1️⃣ Observations (BOS/CHoCH/liquidity)\n"
-                "2️⃣ Trading plan:\n"
-                "  🎯 Entry: $_____\n"
-                "  🚨 StopLoss: $_____\n"
-                "  💰 TakeProfit: $_____\n"
-                "3️⃣ Short risk commentary on DV.\n"
-                "✅ Finally, give a concise 2-line summary in Russian with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
-            )
-        else:
-            prompt_text = (
-                "You are a highly skilled Smart Money Concepts (SMC) trader on Forex with 10+ years of experience. "
-                "Ensure chart has ONLY TWO indicators:\n"
-                "- LuxAlgo SMC\n"
-                "- Support & Resistance Levels\n\n"
-                "Check DV via LazyScalp Board. If DV < 300M or unclear, WARN but ALWAYS build a full plan with Entry, StopLoss and TakeProfit.\n\n"
-                "Format:\n"
-                "1️⃣ Observations\n"
-                "2️⃣ Trading plan:\n"
-                "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
-                "3️⃣ Short risk note.\n"
-                "✅ Finish with a concise 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
-            )
-    elif selected_style == "swing":
-        if selected_market == "crypto":
-            prompt_text = (
-                "You are a seasoned swing trader in cryptocurrency markets with over 10 years of experience. "
-                "Chart must show ONLY TWO indicators:\n"
-                "- Support & Resistance Levels [LuxAlgo]\n"
-                "- Индекс относительной силы (RSI)\n\n"
-                "Check DV first via LazyScalp Board. If DV < 300M, WARN but ALWAYS continue with Entry, StopLoss, TakeProfit.\n\n"
-                "Provide:\n"
-                "1️⃣ Observations (zones and volume)\n"
-                "2️⃣ Swing plan:\n"
-                "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
-                "3️⃣ Quick risk note.\n"
-                "✅ Conclude with a 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
-            )
-        else:
-            prompt_text = (
-                "You are an advanced swing trader on Forex. Ensure chart shows ONLY TWO indicators:\n"
-                "- Support & Resistance Levels or Liquidity Levels\n"
-                "- Индекс относительной силы (RSI)\n\n"
-                "Check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build the plan with Entry, StopLoss and TakeProfit.\n\n"
-                "Structure:\n"
-                "1️⃣ Observations\n"
-                "2️⃣ Plan:\n"
-                "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
-                "3️⃣ Risk comment.\n"
-                "✅ End with a 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
-            )
-    elif selected_style == "breakout":
-        if selected_market == "crypto":
-            prompt_text = (
-                "You are a scalper and intraday breakout trader in cryptocurrency with over 10 years of experience. "
-                "Chart must show ONLY TWO indicators:\n"
-                "- Range Detection\n"
-                "- Индекс относительной силы (RSI)\n\n"
-                "First check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS give two breakout scenarios.\n\n"
-                "- 📈 Up: Entry / StopLoss / TakeProfit\n"
-                "- 📉 Down: Entry / StopLoss / TakeProfit\n"
-                "Short risk note.\n"
-                "✅ Conclude with a 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
-            )
-        else:
-            prompt_text = (
-                "You are a scalper and intraday breakout trader on Forex with 10+ years of expertise. "
-                "Ensure chart has ONLY TWO indicators:\n"
-                "- Range Detection or Lux Levels\n"
-                "- Индекс относительной силы (RSI)\n\n"
-                "Check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build two scenarios with Entry, StopLoss, TakeProfit.\n"
-                "✅ Conclude with a 2-line Russian summary with emojis.\n"
-                "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
-            )
+    # Только SMC, но разный prompt для crypto и forex
+    if selected_market == "crypto":
+        prompt_text = (
+            "You are a world-class professional Smart Money Concepts (SMC) trader with 10+ years of experience in cryptocurrency markets. "
+            "You deeply understand BOS, CHoCH, liquidity hunts, OTE, premium/discount zones.\n\n"
+            "Look at the TradingView chart. Ensure it contains ONLY TWO indicators:\n"
+            "- LuxAlgo SMC\n"
+            "- Support & Resistance Levels\n\n"
+            "First check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build a detailed SMC plan anyway. "
+            "Never apologize or say you can't analyze — ALWAYS provide Entry, StopLoss and TakeProfit levels.\n\n"
+            "Then structure your answer:\n"
+            "1️⃣ Observations (BOS/CHoCH/liquidity)\n"
+            "2️⃣ Trading plan:\n"
+            "  🎯 Entry: $_____\n"
+            "  🚨 StopLoss: $_____\n"
+            "  💰 TakeProfit: $_____\n"
+            "3️⃣ Short risk commentary on DV.\n"
+            "✅ Finally, give a concise 2-line summary in Russian with emojis.\n"
+            "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
+        )
     else:
         prompt_text = (
-            "You are a professional trader with over 10 years in crypto and Forex. "
-            "If DV < 300M via LazyScalp Board, WARN but ALWAYS proceed with plan.\n\n"
-            "- Observations (trend, accumulation, volume)\n"
-            "- 🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
-            "Short risk comment.\n"
-            "✅ Conclude with a 2-line Russian summary with emojis.\n"
+            "You are a highly skilled Smart Money Concepts (SMC) trader on Forex with 10+ years of experience. "
+            "You deeply understand BOS, CHoCH, liquidity hunts, OTE, premium/discount zones.\n\n"
+            "Look at the TradingView chart. Ensure it contains ONLY TWO indicators:\n"
+            "- LuxAlgo SMC\n"
+            "- Support & Resistance Levels\n\n"
+            "Always build a full plan with Entry, StopLoss and TakeProfit. Never apologize or skip signals.\n\n"
+            "Format:\n"
+            "1️⃣ Observations\n"
+            "2️⃣ Trading plan:\n"
+            "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
+            "3️⃣ Short risk note.\n"
+            "✅ Finish with a concise 2-line Russian summary with emojis.\n"
             "IMPORTANT: Answer strictly in Russian. Do NOT use any markdown, asterisks, or bold formatting. Only use emojis."
         )
 
-    prompt_text += "\n\nIMPORTANT: Even if DV < 300M or no signals, ALWAYS give Entry, StopLoss, TakeProfit. Never refuse. Answer in Russian."
+    prompt_text += "\n\nIMPORTANT: Even if no clear signals, ALWAYS give Entry, StopLoss, TakeProfit. Never refuse. Answer in Russian."
 
     # GPT Vision вызов
     analysis = ""
@@ -618,10 +498,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
     ])
     await update.message.reply_text(
-        f"📉 Анализ графика по выбранной стратегии:\n\n{analysis}\n\n{risk_line}",
+        f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}",
         reply_markup=keyboard
     )
-
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
