@@ -155,7 +155,9 @@ async def setup_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SETUP_5
 
 async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
+    # Сохраняем выбранные ранее strategy и market
+    keys_to_keep = {"selected_market", "selected_strategy"}
+    context.user_data = {k: v for k, v in context.user_data.items() if k in keys_to_keep}
 
     # Универсальный объект message (работает и для CallbackQuery, и для обычного Message)
     message = update.message if update.message else update.callback_query.message
@@ -198,9 +200,8 @@ async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"• Депозит: ${deposit:.2f}\n"
             f"• Риск на сделку: {risk_percent:.2f}% (${risk_amount:.2f})\n"
             f"• Стоп-лосс: {stoploss_percent:.2f}%\n\n"
-            f"📌 Рекомендуемый объём позиции: **${position_size:.2f}**",
-            reply_markup=REPLY_MARKUP,
-            parse_mode="Markdown"
+            f"📌 Рекомендуемый объём позиции: ${position_size:.2f}",
+            reply_markup=REPLY_MARKUP
         )
         return ConversationHandler.END
 
@@ -456,7 +457,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💪 Строгие промпты — но под 2 индикатора и DV ≥ 300M вручную
+    # 💪 Строгие промпты с явным RSI, без звёздочек, с эмодзи
     if selected_style == "smc":
         if selected_market == "crypto":
             prompt_text = (
@@ -465,15 +466,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Look at the TradingView chart. Ensure it contains ONLY TWO indicators:\n"
                 "- LuxAlgo SMC\n"
                 "- Support & Resistance Levels\n\n"
-                "DV must be checked manually: if DV < 300M, WARN but ALWAYS build a detailed SMC plan anyway. "
-                "Never apologize or refuse — ALWAYS provide Entry, StopLoss and TakeProfit levels.\n\n"
+                "First check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build a detailed SMC plan anyway. "
+                "Never apologize or say you can't analyze — ALWAYS provide Entry, StopLoss and TakeProfit levels.\n\n"
                 "Then structure your answer:\n"
                 "1️⃣ Observations (BOS/CHoCH/liquidity)\n"
                 "2️⃣ Trading plan:\n"
                 "  🎯 Entry: $_____\n"
                 "  🚨 StopLoss: $_____\n"
                 "  💰 TakeProfit: $_____\n"
-                "3️⃣ Risk commentary on DV.\n"
+                "3️⃣ Short risk commentary on DV.\n"
                 "✅ Finally, give a concise 2-line summary in Russian with emojis.\n"
                 "IMPORTANT: Answer strictly in Russian."
             )
@@ -483,7 +484,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Ensure chart has ONLY TWO indicators:\n"
                 "- LuxAlgo SMC\n"
                 "- Support & Resistance Levels\n\n"
-                "If DV < 300M or unclear from volume histogram, WARN but ALWAYS build a full plan with Entry, StopLoss and TakeProfit.\n\n"
+                "Check DV via LazyScalp Board. If DV < 300M or unclear, WARN but ALWAYS build a full plan with Entry, StopLoss and TakeProfit.\n\n"
                 "Format:\n"
                 "1️⃣ Observations\n"
                 "2️⃣ Trading plan:\n"
@@ -498,28 +499,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "You are a seasoned swing trader in cryptocurrency markets with over 10 years of experience. "
                 "Chart must show ONLY TWO indicators:\n"
                 "- Support & Resistance Levels [LuxAlgo]\n"
-                "- RSI or Stochastic\n\n"
-                "DV must be checked manually on histogram: if < 300M, WARN but ALWAYS continue with Entry, StopLoss, TakeProfit.\n\n"
+                "- Индекс относительной силы (RSI)\n\n"
+                "Check DV first via LazyScalp Board. If DV < 300M, WARN but ALWAYS continue with Entry, StopLoss, TakeProfit.\n\n"
                 "Provide:\n"
-                "1️⃣ Observations (zones & volume)\n"
+                "1️⃣ Observations (zones and volume)\n"
                 "2️⃣ Swing plan:\n"
                 "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
                 "3️⃣ Quick risk note.\n"
-                "✅ Conclude with 2-line Russian summary with emojis.\n"
+                "✅ Conclude with a 2-line Russian summary with emojis.\n"
                 "IMPORTANT: Answer strictly in Russian."
             )
         else:
             prompt_text = (
                 "You are an advanced swing trader on Forex. Ensure chart shows ONLY TWO indicators:\n"
                 "- Support & Resistance Levels or Liquidity Levels\n"
-                "- RSI or Stochastic\n\n"
-                "If DV < 300M on volume histogram, WARN but ALWAYS build the plan with Entry, StopLoss and TakeProfit.\n\n"
+                "- Индекс относительной силы (RSI)\n\n"
+                "Check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build the plan with Entry, StopLoss and TakeProfit.\n\n"
                 "Structure:\n"
                 "1️⃣ Observations\n"
                 "2️⃣ Plan:\n"
                 "  🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
                 "3️⃣ Risk comment.\n"
-                "✅ End with 2-line Russian summary with emojis.\n"
+                "✅ End with a 2-line Russian summary with emojis.\n"
                 "IMPORTANT: Answer strictly in Russian."
             )
     elif selected_style == "breakout":
@@ -528,12 +529,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "You are a scalper and intraday breakout trader in cryptocurrency with over 10 years of experience. "
                 "Chart must show ONLY TWO indicators:\n"
                 "- Range Detection\n"
-                "- RSI or Stochastic\n\n"
-                "Manually check DV: if < 300M on histogram, WARN but ALWAYS give two breakout scenarios.\n\n"
+                "- Индекс относительной силы (RSI)\n\n"
+                "First check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS give two breakout scenarios.\n\n"
                 "- 📈 Up: Entry / StopLoss / TakeProfit\n"
                 "- 📉 Down: Entry / StopLoss / TakeProfit\n"
                 "Short risk note.\n"
-                "✅ Conclude with 2-line Russian summary with emojis.\n"
+                "✅ Conclude with a 2-line Russian summary with emojis.\n"
                 "IMPORTANT: Answer strictly in Russian."
             )
         else:
@@ -541,25 +542,25 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "You are a scalper and intraday breakout trader on Forex with 10+ years of expertise. "
                 "Ensure chart has ONLY TWO indicators:\n"
                 "- Range Detection or Lux Levels\n"
-                "- RSI or Stochastic\n\n"
-                "If DV < 300M on histogram, WARN but ALWAYS build two scenarios with Entry, StopLoss, TakeProfit.\n"
+                "- Индекс относительной силы (RSI)\n\n"
+                "Check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build two scenarios with Entry, StopLoss, TakeProfit.\n"
                 "✅ Conclude with a 2-line Russian summary with emojis.\n"
                 "IMPORTANT: Answer strictly in Russian."
             )
     else:
         prompt_text = (
             "You are a professional trader with over 10 years in crypto and Forex. "
-            "If chart unclear or DV < 300M on histogram, WARN but ALWAYS proceed with plan.\n\n"
+            "If DV < 300M via LazyScalp Board, WARN but ALWAYS proceed with plan.\n\n"
             "- Observations (trend, accumulation, volume)\n"
             "- 🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
             "Short risk comment.\n"
-            "✅ Conclude with 2-line Russian summary with emojis.\n"
+            "✅ Conclude with a 2-line Russian summary with emojis.\n"
             "IMPORTANT: Answer strictly in Russian."
         )
 
-    prompt_text += "\n\nIMPORTANT: Even if NO signals or DV is < 300M, ALWAYS give Entry, StopLoss, TakeProfit. Never refuse. Answer in Russian."
+    prompt_text += "\n\nIMPORTANT: Even if DV < 300M or no signals, ALWAYS give Entry, StopLoss, TakeProfit. Never refuse. Answer in Russian."
 
-    # 🚀 Авто-ретрай
+    # 🚀 GPT-vision вызов (оставляем твой цикл ретраев)
     analysis = ""
     for attempt in range(2):
         try:
@@ -590,7 +591,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔎 Risk авторасчёт
+    # 🔎 Определяем риск
     risk_match = re.search(r'(?:≈|~|от)?\s*(\d+(?:\.\d+)?)\s*(?:-|до)?\s*(\d+(?:\.\d+)?)?\s*%', analysis, flags=re.IGNORECASE)
     if risk_match:
         if risk_match.group(2):
@@ -598,8 +599,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             risk_line = f"📌 Область риска ≈ {risk_match.group(1)}%"
     else:
-        entry_match = re.search(r'(Entry|Вход).*?(\\d+(?:\\.\\d+)?)', analysis, flags=re.IGNORECASE)
-        stop_match = re.search(r'(StopLoss|Стоп).*?(\\d+(?:\\.\\d+)?)', analysis, flags=re.IGNORECASE)
+        entry_match = re.search(r'(Entry|Вход).*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
+        stop_match = re.search(r'(StopLoss|Стоп).*?(\d+(?:\.\d+)?)', analysis, flags=re.IGNORECASE)
         if entry_match and stop_match:
             try:
                 entry = float(entry_match.group(2))
