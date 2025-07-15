@@ -403,16 +403,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Только SMC, но разный prompt для crypto и forex
+    # Только SMC, H4 под лимитки
     if selected_market == "crypto":
         prompt_text = (
             "You are a world-class professional Smart Money Concepts (SMC) trader with 10+ years of experience in cryptocurrency markets. "
             "You deeply understand BOS, CHoCH, liquidity hunts, OTE, premium/discount zones.\n\n"
-            "Look at the TradingView chart. Ensure it contains ONLY TWO indicators:\n"
+            "Look at the TradingView chart on H4 timeframe. Ensure it contains ONLY TWO indicators:\n"
             "- LuxAlgo SMC\n"
             "- Support & Resistance Levels\n\n"
             "First check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build a detailed SMC plan anyway. "
-            "Never apologize or say you can't analyze — ALWAYS provide Entry, StopLoss and TakeProfit levels.\n\n"
+            "This must be strictly an H4 swing trading plan suitable for pending limit or stop orders, so the user can set and wait without monitoring charts constantly.\n\n"
             "Then structure your answer:\n"
             "1️⃣ Observations (BOS/CHoCH/liquidity)\n"
             "2️⃣ Trading plan:\n"
@@ -427,10 +427,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prompt_text = (
             "You are a highly skilled Smart Money Concepts (SMC) trader on Forex with 10+ years of experience. "
             "You deeply understand BOS, CHoCH, liquidity hunts, OTE, premium/discount zones.\n\n"
-            "Look at the TradingView chart. Ensure it contains ONLY TWO indicators:\n"
+            "Look at the TradingView chart on H4 timeframe. Ensure it contains ONLY TWO indicators:\n"
             "- LuxAlgo SMC\n"
             "- Support & Resistance Levels\n\n"
-            "Always build a full plan with Entry, StopLoss and TakeProfit. Never apologize or skip signals.\n\n"
+            "Always build a full H4 swing trading plan designed for pending orders (limit or stop), so the user can place the trade and leave it without constant monitoring. "
+            "Never apologize or skip signals.\n\n"
             "Format:\n"
             "1️⃣ Observations\n"
             "2️⃣ Trading plan:\n"
@@ -498,7 +499,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
     ])
     await update.message.reply_text(
-        f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}",
+        f"📉 Анализ графика по SMC (H4):\n\n{analysis}\n\n{risk_line}",
         reply_markup=keyboard
     )
 
