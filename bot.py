@@ -1371,9 +1371,12 @@ def main():
         ]
     )
 
-    # 📏 Калькулятор риска
+    # 📏 Калькулятор риска (добавили CallbackQueryHandler для inline кнопки)
     risk_calc_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc)],
+        entry_points=[
+            MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc),
+            CallbackQueryHandler(start_risk_calc, pattern="^start_risk_calc$")
+        ],
         states={
             RISK_CALC_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_deposit)],
             RISK_CALC_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_risk_percent)],
