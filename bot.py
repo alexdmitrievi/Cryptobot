@@ -403,7 +403,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Только SMC, H4 под лимитки
+    # Только SMC на H4 под лимитки + требование RR >= 1:3
     if selected_market == "crypto":
         prompt_text = (
             "You are a world-class professional Smart Money Concepts (SMC) trader with 10+ years of experience in cryptocurrency markets. "
@@ -413,6 +413,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "- Support & Resistance Levels\n\n"
             "First check DV via LazyScalp Board. If DV < 300M, WARN but ALWAYS build a detailed SMC plan anyway. "
             "This must be strictly an H4 swing trading plan suitable for pending limit or stop orders, so the user can set and wait without monitoring charts constantly.\n\n"
+            "Always ensure the Risk/Reward ratio (TakeProfit : StopLoss) is at least 1:3. If the market structure allows, aim for 1:4 or better. Never give a plan with RR lower than 1:3.\n\n"
             "Then structure your answer:\n"
             "1️⃣ Observations (BOS/CHoCH/liquidity)\n"
             "2️⃣ Trading plan:\n"
@@ -431,7 +432,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "- LuxAlgo SMC\n"
             "- Support & Resistance Levels\n\n"
             "Always build a full H4 swing trading plan designed for pending orders (limit or stop), so the user can place the trade and leave it without constant monitoring. "
-            "Never apologize or skip signals.\n\n"
+            "Always ensure the Risk/Reward ratio (TakeProfit : StopLoss) is at least 1:3. If the market structure allows, aim for 1:4 or better. Never give a plan with RR lower than 1:3.\n\n"
             "Format:\n"
             "1️⃣ Observations\n"
             "2️⃣ Trading plan:\n"
