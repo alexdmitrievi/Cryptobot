@@ -857,21 +857,22 @@ async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         reply_markup = ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
 
-        text = response.choices[0].message.content.strip()
-        if not text:
+        # Защита от пустого ответа или структуры
+        if not response.choices or not response.choices[0].message or not response.choices[0].message.content:
             await update.message.reply_text(
                 "⚠️ GPT не дал ответа. Попробуй задать вопрос ещё раз.",
                 reply_markup=reply_markup
             )
             return
 
+        text = response.choices[0].message.content.strip()
         await update.message.reply_text(
             f"📖 Обучение:\n\n{text}",
             reply_markup=reply_markup
         )
 
     except Exception as e:
-        logging.error(f"[TEACHER_RESPONSE] GPT error: {e}")
+        logging.error(f"[TEACHER_RESPONSE] GPT error: {e}", exc_info=True)
         await update.message.reply_text(
             "⚠️ GPT временно недоступен. Попробуй позже.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
