@@ -161,36 +161,56 @@ async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data.update(saved_data)
 
-    # Универсальный объект message (работает и для CallbackQuery, и для обычного Message)
     message = update.message if update.message else update.callback_query.message
 
     await message.reply_text(
         "📊 Введи размер депозита в $:",
-        reply_markup=REPLY_MARKUP
+        reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
     )
     return RISK_CALC_1
 
+
 async def risk_calc_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text.strip()
+    if user_text == "↩️ Выйти в меню":
+        context.user_data.clear()
+        await update.message.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
+        return ConversationHandler.END
+
     try:
-        context.user_data["deposit"] = float(update.message.text.strip())
+        context.user_data["deposit"] = float(user_text)
         await update.message.reply_text("💡 Теперь введи процент риска на сделку (%):")
         return RISK_CALC_2
     except ValueError:
         await update.message.reply_text("❗️ Введи число. Пример: 1000")
         return RISK_CALC_1
 
+
 async def risk_calc_risk_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text.strip()
+    if user_text == "↩️ Выйти в меню":
+        context.user_data.clear()
+        await update.message.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
+        return ConversationHandler.END
+
     try:
-        context.user_data["risk_percent"] = float(update.message.text.strip())
+        context.user_data["risk_percent"] = float(user_text)
         await update.message.reply_text("⚠️ Введи стоп-лосс по сделке (%):")
         return RISK_CALC_3
     except ValueError:
         await update.message.reply_text("❗️ Введи число. Пример: 2")
         return RISK_CALC_2
 
+
 async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text.strip()
+    if user_text == "↩️ Выйти в меню":
+        context.user_data.clear()
+        await update.message.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
+        return ConversationHandler.END
+
     try:
-        stoploss_percent = float(update.message.text.strip())
+        stoploss_percent = float(user_text)
         deposit = context.user_data["deposit"]
         risk_percent = context.user_data["risk_percent"]
 
