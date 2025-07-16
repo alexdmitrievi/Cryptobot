@@ -1068,7 +1068,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_invest_question"):
         return await handle_invest_question(update, context)
     if context.user_data.get("awaiting_teacher_question"):
-        return await handle_teacher_question(update, context)
+        return await teacher_response(update, context)  # <-- исправлено тут
     if context.user_data.get("awaiting_definition_term"):
         return await handle_definition_term(update, context)
     if context.user_data.get("awaiting_news"):
