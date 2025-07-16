@@ -415,7 +415,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
     selected_market = context.user_data.get("selected_market")
-    selected_style = context.user_data.get("style", "swing")  # future-proofing for custom styles
+    selected_style = context.user_data.get("style", "swing")
 
     if not selected_market:
         await update.message.reply_text(
@@ -502,7 +502,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ GPT не дал ответа. Попробуй снова или пришли другой скрин.")
         return
 
-    # Расчёт RR, Risk и Bias
     def parse_price(raw_text):
         try:
             return float(raw_text.replace(" ", "").replace(",", "").replace("$", ""))
@@ -511,12 +510,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     entry_match = re.search(r'(Entry|Вход).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
     stop_match = re.search(r'(StopLoss|Стоп).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
-    tp_match = re.search(r'(TakeProfit|Тейк).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
-    bias_match = re.search(r'(BUY|SELL|ПОКУПКА|ПРОДАЖА)', analysis, flags=re.IGNORECASE)
 
     entry = parse_price(entry_match.group(2)) if entry_match else None
     stop = parse_price(stop_match.group(2)) if stop_match else None
-    tp = parse_price(tp_match.group(2)) if tp_match else None
 
     if entry and stop:
         risk_percent = abs((entry - stop) / entry * 100)
@@ -524,31 +520,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         risk_line = "📌 Область риска не указана явно — оценивай внимательно."
 
-    rr_line = ""
-    if entry and stop and tp and (entry != stop):
-        rr_ratio = abs((tp - entry) / (entry - stop))
-        rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
-
-    bias_line = f"📈 Направление сделки: {bias_match.group(1).upper()}" if bias_match else ""
-
-    # TLDR
-    if entry and stop and tp:
-        tldr = f"✅ TL;DR: Вход {entry}, стоп {stop}, тейк {tp}."
-        if rr_line:
-            tldr += f" {rr_line}"
-    else:
-        tldr = "✅ Краткий план не сформирован — проверь вход/стоп/тейк."
-
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
     ])
 
     full_message = f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}"
-    if rr_line:
-        full_message += f"\n{rr_line}"
-    if bias_line:
-        full_message += f"\n{bias_line}"
-    full_message += f"\n\n{tldr}"
 
     await update.message.reply_text(full_message, reply_markup=keyboard)
 
