@@ -604,8 +604,18 @@ async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
 async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     user_text = update.message.text.strip()
+
+    # 🚪 Выход в главное меню по кнопке
+    if user_text == "↩️ Выйти в меню":
+        context.user_data.pop("awaiting_invest_question", None)
+        await update.message.reply_text(
+            "🔙 Ты вышел из режима стратегий. Возвращаемся в главное меню.",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
+    user_id = update.effective_user.id
 
     # 🪝 Fetch BTC & ETH prices
     try:
@@ -711,7 +721,7 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
 async def generate_news_interpretation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
 
-    # 🚪 Выход из режима
+    # 🚪 Выход из режима по кнопке
     if user_text == "↩️ Выйти в меню":
         context.user_data.pop("awaiting_news", None)
         await update.message.reply_text(
@@ -762,11 +772,18 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
             messages=[{"role": "user", "content": prompt}]
         )
 
-        keyboard = [["↩️ Выйти в меню"]]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        text = response.choices[0].message.content.strip()
+        reply_markup = ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+
+        if not text:
+            await update.message.reply_text(
+                "⚠️ GPT не дал ответа. Попробуй снова.",
+                reply_markup=reply_markup
+            )
+            return
 
         await update.message.reply_text(
-            f"📊 Интерпретация новости:\n\n{response.choices[0].message.content.strip()}",
+            f"📊 Интерпретация новости:\n\n{text}",
             reply_markup=reply_markup
         )
 
@@ -780,7 +797,7 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
 async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
 
-    # Обработка выхода в меню
+    # 🚪 Выход в меню по кнопке
     if user_text == "↩️ Выйти в меню":
         context.user_data.pop("awaiting_teacher_question", None)
         await update.message.reply_text(
@@ -818,12 +835,18 @@ async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
             messages=[{"role": "user", "content": prompt}]
         )
 
-        # Постоянная клавиатура для выхода
-        education_keyboard = [["↩️ Выйти в меню"]]
-        reply_markup = ReplyKeyboardMarkup(education_keyboard, resize_keyboard=True)
+        reply_markup = ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+
+        text = response.choices[0].message.content.strip()
+        if not text:
+            await update.message.reply_text(
+                "⚠️ GPT не дал ответа. Попробуй задать вопрос ещё раз.",
+                reply_markup=reply_markup
+            )
+            return
 
         await update.message.reply_text(
-            f"📖 Обучение:\n\n{response.choices[0].message.content.strip()}",
+            f"📖 Обучение:\n\n{text}",
             reply_markup=reply_markup
         )
 
@@ -835,8 +858,18 @@ async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.pop("awaiting_definition_term", None)
-    term = update.message.text.strip()
+    user_text = update.message.text.strip()
+
+    # 🚪 Выход по кнопке
+    if user_text == "↩️ Выйти в меню":
+        context.user_data.pop("awaiting_definition_term", None)
+        await update.message.reply_text(
+            "🔙 Ты вышел из режима терминов. Возвращаемся в главное меню.",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
+    term = user_text
 
     prompt = (
         f"You are a professional trader and educator with over 10 years of experience.\n\n"
@@ -853,13 +886,28 @@ async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
+
+        reply_markup = ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+
+        text = response.choices[0].message.content.strip()
+        if not text:
+            await update.message.reply_text(
+                "⚠️ GPT не дал ответа. Попробуй задать термин ещё раз.",
+                reply_markup=reply_markup
+            )
+            return
+
         await update.message.reply_text(
-            f"📘 Определение:\n{response.choices[0].message.content.strip()}",
-            reply_markup=REPLY_MARKUP
+            f"📘 Определение:\n\n{text}",
+            reply_markup=reply_markup
         )
+
     except Exception as e:
         logging.error(f"[DEFINITION] GPT error: {e}")
-        await update.message.reply_text("⚠️ Не удалось объяснить термин. Попробуй позже.")
+        await update.message.reply_text(
+            "⚠️ GPT временно недоступен. Попробуй позже.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
 
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -867,6 +915,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logging.info(f"[handle_main] Пользователь {user_id} нажал кнопку: {text}")
 
+    # 🚪 Проверка доступа
     if user_id not in ALLOWED_USERS and text not in ["💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера"]:
         await update.message.reply_text(
             "🔒 Доступ только после активации подписки за $25 или через брокера.",
@@ -879,7 +928,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_invest_question"] = True
         await update.message.reply_text(
             "✍️ Напиши свой вопрос или опиши свою инвестиционную цель, "
-            "чтобы я составил стратегию с учётом текущих цен BTC/ETH и рекомендациями по диверсификации."
+            "чтобы я составил стратегию с учётом текущих цен BTC/ETH и рекомендациями по диверсификации.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
         return
 
@@ -908,14 +958,18 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "📖 Обучение":
         context.user_data["awaiting_teacher_question"] = True
         await update.message.reply_text(
-            "✍️ Напиши свой вопрос — я отвечу как преподаватель с 20+ годами опыта в трейдинге и инвестициях."
+            "✍️ Напиши свой вопрос — я отвечу как преподаватель с 20+ годами опыта в трейдинге и инвестициях.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
         return
 
     # 📚 Термин
     if text == "📚 Термин":
         context.user_data["awaiting_definition_term"] = True
-        await update.message.reply_text("✍️ Напиши термин, который нужно объяснить.")
+        await update.message.reply_text(
+            "✍️ Напиши термин, который нужно объяснить.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
         return
 
     # 🚀 Сигнал
@@ -973,13 +1027,17 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
         return SETUP_1
 
-    # ✅ Обработка открытых диалогов для инвестиционных вопросов, обучения и терминов
+    # ✅ Обработка открытых диалогов для всех режимов
     if context.user_data.get("awaiting_invest_question"):
         return await handle_invest_question(update, context)
     if context.user_data.get("awaiting_teacher_question"):
         return await handle_teacher_question(update, context)
     if context.user_data.get("awaiting_definition_term"):
         return await handle_definition_term(update, context)
+    if context.user_data.get("awaiting_news"):
+        return await generate_news_interpretation(update, context)
+    if context.user_data.get("awaiting_therapy_input"):
+        return await gpt_psychologist_response(update, context)
     if context.user_data.get("awaiting_uid"):
         return await handle_uid_submission(update, context)
 
@@ -991,6 +1049,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔄 Сброс всех ожиданий. Продолжай.",
         reply_markup=REPLY_MARKUP
     )
+
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
@@ -1392,7 +1451,7 @@ def main():
         ]
     )
 
-    # 📏 Калькулятор риска (добавили CallbackQueryHandler для inline кнопки)
+    # 📏 Калькулятор риска
     risk_calc_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc),
@@ -1427,24 +1486,24 @@ def main():
         ]
     )
 
+    # ✅ Регистрируем стандартные команды в начале
+    app.add_handler(CommandHandler("start", start, block=False))
+    app.add_handler(CommandHandler("restart", restart, block=False))
+    app.add_handler(CommandHandler("publish", publish_post, block=False))
+    app.add_handler(CommandHandler("broadcast", broadcast, block=False))
+    app.add_handler(CommandHandler("grant", grant, block=False))
+    app.add_handler(CommandHandler("reload_users", reload_users, block=False))
+    app.add_handler(CommandHandler("stats", stats, block=False))
+    app.add_handler(CommandHandler("export", export, block=False))
+
     # ✅ Регистрируем ConversationHandlers
     app.add_handler(therapy_handler)
     app.add_handler(risk_calc_handler)
     app.add_handler(setup_handler)
 
-    # ✅ Стандартные команды
-    app.add_handler(CommandHandler("start", start, block=False))
-    app.add_handler(CommandHandler("restart", restart, block=False))
-    app.add_handler(CommandHandler("publish", publish_post))
-    app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(CommandHandler("grant", grant))
-    app.add_handler(CommandHandler("reload_users", reload_users))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("export", export))
-
-    # ✅ Обработчики фото, inline кнопок и текста
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    # ✅ CallbackQuery, фото и текстовые сообщения
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
 
     # 🚀 Запускаем polling
