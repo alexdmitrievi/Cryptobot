@@ -518,46 +518,22 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     entry_match = re.search(r'(Entry|Вход).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
     stop_match = re.search(r'(StopLoss|Стоп).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
-    tp_match = re.search(r'(TakeProfit|Тейк).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
-    bias_match = re.search(r'(BUY|SELL|ПОКУПКА|ПРОДАЖА)', analysis, flags=re.IGNORECASE)
 
     entry = parse_price(entry_match.group(2)) if entry_match else None
     stop = parse_price(stop_match.group(2)) if stop_match else None
-    tp = parse_price(tp_match.group(2)) if tp_match else None
-    bias = bias_match.group(1).upper() if bias_match else None
 
-    risk_line = "📌 Область риска не указана явно — оценивай внимательно."
-    rr_line = ""
-    rr_warning = ""
-
-    if entry and stop:
-        risk_percent = abs((entry - stop) / entry * 100)
-        risk_line = f"📌 Область риска ≈ {risk_percent:.2f}% (авторасчёт)"
-
-    if entry and stop and tp and bias:
-        if bias in ["SELL", "ПРОДАЖА"]:
-            rr = abs((entry - tp) / (stop - entry)) if stop != entry else 0
-        else:
-            rr = abs((tp - entry) / (entry - stop)) if stop != entry else 0
-
-        if rr > 0:
-            rr_line = f"📊 R:R ≈ {rr:.2f}"
-            if rr < 3.0:
-                rr_warning = "⚠️ R:R ниже 1:3 — план рискованный, подумай дважды."
-
-    bias_line = f"📈 Направление сделки: {bias}" if bias else ""
+    if entry and stop and entry != 0:
+        diff = abs(entry - stop)
+        percent = abs((entry - stop) / entry * 100)
+        risk_line = f"📌 Область риска ≈ ${diff:.2f} ({percent:.2f}%)"
+    else:
+        risk_line = "📌 Область риска не указана явно — оценивай внимательно."
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
     ])
 
     full_message = f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}"
-    if rr_line:
-        full_message += f"\n{rr_line}"
-    if rr_warning:
-        full_message += f"\n{rr_warning}"
-    if bias_line:
-        full_message += f"\n{bias_line}"
 
     await update.message.reply_text(full_message, reply_markup=keyboard)
 
