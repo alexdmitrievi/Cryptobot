@@ -923,7 +923,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🎯 Стратегия инвестиций
+    # 💡 Стратегия
     if text == "💡 Стратегия":
         context.user_data["awaiting_invest_question"] = True
         await update.message.reply_text(
@@ -933,15 +933,15 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 📏 Калькулятор риска
+    # 🎯 Риск
     if text == "🎯 Риск":
         return await start_risk_calc(update, context)
 
-    # 🧘 GPT-Психолог
+    # 🌱 Психолог
     if text == "🌱 Психолог":
         return await start_therapy(update, context)
 
-    # 🔍 Анализ новостей
+    # 🔍 Анализ
     if text == "🔍 Анализ":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Экономический календарь", callback_data="interpret_calendar")],
@@ -981,6 +981,22 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚡ Для какого рынка сделать анализ?",
             reply_markup=keyboard
+        )
+        return
+
+    # 💸 Криптообмен
+    if text == "💸 Криптообмен":
+        await update.message.reply_text(
+            "💸 Криптообмен без риска\n\n"
+            "⚖️ Легально, быстро и прозрачно — мы производим обмен криптовалюты в 17 регионах России. "
+            "Все средства имеют чистое и официальное происхождение.\n\n"
+            "✅ Без скрытых комиссий\n"
+            "🚀 Моментальные сделки\n"
+            "💰 Деньги сразу к вам в руки или на счёт\n"
+            "🔥 Полная конфиденциальность и защита данных\n\n"
+            "Хочешь выгодно и безопасно обменять крипту?\n"
+            "✍️ Напиши мне прямо сейчас 👉 @zhbankov_alex",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Вернуться в меню"]], resize_keyboard=True)
         )
         return
 
@@ -1041,6 +1057,15 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_uid"):
         return await handle_uid_submission(update, context)
 
+    # ↩️ Вернуться в меню (универсальный выход)
+    if text == "↩️ Вернуться в меню" or text == "↩️ Выйти в меню":
+        context.user_data.clear()
+        await update.message.reply_text(
+            "🔙 Вернулись в главное меню.",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
     # 🔄 Если ничего не ожидаем - сброс
     saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
     context.user_data.clear()
@@ -1049,7 +1074,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔄 Сброс всех ожиданий. Продолжай.",
         reply_markup=REPLY_MARKUP
     )
-
 
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
@@ -1486,7 +1510,7 @@ def main():
         ]
     )
 
-    # ✅ Регистрируем стандартные команды в начале
+    # ✅ Стандартные команды (block=False для async-надёжности)
     app.add_handler(CommandHandler("start", start, block=False))
     app.add_handler(CommandHandler("restart", restart, block=False))
     app.add_handler(CommandHandler("publish", publish_post, block=False))
@@ -1496,17 +1520,17 @@ def main():
     app.add_handler(CommandHandler("stats", stats, block=False))
     app.add_handler(CommandHandler("export", export, block=False))
 
-    # ✅ Регистрируем ConversationHandlers
+    # ✅ ConversationHandlers
     app.add_handler(therapy_handler)
     app.add_handler(risk_calc_handler)
     app.add_handler(setup_handler)
 
-    # ✅ CallbackQuery, фото и текстовые сообщения
+    # ✅ CallbackQuery, фото и текстовые
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
 
-    # 🚀 Запускаем polling
+    # 🚀 Запуск
     app.run_polling()
 
 def log_payment(user_id, username):
