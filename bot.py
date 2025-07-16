@@ -445,7 +445,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🚫 RESPONSE RULES:\n"
             "- Always reply in Russian language.\n"
             "- No markdown, no asterisks, no formatting — only plain text + emojis.\n"
-            "- Even if no strong signals are present, you MUST still provide Entry, StopLoss, and TakeProfit. Never refuse."
+            "- Even if no strong signals are present, you MUST still provide Entry, StopLoss, and TakeProfit. Never refuse.\n"
+            "⚠️ Even if chart quality is low or unclear — ALWAYS provide Entry, SL, TP. Never say 'I can't assist'."
         )
     else:
         prompt_text = (
@@ -466,7 +467,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🚫 RESPONSE RULES:\n"
             "- Write ONLY in Russian.\n"
             "- Do NOT use markdown, bold text, or special formatting. Just plain text + emojis.\n"
-            "- If no ideal setup exists, still provide Entry, StopLoss, TakeProfit. Never refuse."
+            "- If no ideal setup exists, still provide Entry, StopLoss, TakeProfit. Never refuse.\n"
+            "⚠️ Even if chart quality is low or unclear — ALWAYS provide Entry, SL, TP. Never say 'I can't assist'."
         )
 
     prompt_text += (
@@ -492,7 +494,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             message_obj = vision_response.choices[0].message
             analysis = message_obj.content.strip() if message_obj and message_obj.content else ""
-            if analysis and "sorry" not in analysis.lower() and "can't assist" not in analysis.lower():
+
+            logging.info(f"[handle_photo] Raw GPT analysis:\n{analysis}")
+
+            if any(x in analysis.lower() for x in ["sorry", "can't assist", "i cannot", "unable to"]):
+                continue
+
+            if analysis:
                 break
             await asyncio.sleep(0.5)
         except Exception as e:
