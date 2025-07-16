@@ -1078,7 +1078,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await handle_uid_submission(update, context)
 
     # ↩️ Вернуться в меню (универсальный выход)
-    if text == "↩️ Вернуться в меню" or text == "↩️ Выйти в меню":
+    if text in ["↩️ Вернуться в меню", "↩️ Выйти в меню"]:
         context.user_data.clear()
         await update.message.reply_text(
             "🔙 Вернулись в главное меню.",
@@ -1534,7 +1534,7 @@ def main():
         ]
     )
 
-    # ✅ Стандартные команды (block=False для async-надёжности)
+    # ✅ Стандартные команды
     app.add_handler(CommandHandler("start", start, block=False))
     app.add_handler(CommandHandler("restart", restart, block=False))
     app.add_handler(CommandHandler("publish", publish_post, block=False))
@@ -1554,7 +1554,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
 
-    # 🚀 Запуск
+    # 🚀 Запуск polling
     app.run_polling()
 
 def log_payment(user_id, username):
