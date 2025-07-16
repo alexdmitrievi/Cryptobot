@@ -1075,12 +1075,31 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=REPLY_MARKUP
     )
 
+async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Устанавливаем флаг, чтобы handle_main понимал, что активен психолог
+    context.user_data["awaiting_therapy_input"] = True
+
+    therapy_keyboard = [["↩️ Выйти в меню"]]
+    reply_markup = ReplyKeyboardMarkup(therapy_keyboard, resize_keyboard=True)
+
+    await update.message.reply_text(
+        "😵‍💫 Ну что, опять рынок побрил как барбер в пятницу? Бывает, друг.\n\n"
+        "Напиши, что случилось — GPT-психолог с доброй иронией выслушает, подбодрит и вставит мем.\n\n"
+        "Когда захочешь вернуться к аналитике — просто нажми «↩️ Выйти в меню».",
+        reply_markup=reply_markup
+    )
+
 async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
 
+    # Обработка выхода в меню
     if user_text == "↩️ Выйти в меню":
-        await update.message.reply_text("🔁 Возвращаемся в главное меню!", reply_markup=REPLY_MARKUP)
-        return ConversationHandler.END
+        context.user_data.pop("awaiting_therapy_input", None)
+        await update.message.reply_text(
+            "🔁 Возвращаемся в главное меню!",
+            reply_markup=REPLY_MARKUP
+        )
+        return
 
     prompt = (
         "You are a GPT-psychologist for traders. "
@@ -1088,13 +1107,13 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
         "Avoid gender-specific words like 'bro' or 'girl', use neutral terms such as 'friend', 'colleague', or 'trader'.\n\n"
         f"User's message:\n{user_text}\n\n"
         "📌 Follow this exact structure:\n\n"
-        "1️⃣ **React empathetically**, but without pity. Show you understand the feeling of losses.\n\n"
-        "2️⃣ **Provide a metaphor** to help the trader realize that a drawdown isn't the end. "
+        "1️⃣ React empathetically, but without pity. Show you understand the feeling of losses.\n\n"
+        "2️⃣ Provide a metaphor to help the trader realize that a drawdown isn't the end. "
         "For example: 'it's like pulling back a slingshot before it fires.'\n\n"
-        "3️⃣ **Give a fact or story** showing that even top traders have losing streaks (like Soros or Druckenmiller). "
+        "3️⃣ Give a fact or story showing that even top traders have losing streaks (like Soros or Druckenmiller). "
         "This builds confidence that everyone experiences losses.\n\n"
-        "4️⃣ **Suggest one simple micro-action** to feel in control right now, like closing the terminal, journaling emotions, or stepping outside.\n\n"
-        "5️⃣ **Finish with a trading meme or funny short quote**, e.g.: '— Are you holding a position? — No, I'm holding back tears 😭.'\n\n"
+        "4️⃣ Suggest one simple micro-action to feel in control right now, like closing the terminal, journaling emotions, or stepping outside.\n\n"
+        "5️⃣ Finish with a trading meme or funny short quote, e.g.: '— Are you holding a position? — No, I'm holding back tears 😭.'\n\n"
         "⚠️ Avoid generic phrases like 'don't worry' or 'everything will be fine'. Be specific, warm, and slightly ironic.\n"
         "Answer everything strictly in Russian."
     )
@@ -1105,34 +1124,19 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
             messages=[{"role": "user", "content": prompt}]
         )
 
-        therapy_keyboard = [["↩️ Выйти в меню"]]
-        reply_markup = ReplyKeyboardMarkup(therapy_keyboard, resize_keyboard=True)
+        reply_markup = ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
 
         await update.message.reply_text(
             f"🧘 GPT-психолог:\n{response.choices[0].message.content.strip()}",
             reply_markup=reply_markup
         )
-        return WAITING_FOR_THERAPY_INPUT
 
     except Exception as e:
         logging.error(f"[GPT_PSYCHOLOGIST] Ошибка при ответе: {e}")
-        await update.message.reply_text("⚠️ Произошла ошибка. Попробуйте ещё раз позже.")
-        return WAITING_FOR_THERAPY_INPUT
-
-async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    therapy_keyboard = [
-        ["↩️ Выйти в меню"]
-    ]
-    reply_markup = ReplyKeyboardMarkup(therapy_keyboard, resize_keyboard=True)
-
-    await update.message.reply_text(
-        "😵‍💫 Ну что, опять рынок побрил как барбер в пятницу? Бывает, дружище.\n\n"
-        "Напиши, что случилось — GPT-психолог с доброй иронией выслушает, подбодрит и вставит мем.\n\n"
-        "Когда захочешь вернуться к аналитике — просто нажми *«↩️ Выйти в меню»*.",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
-    )
-    return WAITING_FOR_THERAPY_INPUT
+        await update.message.reply_text(
+            "⚠️ Произошла ошибка. Попробуй ещё раз позже.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
 
 # 🚀 Функция генерации ссылки POS для Telegram
 async def send_payment_link(update, context):
