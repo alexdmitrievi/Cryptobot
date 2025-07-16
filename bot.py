@@ -409,13 +409,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await photo.get_file()
     original_photo_bytes = await file.download_as_bytearray()
 
-    # Конвертируем изображение в base64 для Vision
     image = Image.open(BytesIO(original_photo_bytes)).convert("RGB")
     buffer = BytesIO()
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
     selected_market = context.user_data.get("selected_market")
+    selected_style = context.user_data.get("style", "swing")  # future-proofing for custom styles
 
     if not selected_market:
         await update.message.reply_text(
@@ -434,13 +434,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🧠 Your goal: Generate a swing trading plan for **pending orders only** (limit or stop), designed so the user can set it and walk away — no active monitoring required.\n"
             "⚖️ Required: Risk/Reward ratio (TakeProfit / StopLoss) must be **at least 1:3**. If market structure allows, aim for 1:4 or better. NEVER return a plan with RR below 1:3.\n\n"
             "✅ Structure your response in this exact format:\n"
-            "1️⃣ Observations — BOS, CHoCH, liquidity zones, OTE areas, premium/discount zones\n"
+            "1️⃣ Observations — use one line per item, each starting with 🔹 (example: 🔹 BOS on 4h above 9980)\n"
             "2️⃣ Trade Plan:\n"
             "   🎯 Entry: $_____\n"
             "   🚨 StopLoss: $_____\n"
             "   💰 TakeProfit: $_____\n"
             "3️⃣ Risk Note — include comment on DV status\n"
-            "✅ Finish with a **concise 2-line summary in Russian**, using only emojis (example: «Покупка от зоны дисконта на вынос ликвидности 💸📈»)\n\n"
+            "4️⃣ Bias — direction of the trade (BUY or SELL)\n"
+            "✅ Finish with a concise 2-line summary in Russian, using only emojis (example: «Покупка от зоны дисконта на вынос ликвидности 💸📈»)\n\n"
             "🚫 RESPONSE RULES:\n"
             "- Always reply in Russian language.\n"
             "- No markdown, no asterisks, no formatting — only plain text + emojis.\n"
@@ -453,14 +454,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "You are reviewing a TradingView chart that contains exactly two indicators:\n"
             "- LuxAlgo SMC\n"
             "- Support & Resistance Levels\n\n"
-            "🎯 Your task: Build a swing trade plan designed for **pending orders** (limit or stop) — so the user can execute and walk away. "
+            "🎯 Your task: Build a swing trade plan designed for **pending orders** (limit or stop) — so the user can execute and walk away.\n"
             "⚖️ Ensure the RR ratio (TakeProfit / StopLoss) is **at least 1:3**, ideally 1:4 or better. Plans with RR below 1:3 are not acceptable.\n\n"
             "✅ Format your output exactly as follows:\n"
-            "1️⃣ Key Market Observations\n"
+            "1️⃣ Key Market Observations — each with 🔹\n"
             "2️⃣ Trade Plan:\n"
             "   🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
-            "3️⃣ Risk Note (e.g., liquidity issues)\n"
-            "✅ End with a 2-line Russian summary using emojis (example: «Продажа от премии на добор стопов 📉🩸»)\n\n"
+            "3️⃣ Risk Note\n"
+            "4️⃣ Bias — BUY or SELL\n"
+            "✅ End with a 2-line Russian summary with emojis (example: «Продажа от премии на добор стопов 📉🩸»)\n\n"
             "🚫 RESPONSE RULES:\n"
             "- Write ONLY in Russian.\n"
             "- Do NOT use markdown, bold text, or special formatting. Just plain text + emojis.\n"
@@ -497,47 +499,58 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
 
     if not analysis:
-        await update.message.reply_text(
-            "⚠️ GPT не дал ответа. Попробуй снова или пришли другой скрин."
-        )
+        await update.message.reply_text("⚠️ GPT не дал ответа. Попробуй снова или пришли другой скрин.")
         return
 
-    # Авторасчёт риска
+    # Расчёт RR, Risk и Bias
     def parse_price(raw_text):
         try:
             return float(raw_text.replace(" ", "").replace(",", "").replace("$", ""))
         except:
             return None
 
-    risk_match = re.search(r'(?:≈|~|от)?\s*(\d+(?:[\.,]\d+)?)\s*(?:-|до)?\s*(\d+(?:[\.,]\d+)?)?\s*%', analysis, flags=re.IGNORECASE)
-    if risk_match:
-        val1 = risk_match.group(1).replace(",", ".")
-        val2 = risk_match.group(2).replace(",", ".") if risk_match.group(2) else None
-        if val2:
-            risk_line = f"📌 Область риска ≈ {val1}-{val2}%"
-        else:
-            risk_line = f"📌 Область риска ≈ {val1}%"
+    entry_match = re.search(r'(Entry|Вход).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
+    stop_match = re.search(r'(StopLoss|Стоп).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
+    tp_match = re.search(r'(TakeProfit|Тейк).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
+    bias_match = re.search(r'(BUY|SELL|ПОКУПКА|ПРОДАЖА)', analysis, flags=re.IGNORECASE)
+
+    entry = parse_price(entry_match.group(2)) if entry_match else None
+    stop = parse_price(stop_match.group(2)) if stop_match else None
+    tp = parse_price(tp_match.group(2)) if tp_match else None
+
+    if entry and stop:
+        risk_percent = abs((entry - stop) / entry * 100)
+        risk_line = f"📌 Область риска ≈ {risk_percent:.2f}% (авторасчёт)"
     else:
-        entry_match = re.search(r'(Entry|Вход).*?([\d\s,\.]+)', analysis, flags=re.IGNORECASE)
-        stop_match = re.search(r'(StopLoss|Стоп).*?([\d\s,\.]+)', analysis, flags=re.IGNORECASE)
-        if entry_match and stop_match:
-            entry = parse_price(entry_match.group(2))
-            stop = parse_price(stop_match.group(2))
-            if entry and stop and entry != stop:
-                risk_percent = abs((entry - stop) / entry * 100)
-                risk_line = f"📌 Область риска ≈ {risk_percent:.2f}% (авторасчёт)"
-            else:
-                risk_line = "📌 Область риска не указана явно — оценивай внимательно."
-        else:
-            risk_line = "📌 Область риска не указана явно — оценивай внимательно."
+        risk_line = "📌 Область риска не указана явно — оценивай внимательно."
+
+    rr_line = ""
+    if entry and stop and tp and (entry != stop):
+        rr_ratio = abs((tp - entry) / (entry - stop))
+        rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
+
+    bias_line = f"📈 Направление сделки: {bias_match.group(1).upper()}" if bias_match else ""
+
+    # TLDR
+    if entry and stop and tp:
+        tldr = f"✅ TL;DR: Вход {entry}, стоп {stop}, тейк {tp}."
+        if rr_line:
+            tldr += f" {rr_line}"
+    else:
+        tldr = "✅ Краткий план не сформирован — проверь вход/стоп/тейк."
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
     ])
-    await update.message.reply_text(
-        f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}",
-        reply_markup=keyboard
-    )
+
+    full_message = f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}"
+    if rr_line:
+        full_message += f"\n{rr_line}"
+    if bias_line:
+        full_message += f"\n{bias_line}"
+    full_message += f"\n\n{tldr}"
+
+    await update.message.reply_text(full_message, reply_markup=keyboard)
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
