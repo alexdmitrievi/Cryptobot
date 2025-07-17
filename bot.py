@@ -273,6 +273,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "market_crypto":
         context.user_data["selected_market"] = "crypto"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
+        ])
         await query.edit_message_text(
             "📈 Smart Money Concepts (SMC) для крипты\n\n"
             "1️⃣ Сначала включи индикатор LazyScalp Board и проверь, чтобы DV ≥ 300M.\n"
@@ -287,11 +290,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Импульсы цены\n"
             "• Зоны дисбаланса (imbalance)\n\n"
             "📏 Хочешь ещё точнее? Нарисуй вручную горизонтальные уровни и наклонные линии тренда — я это тоже увижу и учту.\n\n"
-            "🔽 Пришли скрин — я выдам Entry / Stop / TakeProfit 💰"
+            "🔽 Пришли скрин — я выдам Entry / Stop / TakeProfit 💰",
+            reply_markup=keyboard
         )
 
     elif query.data == "market_forex":
         context.user_data["selected_market"] = "forex"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
+        ])
         await query.edit_message_text(
             "📈 Smart Money Concepts (SMC) для форекса\n\n"
             "⚠️ На Forex нет централизованного объёма, поэтому сразу включи два индикатора:\n"
@@ -305,12 +312,46 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Импульсы цены\n"
             "• Зоны дисбаланса\n\n"
             "📏 Рекомендуется вручную добавить горизонтальные уровни и линии тренда — это улучшит точность прогноза.\n\n"
-            "🔽 Пришли скрин — я сделаю SMC-анализ и выдам Entry / SL / TP 📊"
+            "🔽 Пришли скрин — я сделаю SMC-анализ и выдам Entry / SL / TP 📊",
+            reply_markup=keyboard
         )
 
     elif query.data == "forecast_by_image":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
+        ])
         await query.message.reply_text(
-            "📸 Пришли скриншот графика — я сделаю технический разбор и прогноз."
+            "📸 Пришли скриншот графика — я сделаю технический разбор и прогноз.\n\n"
+            "Если не уверен, как его оформить — нажми кнопку ниже:",
+            reply_markup=keyboard
+        )
+
+    elif query.data == "screenshot_help":
+        await query.message.reply_text(
+            "📸 Как правильно подготовить скрин для точного анализа:\n\n"
+            "1. Таймфрейм:\n"
+            "- Используй 4H или 1H. Это лучшие варианты для анализа по SMC.\n\n"
+            "2. Цвет фона:\n"
+            "- Рекомендуется белый фон. GPT Vision лучше видит уровни и свечи на светлом фоне.\n"
+            "- Как изменить: нажми правой кнопкой мыши по графику → Настройки → Вкладка 'Внешний вид' → Измени фон на белый.\n\n"
+            "3. Индикаторы:\n"
+            "- Включи только два:\n"
+            "  • LuxAlgo SMC\n"
+            "  • Support & Resistance Levels with Breaks\n"
+            "- Удали все остальные (MACD, RSI, объёмы и т.д.)\n\n"
+            "4. Что должно быть видно на скрине:\n"
+            "- Уровни BOS и CHoCH\n"
+            "- Поддержка и сопротивление\n"
+            "- Зоны дисбаланса (imbalance)\n"
+            "- 2–3 последних импульсных движения цены\n\n"
+            "5. Дополнительно:\n"
+            "- Можно вручную нарисовать горизонтальные уровни и наклонные линии тренда — это улучшит результат.\n\n"
+            "6. Перед скрином:\n"
+            "- Убери лишние панели (внизу и сбоку)\n"
+            "- Сделай график на весь экран\n\n"
+            "7. Скриншот:\n"
+            "- Используй кнопку 📷 вверху справа или нажми Windows + Shift + S\n\n"
+            "✅ Чем чище и информативнее скрин, тем точнее Entry / Stop / TakeProfit"
         )
 
     elif query.data == "get_email":
@@ -431,74 +472,38 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
     selected_market = context.user_data.get("selected_market")
-    selected_style = context.user_data.get("style", "swing")
-
     if not selected_market:
-        await update.message.reply_text(
-            "📝 Сначала выбери рынок через кнопки в меню, чтобы я знал, какой анализ тебе нужен."
-        )
+        await update.message.reply_text("📝 Сначала выбери рынок через кнопки в меню, чтобы я знал, какой анализ тебе нужен.")
         return
 
-    if selected_market == "crypto":
-        prompt_text = (
-            "You are a top-tier professional SMC (Smart Money Concepts) trader with over 10 years of proven success in cryptocurrency markets. "
-            "You fully master concepts like Break of Structure (BOS), Change of Character (CHoCH), liquidity grabs, Optimal Trade Entry (OTE), premium/discount zones, and imbalance zones between impulse candles.\n\n"
-            "You are provided with a TradingView chart that includes ONLY TWO indicators:\n"
-            "- LuxAlgo SMC\n"
-            "- Support & Resistance Levels\n\n"
-            "First, check Daily Volume (DV) using LazyScalp Board. If DV < 300M, clearly warn about low liquidity risk — BUT ALWAYS build a full trading plan regardless.\n\n"
-            "🧠 Your goal: Generate a swing trading plan for **pending orders only** (limit or stop), designed so the user can set it and walk away — no active monitoring required.\n"
-            "⚖️ Required: Risk/Reward ratio (TakeProfit / StopLoss) must be **at least 1:3**. If market structure allows, aim for 1:4 or better. NEVER return a plan with RR below 1:3.\n\n"
-            "✅ Structure your response in this exact format:\n"
-            "1️⃣ Observations — use one line per item, each starting with 🔹\n"
-            "2️⃣ Trade Plan:\n"
-            "   🎯 Entry: $_____\n"
-            "   🚨 StopLoss: $_____\n"
-            "   💰 TakeProfit: $_____\n"
-            "3️⃣ Risk Note — include comment on DV status\n"
-            "4️⃣ Bias — direction of the trade (BUY or SELL)\n"
-            "✅ Finish with a concise 2-line summary in Russian, using only emojis (example: «Покупка от зоны дисконта на вынос ликвидности 💸📈»)\n\n"
-            "🚫 RESPONSE RULES:\n"
-            "- Always reply in Russian language.\n"
-            "- No markdown, no asterisks, no formatting — only plain text + emojis.\n"
-            "- Even if no strong signals are present, you MUST still provide Entry, StopLoss, and TakeProfit. Never refuse.\n"
-            "⚠️ Even if chart quality is low or unclear — ALWAYS provide Entry, SL, TP. Never say 'I can't assist'."
-        )
-    else:
-        prompt_text = (
-            "You are a highly skilled SMC (Smart Money Concepts) trader with over 10 years of experience in the Forex market. "
-            "You are fluent in BOS, CHoCH, liquidity grabs, OTE, premium/discount zones, and imbalance zones between impulse candles.\n\n"
-            "You are reviewing a TradingView chart that contains exactly two indicators:\n"
-            "- LuxAlgo SMC\n"
-            "- Support & Resistance Levels\n\n"
-            "🎯 Your task: Build a swing trade plan designed for **pending orders** (limit or stop) — so the user can execute and walk away.\n"
-            "⚖️ Ensure the RR ratio (TakeProfit / StopLoss) is **at least 1:3**, ideally 1:4 or better. Plans with RR below 1:3 are not acceptable.\n\n"
-            "✅ Format your output exactly as follows:\n"
-            "1️⃣ Key Market Observations — each with 🔹\n"
-            "2️⃣ Trade Plan:\n"
-            "   🎯 Entry / 🚨 StopLoss / 💰 TakeProfit\n"
-            "3️⃣ Risk Note\n"
-            "4️⃣ Bias — BUY or SELL\n"
-            "✅ End with a 2-line Russian summary with emojis (example: «Продажа от премии на добор стопов 📉🩸»)\n\n"
-            "🚫 RESPONSE RULES:\n"
-            "- Write ONLY in Russian.\n"
-            "- Do NOT use markdown, bold text, or special formatting. Just plain text + emojis.\n"
-            "- If no ideal setup exists, still provide Entry, StopLoss, TakeProfit. Never refuse.\n"
-            "⚠️ Even if chart quality is low or unclear — ALWAYS provide Entry, SL, TP. Never say 'I can't assist'."
-        )
-
-    prompt_text += (
-        "\n\n🔒 CRITICAL: You must always follow the exact format above. "
-        "No exceptions. Never skip any step. Always write in Russian."
+    # 📜 Базовый prompt
+    prompt_text = (
+        "You are a professional SMC (Smart Money Concepts) trader with over 10 years of experience in "
+        f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets. "
+        "You master BOS, CHoCH, liquidity grabs, imbalance zones, OTE, premium/discount levels.\n\n"
+        "Chart contains only two indicators:\n"
+        "- LuxAlgo SMC\n"
+        "- Support & Resistance Levels\n\n"
+        "Your task: Build a swing trading plan for pending orders only.\n"
+        "Risk/Reward must be at least 1:3. Even on unclear charts, you MUST return Entry, StopLoss, and TakeProfit.\n\n"
+        "✅ Format:\n"
+        "1️⃣ Observations — each starts with 🔹\n"
+        "2️⃣ Trade Plan:\n🎯 Entry: $___\n🚨 StopLoss: $___\n💰 TakeProfit: $___\n"
+        "3️⃣ Risk Note\n4️⃣ Bias — BUY or SELL\n"
+        "✅ End with a short 2-line summary in Russian with emojis.\n\n"
+        "⚠️ Write in Russian only. No markdown. No refusal allowed."
     )
 
     analysis = ""
     for attempt in range(2):
         try:
-            enhanced_prompt = prompt_text if attempt == 0 else (
-                prompt_text +
-                "\n\n🚨 STRICT INSTRUCTION: Even if chart is unclear, low-quality, or shows no obvious setup — you MUST still provide valid Entry, StopLoss, and TakeProfit. NEVER refuse or say 'I can't assist'."
-            )
+            enhanced_prompt = prompt_text
+            if attempt == 1:
+                enhanced_prompt += (
+                    "\n\n🚨 STRICT ORDER: Даже если график нечеткий, тёмный, с насыщенными цветами или без чётких уровней — "
+                    "ты ОБЯЗАН выдать Entry, StopLoss и TakeProfit. Отказ недопустим. "
+                    "Если информации недостаточно — оцени по свечам и структуре. Но НЕ отказывайся."
+                )
 
             vision_response = await client.chat.completions.create(
                 model="gpt-4o",
@@ -528,17 +533,25 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
 
-    if not analysis:
-        await update.message.reply_text("⚠️ GPT не дал ответа. Попробуй снова или пришли другой скрин.")
+    # ❌ Если оба раза GPT отказался
+    if not analysis or "can't assist" in analysis.lower():
+        await update.message.reply_text(
+            "⚠️ GPT не смог проанализировать этот скрин.\n\n"
+            "Попробуй следующие улучшения:\n"
+            "• Сделай фон графика белым\n"
+            "• Убери лишние индикаторы\n"
+            "• Добавь вручную уровни и наклонные линии\n\n"
+            "После этого пришли скрин ещё раз 🔁"
+        )
         return
 
+    # 🔍 Парсинг цен
     def parse_price(raw_text):
         try:
             return float(raw_text.replace(" ", "").replace(",", "").replace("$", ""))
         except:
             return None
 
-    # 🛠 Улучшенные регулярки с fallback на эмодзи
     entry_match = re.search(r'(Entry|Вход)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
         or re.search(r'🎯[:\s]*\$?\s*([\d\s,.]+)', analysis)
     stop_match = re.search(r'(StopLoss|Стоп)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
@@ -584,7 +597,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_message += f"\n\n{tldr}"
 
     await update.message.reply_text(full_message, reply_markup=keyboard)
-
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
