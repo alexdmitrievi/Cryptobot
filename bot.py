@@ -498,6 +498,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2️⃣ Trade Plan:\n🎯 Entry: $...\n🚨 StopLoss: $...\n💰 TakeProfit: $...\n"
         "3️⃣ Risk Note\n4️⃣ Bias: BUY or SELL\n"
         "✅ End with 2-line Russian summary with emojis (e.g. «Покупка от дисконта 💸📈»)\n\n"
+        "❗ Если вход в сделку идёт против текущего тренда (например, SELL в восходящем канале) — обязательно объясни, почему такой вход оправдан.\n\n"
         "🚫 Rules:\n- Write in Russian only\n- No markdown\n- No refusal\n- No apologies"
     )
 
