@@ -529,7 +529,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "you must still provide Entry, StopLoss, and TakeProfit levels. No refusals allowed. "
                     "If data is limited, estimate based on candles, structure, and visible zones.\n\n"
                     "🛑 Your analysis is MANDATORY and must always end in Russian language, in the exact format specified above."
-                 )
+                )
 
             vision_response = await client.chat.completions.create(
                 model="gpt-4o",
@@ -589,26 +589,36 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stop = parse_price(stop_match.group(2) if stop_match and stop_match.lastindex == 2 else stop_match.group(1)) if stop_match else None
     tp = parse_price(tp_match.group(2) if tp_match and tp_match.lastindex == 2 else tp_match.group(1)) if tp_match else None
 
+    rr_line = ""
+    risk_line = "📌 Область риска не указана явно — оценивай внимательно."
+    rr_ratio = None
     if entry and stop:
         risk_abs = abs(entry - stop)
         risk_pct = abs((entry - stop) / entry * 100)
         risk_line = f"📌 Область риска ≈ ${risk_abs:.2f} ({risk_pct:.2f}%)"
-    else:
-        risk_line = "📌 Область риска не указана явно — оценивай внимательно."
-
-    rr_line = ""
     if entry and stop and tp and (entry != stop):
         rr_ratio = abs((tp - entry) / (entry - stop))
         rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
-        if rr_ratio < 3:
-            rr_line += "\n⚠️ R:R ниже 1:3 — план рискованный, подумай дважды."
+        if rr_ratio < 1.5:
+            rr_line += "\n⚠️ R:R ниже 1.5 — сигнал сомнительный, возможна переоценка."
 
     bias_line = f"📈 Направление сделки: {bias_match.group(1).upper()}" if bias_match else ""
 
+    # Проверка: не шорт ли внизу и не лонг ли на хаях
+    direction = bias_match.group(1).upper() if bias_match else None
+    current_price = entry  # Предполагаем, что Entry примерно равен текущей цене
+
+    unrealistic_note = ""
+    if entry and direction:
+        if direction in ["SELL", "ПРОДАЖА"] and entry < tp:
+            unrealistic_note = "⚠️ Entry находится слишком низко для шорта. Возможна реализация BUY-сценария."
+        elif direction in ["BUY", "ПОКУПКА"] and entry > tp:
+            unrealistic_note = "⚠️ Entry слишком высок для покупки — возможно, стоит дождаться подтверждения."
+
     if entry and stop and tp:
         tldr = f"✅ TL;DR: Вход {entry}, стоп {stop}, тейк {tp}."
-        if rr_line:
-            tldr += f" {rr_line.splitlines()[0]}"
+        if rr_ratio:
+            tldr += f" 📊 R:R ≈ {rr_ratio:.2f}"
     else:
         tldr = "✅ Краткий план не сформирован — проверь вход/стоп/тейк."
 
@@ -619,10 +629,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         full_message += f"\n{rr_line}"
     if bias_line:
         full_message += f"\n{bias_line}"
+    if unrealistic_note:
+        full_message += f"\n{unrealistic_note}"
     full_message += f"\n\n{tldr}"
 
     await update.message.reply_text(full_message, reply_markup=keyboard)
-
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
