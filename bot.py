@@ -426,7 +426,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if selected_market == "crypto":
         prompt_text = (
             "You are a top-tier professional SMC (Smart Money Concepts) trader with over 10 years of proven success in cryptocurrency markets. "
-            "You fully master concepts like Break of Structure (BOS), Change of Character (CHoCH), liquidity grabs, Optimal Trade Entry (OTE), and premium/discount zones.\n\n"
+            "You fully master concepts like Break of Structure (BOS), Change of Character (CHoCH), liquidity grabs, Optimal Trade Entry (OTE), premium/discount zones, and imbalance zones between impulse candles.\n\n"
             "You are provided with a TradingView chart that includes ONLY TWO indicators:\n"
             "- LuxAlgo SMC\n"
             "- Support & Resistance Levels\n\n"
@@ -451,7 +451,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         prompt_text = (
             "You are a highly skilled SMC (Smart Money Concepts) trader with over 10 years of experience in the Forex market. "
-            "You are fluent in BOS, CHoCH, liquidity grabs, OTE, and premium/discount zones.\n\n"
+            "You are fluent in BOS, CHoCH, liquidity grabs, OTE, premium/discount zones, and imbalance zones between impulse candles.\n\n"
             "You are reviewing a TradingView chart that contains exactly two indicators:\n"
             "- LuxAlgo SMC\n"
             "- Support & Resistance Levels\n\n"
