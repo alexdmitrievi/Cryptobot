@@ -351,7 +351,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "- Сделай график на весь экран\n\n"
             "7. Скриншот:\n"
             "- Используй кнопку 📷 вверху справа или нажми Windows + Shift + S\n\n"
-            "✅ Чем чище и информативнее скрин, тем точнее Entry / Stop / TakeProfit"
+            "✅ Чем чище и информативнее скрин, тем точнее Entry / Stop / TakeProfit",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("↩️ Вернуться к сигналу", callback_data="back_to_signal")]
+            ])
+        )
+
+    elif query.data == "back_to_signal":
+        await query.message.reply_text(
+            "📸 Отлично! Теперь пришли скриншот графика — я разберу его и выдам Entry / StopLoss / TakeProfit 💰"
         )
 
     elif query.data == "get_email":
