@@ -484,22 +484,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📝 Сначала выбери рынок через кнопки в меню, чтобы я знал, какой анализ тебе нужен.")
         return
 
-    # 📜 Базовый prompt
     prompt_text = (
-        "You are a professional SMC (Smart Money Concepts) trader with over 10 years of experience in "
-        f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets. "
-        "You master BOS, CHoCH, liquidity grabs, imbalance zones, OTE, premium/discount levels.\n\n"
-        "Chart contains only two indicators:\n"
+        f"You are a professional SMC (Smart Money Concepts) trader with 10+ years experience in "
+        f"{'crypto' if selected_market == 'crypto' else 'forex'} markets. "
+        "You master BOS, CHoCH, liquidity grabs, imbalance, OTE, and premium/discount zones.\n\n"
+        "Chart has two indicators:\n"
         "- LuxAlgo SMC\n"
         "- Support & Resistance Levels\n\n"
-        "Your task: Build a swing trading plan for pending orders only.\n"
-        "Risk/Reward must be at least 1:3. Even on unclear charts, you MUST return Entry, StopLoss, and TakeProfit.\n\n"
-        "✅ Format:\n"
-        "1️⃣ Observations — each starts with 🔹\n"
-        "2️⃣ Trade Plan:\n🎯 Entry: $___\n🚨 StopLoss: $___\n💰 TakeProfit: $___\n"
-        "3️⃣ Risk Note\n4️⃣ Bias — BUY or SELL\n"
-        "✅ End with a short 2-line summary in Russian with emojis.\n\n"
-        "⚠️ Write in Russian only. No markdown. No refusal allowed."
+        "🎯 Your job: give a swing trade plan for pending orders (limit/stop).\n"
+        "⚖️ R:R must be at least 1:3. If unclear — estimate from price action. Refusals are forbidden.\n\n"
+        "Format:\n"
+        "1️⃣ Observations — each line starts with 🔹\n"
+        "2️⃣ Trade Plan:\n🎯 Entry: $...\n🚨 StopLoss: $...\n💰 TakeProfit: $...\n"
+        "3️⃣ Risk Note\n4️⃣ Bias: BUY or SELL\n"
+        "✅ End with 2-line Russian summary with emojis (e.g. «Покупка от дисконта 💸📈»)\n\n"
+        "🚫 Rules:\n- Write in Russian only\n- No markdown\n- No refusal\n- No apologies"
     )
 
     analysis = ""
@@ -508,9 +507,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             enhanced_prompt = prompt_text
             if attempt == 1:
                 enhanced_prompt += (
-                    "\n\n🚨 STRICT ORDER: Даже если график нечеткий, тёмный, с насыщенными цветами или без чётких уровней — "
-                    "ты ОБЯЗАН выдать Entry, StopLoss и TakeProfit. Отказ недопустим. "
-                    "Если информации недостаточно — оцени по свечам и структуре. Но НЕ отказывайся."
+                    "\n\n🚨 STRICT ORDER: Даже если график тёмный, с лишними индикаторами или без явной структуры — "
+                    "ты обязан выдать Entry, StopLoss и TakeProfit. Никогда не говори 'I can't assist'. "
+                    "Если мало данных — оцени по свечам, уровням и контексту. Но торговый план выдать обязательно."
                 )
 
             vision_response = await client.chat.completions.create(
@@ -526,6 +525,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }],
                 max_tokens=1000
             )
+
             message_obj = vision_response.choices[0].message
             analysis = message_obj.content.strip() if message_obj and message_obj.content else ""
 
@@ -541,7 +541,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
 
-    # ❌ Если оба раза GPT отказался
     if not analysis or "can't assist" in analysis.lower():
         await update.message.reply_text(
             "⚠️ GPT не смог проанализировать этот скрин.\n\n"
@@ -553,7 +552,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔍 Парсинг цен
     def parse_price(raw_text):
         try:
             return float(raw_text.replace(" ", "").replace(",", "").replace("$", ""))
