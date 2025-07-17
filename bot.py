@@ -475,6 +475,7 @@ async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"[reload_users] Ошибка: {e}")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    
     user_id = update.effective_user.id
     photo = update.message.photo[-1]
     file = await photo.get_file()
@@ -498,38 +499,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     prompt_text = (
-        f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years of professional experience "
-        f"in {'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
-        "You specialize in:\n"
-        "- Market structure (BOS, CHoCH)\n"
-        "- Liquidity sweeps and inducements\n"
-        "- Fair value gaps (FVG), imbalance zones, mitigation\n"
-        "- Premium/discount models, POI and OTE entries\n\n"
-        "You are given a TradingView chart screenshot with:\n"
-        "- LuxAlgo SMC indicator\n"
-        "- Support and Resistance Levels with Breaks\n\n"
-        "🎯 YOUR TASK:\n"
-        "Analyze the chart and build a realistic swing trade setup using pending orders (limit or stop).\n"
-        "Focus strictly on what is visible on the chart (price action, structure, zones).\n\n"
-        "🚫 ABSOLUTE RULES:\n"
-        "- Your reply must be strictly in Russian\n"
-        "- Do NOT use markdown or formatting\n"
-        "- Do NOT refuse to answer\n"
-        "- Do NOT say “sorry” or “I cannot assist”\n\n"
-        "✅ FORMAT (in Russian):\n"
-        "1️⃣ Наблюдения — start each line with 🔹\n"
-        "2️⃣ План сделки:\n"
-        "🎯 Entry: $...\n"
-        "🚨 StopLoss: $...\n"
-        "💰 TakeProfit: $...\n"
+        f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years experience in "
+        f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
+        "You are skilled in BOS, CHoCH, liquidity grabs, FVG, OTE, mitigation, POI, premium/discount zones.\n"
+        "The chart includes only:\n- LuxAlgo SMC\n- Support & Resistance Levels with Breaks\n\n"
+        "🎯 Your task: interpret the price action and produce a high-confidence swing trade plan with pending orders.\n\n"
+        "✅ FORMAT (your response must be in Russian):\n"
+        "1️⃣ Наблюдения (start each with 🔹)\n"
+        "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
         "3️⃣ Комментарий по риску\n"
-        "4️⃣ Смещение: BUY или SELL\n"
-        "✅ Заверши двумя строками краткого итога с эмодзи (e.g. «Покупка из дисконта 📈🟢»)\n\n"
-        "📌 Rules for the trade setup:\n"
-        "- Risk/Reward (R:R) must be at least 1.5. If it's less than 3.0, explain why it’s still valid.\n"
-        "- Entry must be realistically reachable from current price.\n"
-        "- If multiple scenarios possible, pick only one (BUY or SELL) and justify clearly.\n"
-        "- Prefer confirmation entries (e.g. breakout + retest) over far-fetched limit orders.\n"
+        "4️⃣ Смещение (BUY или SELL)\n"
+        "✅ Заверши двумя строками резюме с эмодзи (e.g. «Покупка из дисконта 📈🟢»)\n\n"
+        "📌 Rules:\n"
+        "- Risk/Reward must be at least 1.5. If < 3.0, explain why it's acceptable.\n"
+        "- Entry must be realistic and reachable.\n"
+        "- Choose BUY or SELL (not both). Justify.\n"
+        "- Prefer confirmation-based entries.\n\n"
+        "🚫 ABSOLUTE:\n"
+        "- Reply STRICTLY in Russian\n"
+        "- No markdown\n"
+        "- No apologies or refusal\n"
+        "- Analysis is MANDATORY. If structure unclear — estimate from candles, BOS/CHoCH hints, zones."
     )
 
     analysis = ""
@@ -538,9 +528,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             enhanced_prompt = prompt_text
             if attempt == 1:
                 enhanced_prompt += (
-                    "\n\n🚨 MANDATORY:\nEven if the chart is noisy, blurry, dark or lacks clear structure — "
-                    "you must still provide a valid Entry, StopLoss, and TakeProfit. Estimate if needed.\n"
-                    "No refusals. Answer in Russian. Follow the exact format above."
+                    "\n\n🚨 SECOND ATTEMPT: You MUST give Entry, StopLoss and TakeProfit even if chart lacks clarity. "
+                    "Estimate from candles and structure. Never say 'I can't'. Response MUST be in Russian. Format required."
                 )
 
             vision_response = await client.chat.completions.create(
@@ -560,28 +549,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_obj = vision_response.choices[0].message
             analysis = message_obj.content.strip() if message_obj and message_obj.content else ""
 
-            if "can't assist" in analysis.lower() or "i cannot" in analysis.lower() or "sorry" in analysis.lower():
+            if "can't assist" in analysis.lower() or "sorry" in analysis.lower() or len(analysis) < 100:
                 analysis = ""
                 continue
-
             if analysis:
                 break
-            await asyncio.sleep(0.5)
 
         except Exception as e:
-            logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
+            logging.error(f"[handle_photo GPT error] {e}")
+            continue
 
     if not analysis:
         await update.message.reply_text(
             "⚠️ GPT не смог проанализировать этот скрин.\n\n"
             "Проверь следующее:\n"
-            "• Используй белый фон (чёрный плохо читается)\n"
-            "• Убери все индикаторы кроме LuxAlgo SMC и уровней\n"
-            "• Сделай скрин на весь экран без панелей\n"
-            "• Убедись, что на графике есть BOS, CHoCH, уровни ликвидности\n\n"
+            "• Сделай фон графика белым\n"
+            "• Удали все лишние индикаторы\n"
+            "• Убедись, что видны BOS, CHoCH, зоны ликвидности и структура\n\n"
             "📸 Затем отправь скрин снова."
         )
         return
+
+    await update.message.reply_text(f"📉 Анализ графика по SMC:\n\n{analysis}")
 
     def parse_price(raw_text):
         try:
