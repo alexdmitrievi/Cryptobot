@@ -358,8 +358,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == "back_to_signal":
+        context.user_data.pop("selected_market", None)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📉 Crypto", callback_data="market_crypto")],
+            [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
+        ])
         await query.message.reply_text(
-            "📸 Отлично! Теперь пришли скриншот графика — я разберу его и выдам Entry / StopLoss / TakeProfit 💰"
+            "📝 Сначала выбери рынок — нажми одну из кнопок ниже, чтобы я знал, какой анализ тебе нужен:",
+            reply_markup=keyboard
         )
 
     elif query.data == "get_email":
