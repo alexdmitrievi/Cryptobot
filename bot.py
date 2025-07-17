@@ -434,7 +434,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🧠 Your goal: Generate a swing trading plan for **pending orders only** (limit or stop), designed so the user can set it and walk away — no active monitoring required.\n"
             "⚖️ Required: Risk/Reward ratio (TakeProfit / StopLoss) must be **at least 1:3**. If market structure allows, aim for 1:4 or better. NEVER return a plan with RR below 1:3.\n\n"
             "✅ Structure your response in this exact format:\n"
-            "1️⃣ Observations — use one line per item, each starting with 🔹 (example: 🔹 BOS on 4h above 9980)\n"
+            "1️⃣ Observations — use one line per item, each starting with 🔹\n"
             "2️⃣ Trade Plan:\n"
             "   🎯 Entry: $_____\n"
             "   🚨 StopLoss: $_____\n"
@@ -522,14 +522,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             return None
 
-    entry_match = re.search(r'(Entry|Вход).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
-    stop_match = re.search(r'(StopLoss|Стоп).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
-    tp_match = re.search(r'(TakeProfit|Тейк).*?([\d\s,.]+)', analysis, flags=re.IGNORECASE)
-    bias_match = re.search(r'(BUY|SELL|ПОКУПКА|ПРОДАЖА)', analysis, flags=re.IGNORECASE)
+    # 🛠 Улучшенные регулярки с fallback на эмодзи
+    entry_match = re.search(r'(Entry|Вход)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
+        or re.search(r'🎯[:\s]*\$?\s*([\d\s,.]+)', analysis)
+    stop_match = re.search(r'(StopLoss|Стоп)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
+        or re.search(r'🚨[:\s]*\$?\s*([\d\s,.]+)', analysis)
+    tp_match = re.search(r'(TakeProfit|Тейк)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
+        or re.search(r'💰[:\s]*\$?\s*([\d\s,.]+)', analysis)
+    bias_match = re.search(r'\b(BUY|SELL|ПОКУПКА|ПРОДАЖА)\b', analysis, flags=re.IGNORECASE)
 
-    entry = parse_price(entry_match.group(2)) if entry_match else None
-    stop = parse_price(stop_match.group(2)) if stop_match else None
-    tp = parse_price(tp_match.group(2)) if tp_match else None
+    entry = parse_price(entry_match.group(2) if entry_match and entry_match.lastindex == 2 else entry_match.group(1)) if entry_match else None
+    stop = parse_price(stop_match.group(2) if stop_match and stop_match.lastindex == 2 else stop_match.group(1)) if stop_match else None
+    tp = parse_price(tp_match.group(2) if tp_match and tp_match.lastindex == 2 else tp_match.group(1)) if tp_match else None
 
     if entry and stop:
         risk_abs = abs(entry - stop)
@@ -554,9 +558,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         tldr = "✅ Краткий план не сформирован — проверь вход/стоп/тейк."
 
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")
-    ]])
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]])
 
     full_message = f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}"
     if rr_line:
@@ -566,6 +568,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_message += f"\n\n{tldr}"
 
     await update.message.reply_text(full_message, reply_markup=keyboard)
+
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
