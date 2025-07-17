@@ -511,7 +511,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2️⃣ Trade Plan:\n🎯 Entry: $...\n🚨 StopLoss: $...\n💰 TakeProfit: $...\n"
         "3️⃣ Risk Note\n4️⃣ Bias: BUY or SELL\n"
         "✅ End with 2-line Russian summary with emojis (e.g. «Покупка от дисконта 💸📈»)\n\n"
-        "📌 Важно: если вход идёт ПРОТИВ текущего тренда (например, SELL в восходящем канале), обязательно объясни, почему он оправдан.\n\n"
+        "📌 Additional rules:\n"
+        "- If the entry is against the current trend (e.g., SELL in an uptrend), explain why it is justified.\n"
+        "- Estimate if the entry is realistically reachable from the current price. If the entry is far away, don't suggest it.\n"
+        "- If multiple setups are possible (e.g., both BUY and SELL), choose the more probable one and explain why.\n"
+        "- Prefer realistic trades over perfect ones — it's okay to suggest market entry or confirmation-based entry (like breakout + retest) if limit is too far.\n\n"
         "🚫 Rules:\n- Answer in Russian only\n- No markdown\n- No refusal\n- No apologies"
     )
 
@@ -521,10 +525,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             enhanced_prompt = prompt_text
             if attempt == 1:
                 enhanced_prompt += (
-                    "\n\n🚨 STRICT ORDER: Даже если график тёмный, малоконтрастный, с шумом или без чёткой структуры — "
-                    "ты обязан выдать Entry, StopLoss и TakeProfit. Не отказывайся. "
-                    "Если мало данных — оцени по свечам, структуре и зонам. Торговый план ОБЯЗАТЕЛЕН."
-                )
+                    "\n\n🚨 STRICT ORDER: Even if the chart is dark, low contrast, noisy, or lacks clear structure — "
+                    "you must still provide Entry, StopLoss, and TakeProfit levels. No refusals allowed. "
+                    "If data is limited, estimate based on candles, structure, and visible zones.\n\n"
+                    "🛑 Your analysis is MANDATORY and must always end in Russian language, in the exact format specified above."
+                 )
 
             vision_response = await client.chat.completions.create(
                 model="gpt-4o",
@@ -617,6 +622,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_message += f"\n\n{tldr}"
 
     await update.message.reply_text(full_message, reply_markup=keyboard)
+
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
