@@ -492,33 +492,44 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
         ])
         await update.message.reply_text(
-            "📝 Сначала выбери рынок — нажми одну из кнопок ниже:",
+            "📝 Please select the market first:",
             reply_markup=keyboard
         )
         return
 
     prompt_text = (
-        f"You are an elite Smart Money Concepts (SMC) trader with 10+ years of institutional experience "
-        f"trading {'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
-        "You master:\n"
-        "- BOS, CHoCH\n"
-        "- Liquidity grabs, inducement\n"
-        "- Fair value gaps (FVG), imbalance zones\n"
-        "- OTE, mitigation blocks, POI\n"
-        "- Premium/discount zones\n\n"
-        "🧠 Your task is to analyze the attached chart and generate a realistic swing trade plan.\n"
-        "Only use what's visible: structure, SMC signals, support/resistance.\n\n"
-        "⚠️ Mandatory rules:\n"
-        "1. Risk/Reward must be at least 1.5. If it's under 3.0, explain why it's acceptable.\n"
-        "2. Entry must be reachable from current price — don’t suggest unrealistic pullbacks.\n"
-        "3. Choose only one bias (BUY or SELL) and justify clearly.\n"
-        "4. Prefer confirmation entries (break/retest) over blind limit orders.\n\n"
-        "✅ FORMAT (strictly in Russian):\n"
-        "1️⃣ Наблюдения (начни каждое с 🔹)\n"
-        "2️⃣ План сделки:\n🎯 Entry: $...\n🚨 StopLoss: $...\n💰 TakeProfit: $...\n"
-        "3️⃣ Комментарий по риску\n4️⃣ Смещение: BUY или SELL\n"
-        "✅ Заверши 2 строками на русском с эмодзи (e.g. «Покупка из зоны дисконта 📈🟢»)\n\n"
-        "🚫 Respond strictly in Russian. No markdown, no apologies, no disclaimers."
+        f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years of professional experience "
+        f"in {'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
+        "You specialize in:\n"
+        "- Market structure (BOS, CHoCH)\n"
+        "- Liquidity sweeps and inducements\n"
+        "- Fair value gaps (FVG), imbalance zones, mitigation\n"
+        "- Premium/discount models, POI and OTE entries\n\n"
+        "You are given a TradingView chart screenshot with:\n"
+        "- LuxAlgo SMC indicator\n"
+        "- Support and Resistance Levels with Breaks\n\n"
+        "🎯 YOUR TASK:\n"
+        "Analyze the chart and build a realistic swing trade setup using pending orders (limit or stop).\n"
+        "Focus strictly on what is visible on the chart (price action, structure, zones).\n\n"
+        "🚫 ABSOLUTE RULES:\n"
+        "- Your reply must be strictly in Russian\n"
+        "- Do NOT use markdown or formatting\n"
+        "- Do NOT refuse to answer\n"
+        "- Do NOT say “sorry” or “I cannot assist”\n\n"
+        "✅ FORMAT (in Russian):\n"
+        "1️⃣ Наблюдения — start each line with 🔹\n"
+        "2️⃣ План сделки:\n"
+        "🎯 Entry: $...\n"
+        "🚨 StopLoss: $...\n"
+        "💰 TakeProfit: $...\n"
+        "3️⃣ Комментарий по риску\n"
+        "4️⃣ Смещение: BUY или SELL\n"
+        "✅ Заверши двумя строками краткого итога с эмодзи (e.g. «Покупка из дисконта 📈🟢»)\n\n"
+        "📌 Rules for the trade setup:\n"
+        "- Risk/Reward (R:R) must be at least 1.5. If it's less than 3.0, explain why it’s still valid.\n"
+        "- Entry must be realistically reachable from current price.\n"
+        "- If multiple scenarios possible, pick only one (BUY or SELL) and justify clearly.\n"
+        "- Prefer confirmation entries (e.g. breakout + retest) over far-fetched limit orders.\n"
     )
 
     analysis = ""
@@ -527,9 +538,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             enhanced_prompt = prompt_text
             if attempt == 1:
                 enhanced_prompt += (
-                    "\n\n🚨 ABSOLUTE RULE:\nEven if the chart is blurry, dark or lacks clear structure — "
-                    "you must still provide Entry, StopLoss and TakeProfit. Estimate if necessary. "
-                    "NEVER refuse to answer. Always reply in Russian."
+                    "\n\n🚨 MANDATORY:\nEven if the chart is noisy, blurry, dark or lacks clear structure — "
+                    "you must still provide a valid Entry, StopLoss, and TakeProfit. Estimate if needed.\n"
+                    "No refusals. Answer in Russian. Follow the exact format above."
                 )
 
             vision_response = await client.chat.completions.create(
@@ -549,19 +560,26 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_obj = vision_response.choices[0].message
             analysis = message_obj.content.strip() if message_obj and message_obj.content else ""
 
-            if any(x in analysis.lower() for x in ["sorry", "can't assist", "i cannot", "unable to"]):
+            if "can't assist" in analysis.lower() or "i cannot" in analysis.lower() or "sorry" in analysis.lower():
+                analysis = ""
                 continue
 
             if analysis:
                 break
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)
 
         except Exception as e:
-            logging.error(f"[handle_photo] GPT error: {e}")
+            logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
 
     if not analysis:
         await update.message.reply_text(
-            "⚠️ GPT не смог проанализировать скрин.\nСделай фон белым, убери лишние индикаторы и пришли заново."
+            "⚠️ GPT не смог проанализировать этот скрин.\n\n"
+            "Проверь следующее:\n"
+            "• Используй белый фон (чёрный плохо читается)\n"
+            "• Убери все индикаторы кроме LuxAlgo SMC и уровней\n"
+            "• Сделай скрин на весь экран без панелей\n"
+            "• Убедись, что на графике есть BOS, CHoCH, уровни ликвидности\n\n"
+            "📸 Затем отправь скрин снова."
         )
         return
 
@@ -598,8 +616,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rr_ratio = abs((tp - entry) / (entry - stop))
         rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
         if rr_ratio < 1.5:
-            rr_line += "\n⚠️ R:R ниже 1.5 — сигнал сомнительный, лучше не торговать."
-        elif rr_ratio < 3:
+            rr_line += "\n⚠️ R:R ниже 1.5 — вход может быть неэффективным."
+        elif rr_ratio < 3.0:
             rr_line += "\n⚠️ R:R ниже 3.0 — допустимо, если структура сильная."
 
     if direction and entry and tp:
@@ -629,7 +647,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_message += f"\n\n{tldr}"
 
     await update.message.reply_text(full_message, reply_markup=keyboard)
-
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
