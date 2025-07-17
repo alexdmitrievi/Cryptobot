@@ -481,25 +481,32 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     selected_market = context.user_data.get("selected_market")
     if not selected_market:
-        await update.message.reply_text("📝 Сначала выбери рынок через кнопки в меню, чтобы я знал, какой анализ тебе нужен.")
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📉 Crypto", callback_data="market_crypto")],
+            [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
+        ])
+        await update.message.reply_text(
+            "📝 Сначала выбери рынок — нажми одну из кнопок ниже, чтобы я знал, какой анализ тебе нужен:",
+            reply_markup=keyboard
+        )
         return
 
     prompt_text = (
         f"You are a professional SMC (Smart Money Concepts) trader with 10+ years experience in "
         f"{'crypto' if selected_market == 'crypto' else 'forex'} markets. "
-        "You master BOS, CHoCH, liquidity grabs, imbalance, OTE, and premium/discount zones.\n\n"
-        "Chart has two indicators:\n"
+        "You master BOS, CHoCH, liquidity grabs, imbalance zones, OTE, premium/discount levels.\n\n"
+        "The chart includes only:\n"
         "- LuxAlgo SMC\n"
         "- Support & Resistance Levels\n\n"
-        "🎯 Your job: give a swing trade plan for pending orders (limit/stop).\n"
-        "⚖️ R:R must be at least 1:3. If unclear — estimate from price action. Refusals are forbidden.\n\n"
-        "Format:\n"
-        "1️⃣ Observations — each line starts with 🔹\n"
+        "🎯 Your task: create a swing trade plan with pending orders (limit or stop).\n"
+        "Risk/Reward ratio must be at least 1:3. Even if unclear — estimate based on price action.\n\n"
+        "✅ Format:\n"
+        "1️⃣ Observations — each bullet starts with 🔹\n"
         "2️⃣ Trade Plan:\n🎯 Entry: $...\n🚨 StopLoss: $...\n💰 TakeProfit: $...\n"
         "3️⃣ Risk Note\n4️⃣ Bias: BUY or SELL\n"
         "✅ End with 2-line Russian summary with emojis (e.g. «Покупка от дисконта 💸📈»)\n\n"
-        "❗ Если вход в сделку идёт против текущего тренда (например, SELL в восходящем канале) — обязательно объясни, почему такой вход оправдан.\n\n"
-        "🚫 Rules:\n- Write in Russian only\n- No markdown\n- No refusal\n- No apologies"
+        "📌 Важно: если вход идёт ПРОТИВ текущего тренда (например, SELL в восходящем канале), обязательно объясни, почему он оправдан.\n\n"
+        "🚫 Rules:\n- Answer in Russian only\n- No markdown\n- No refusal\n- No apologies"
     )
 
     analysis = ""
@@ -508,9 +515,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             enhanced_prompt = prompt_text
             if attempt == 1:
                 enhanced_prompt += (
-                    "\n\n🚨 STRICT ORDER: Даже если график тёмный, с лишними индикаторами или без явной структуры — "
-                    "ты обязан выдать Entry, StopLoss и TakeProfit. Никогда не говори 'I can't assist'. "
-                    "Если мало данных — оцени по свечам, уровням и контексту. Но торговый план выдать обязательно."
+                    "\n\n🚨 STRICT ORDER: Даже если график тёмный, малоконтрастный, с шумом или без чёткой структуры — "
+                    "ты обязан выдать Entry, StopLoss и TakeProfit. Не отказывайся. "
+                    "Если мало данных — оцени по свечам, структуре и зонам. Торговый план ОБЯЗАТЕЛЕН."
                 )
 
             vision_response = await client.chat.completions.create(
