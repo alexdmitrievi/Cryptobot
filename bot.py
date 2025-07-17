@@ -475,7 +475,7 @@ async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"[reload_users] Ошибка: {e}")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
+
     user_id = update.effective_user.id
     photo = update.message.photo[-1]
     file = await photo.get_file()
@@ -572,70 +572,70 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"📉 Анализ графика по SMC:\n\n{analysis}")
 
-    def parse_price(raw_text):
-        try:
-            return float(raw_text.replace(" ", "").replace(",", "").replace("$", ""))
-        except:
-            return None
+def parse_price(raw_text):
+    try:
+        return float(raw_text.replace(" ", "").replace(",", ".").replace("$", ""))
+    except:
+        return None
 
-    entry_match = re.search(r'(Entry|Вход)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
-        or re.search(r'🎯[:\s]*\$?\s*([\d\s,.]+)', analysis)
-    stop_match = re.search(r'(StopLoss|Стоп)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
-        or re.search(r'🚨[:\s]*\$?\s*([\d\s,.]+)', analysis)
-    tp_match = re.search(r'(TakeProfit|Тейк)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
-        or re.search(r'💰[:\s]*\$?\s*([\d\s,.]+)', analysis)
-    bias_match = re.search(r'\b(BUY|SELL|ПОКУПКА|ПРОДАЖА)\b', analysis, flags=re.IGNORECASE)
+entry_match = re.search(r'(Entry|Вход)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
+    or re.search(r'🎯[:\s]*\$?\s*([\d\s,.]+)', analysis)
+stop_match = re.search(r'(StopLoss|Стоп)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
+    or re.search(r'🚨[:\s]*\$?\s*([\d\s,.]+)', analysis)
+tp_match = re.search(r'(TakeProfit|Тейк)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
+    or re.search(r'💰[:\s]*\$?\s*([\d\s,.]+)', analysis)
+bias_match = re.search(r'\b(BUY|SELL|ПОКУПКА|ПРОДАЖА)\b', analysis, flags=re.IGNORECASE)
 
-    entry = parse_price(entry_match.group(2) if entry_match and entry_match.lastindex == 2 else entry_match.group(1)) if entry_match else None
-    stop = parse_price(stop_match.group(2) if stop_match and stop_match.lastindex == 2 else stop_match.group(1)) if stop_match else None
-    tp = parse_price(tp_match.group(2) if tp_match and tp_match.lastindex == 2 else tp_match.group(1)) if tp_match else None
-    direction = bias_match.group(1).upper() if bias_match else None
+entry = parse_price(entry_match.group(2) if entry_match and entry_match.lastindex == 2 else entry_match.group(1)) if entry_match else None
+stop = parse_price(stop_match.group(2) if stop_match and stop_match.lastindex == 2 else stop_match.group(1)) if stop_match else None
+tp = parse_price(tp_match.group(2) if tp_match and tp_match.lastindex == 2 else tp_match.group(1)) if tp_match else None
+direction = bias_match.group(1).upper() if bias_match else None
 
-    rr_line, risk_line, tldr, unrealistic_note = "", "", "", ""
-    rr_ratio = None
+rr_line, risk_line, tldr, unrealistic_note = "", "", "", ""
+rr_ratio = None
 
-    if entry and stop:
-        risk_abs = abs(entry - stop)
-        risk_pct = abs((entry - stop) / entry * 100)
-        risk_line = f"📌 Область риска ≈ ${risk_abs:.4f} ({risk_pct:.2f}%)"
-    else:
-        risk_line = "📌 Область риска не указана — проверь вручную."
+if entry and stop:
+    risk_abs = abs(entry - stop)
+    risk_pct = abs((entry - stop) / entry * 100)
+    risk_line = f"📌 Область риска ≈ ${risk_abs:.4f} ({risk_pct:.2f}%)"
+else:
+    risk_line = "📌 Область риска не указана — проверь вручную."
 
-    if entry and stop and tp and (entry != stop):
-        rr_ratio = abs((tp - entry) / (entry - stop))
-        rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
-        if rr_ratio < 1.5:
-            rr_line += "\n⚠️ R:R ниже 1.5 — вход может быть неэффективным."
-        elif rr_ratio < 3.0:
-            rr_line += "\n⚠️ R:R ниже 3.0 — допустимо, если структура сильная."
+if entry and stop and tp and (entry != stop):
+    rr_ratio = abs((tp - entry) / (entry - stop))
+    rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
+    if rr_ratio < 1.5:
+        rr_line += "\n️ R:R ниже 1.5 — вход может быть неэффективным."
+    elif rr_ratio < 3.0:
+        rr_line += "\n️ R:R ниже 3.0 — допустимо, если структура сильная."
 
-    if direction and entry and tp:
-        if direction in ["SELL", "ПРОДАЖА"] and entry < tp:
-            unrealistic_note = "⚠️ Entry ниже тейка при SELL — возможна ошибка или цена уже прошла."
-        elif direction in ["BUY", "ПОКУПКА"] and entry > tp:
-            unrealistic_note = "⚠️ Entry выше тейка при BUY — проверь логику."
+if direction and entry and tp:
+    if direction in ["SELL", "ПРОДАЖА"] and entry < tp:
+        unrealistic_note = "⚠️ Entry ниже тейка при SELL — возможна ошибка или цена уже прошла."
+    elif direction in ["BUY", "ПОКУПКА"] and entry > tp:
+        unrealistic_note = "⚠️ Entry выше тейка при BUY — проверь логику."
 
-    bias_line = f"📈 Направление сделки: {direction}" if direction else ""
+bias_line = f"📈 Направление сделки: {direction}" if direction else ""
 
-    if entry and stop and tp:
-        tldr = f"✅ TL;DR: Вход {entry}, стоп {stop}, тейк {tp}."
-        if rr_ratio:
-            tldr += f" 📊 R:R ≈ {rr_ratio:.2f}"
-    else:
-        tldr = "✅ Краткий план не сформирован — проверь вход/стоп/тейк."
+if entry and stop and tp:
+    tldr = f"✅ TL;DR: Вход {entry}, стоп {stop}, тейк {tp}."
+    if rr_ratio:
+        tldr += f" 📊 R:R ≈ {rr_ratio:.2f}"
+else:
+    tldr = "✅ Краткий план не сформирован — проверь вход/стоп/тейк."
 
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]])
+keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]])
 
-    full_message = f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}"
-    if rr_line:
-        full_message += f"\n{rr_line}"
-    if bias_line:
-        full_message += f"\n{bias_line}"
-    if unrealistic_note:
-        full_message += f"\n{unrealistic_note}"
-    full_message += f"\n\n{tldr}"
+full_message = f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}"
+if rr_line:
+    full_message += f"\n{rr_line}"
+if bias_line:
+    full_message += f"\n{bias_line}"
+if unrealistic_note:
+    full_message += f"\n{unrealistic_note}"
+full_message += f"\n\n{tldr}"
 
-    await update.message.reply_text(full_message, reply_markup=keyboard)
+await update.message.reply_text(full_message, reply_markup=keyboard)
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
