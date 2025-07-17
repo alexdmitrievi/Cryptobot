@@ -498,25 +498,50 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     prompt_text = (
-        f"You are a professional SMC (Smart Money Concepts) trader with 10+ years experience in "
-        f"{'crypto' if selected_market == 'crypto' else 'forex'} markets. "
-        "You master BOS, CHoCH, liquidity grabs, imbalance zones, OTE, premium/discount levels.\n\n"
-        "The chart includes only:\n"
+        f"You are an elite Smart Money Concepts (SMC) trader with 10+ years of institutional-level experience "
+        f"trading {'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
+
+        "You are deeply skilled in:\n"
+        "- Market structure: BOS, CHoCH\n"
+        "- Liquidity engineering: sweep zones, inducement traps\n"
+        "- Entry techniques: OTE, mitigation, POI (point of interest)\n"
+        "- Fair value gaps (FVG), imbalance, order blocks\n"
+        "- Premium/discount zones and multi-timeframe alignment\n\n"
+
+        "📊 The chart shown contains only two indicators:\n"
         "- LuxAlgo SMC\n"
-        "- Support & Resistance Levels\n\n"
-        "🎯 Your task: create a swing trade plan with pending orders (limit or stop).\n"
-        "Risk/Reward ratio must be at least 1:3. Even if unclear — estimate based on price action.\n\n"
-        "✅ Format:\n"
-        "1️⃣ Observations — each bullet starts with 🔹\n"
-        "2️⃣ Trade Plan:\n🎯 Entry: $...\n🚨 StopLoss: $...\n💰 TakeProfit: $...\n"
-        "3️⃣ Risk Note\n4️⃣ Bias: BUY or SELL\n"
-        "✅ End with 2-line Russian summary with emojis (e.g. «Покупка от дисконта 💸📈»)\n\n"
-        "📌 Additional rules:\n"
-        "- If the entry is against the current trend (e.g., SELL in an uptrend), explain why it is justified.\n"
-        "- Estimate if the entry is realistically reachable from the current price. If the entry is far away, don't suggest it.\n"
-        "- If multiple setups are possible (e.g., both BUY and SELL), choose the more probable one and explain why.\n"
-        "- Prefer realistic trades over perfect ones — it's okay to suggest market entry or confirmation-based entry (like breakout + retest) if limit is too far.\n\n"
-        "🚫 Rules:\n- Answer in Russian only\n- No markdown\n- No refusal\n- No apologies"
+        "- Support & Resistance Levels with Breaks\n\n"
+
+        "🎯 YOUR MISSION:\n"
+        "Generate a precise swing trade setup using pending orders (limit or stop), based only on visual price action, structure, and SMC principles.\n\n"
+
+        "⚠️ CRITICAL RULES:\n"
+        "1. Risk/Reward (R:R) must be at least 1:3. If it's lower — adjust the setup or reject it.\n"
+        "2. Entry must be realistically reachable from current price.\n"
+        "3. If multiple directions are possible, pick only one (BUY or SELL) and justify it clearly.\n"
+        "4. Prefer confirmation entries (break + retest) over far-fetched limits.\n"
+        "5. Never suggest trades inside imbalance zones without strong logic.\n\n"
+
+        "✅ OUTPUT FORMAT (in Russian):\n"
+        "1️⃣ Наблюдения (each starts with 🔹)\n"
+        "2️⃣ План сделки:\n"
+        "🎯 Entry: $...\n"
+        "🚨 StopLoss: $...\n"
+        "💰 TakeProfit: $...\n"
+        "3️⃣ Комментарий по риску\n"
+        "4️⃣ Смещение (Bias): BUY или SELL\n"
+        "✅ 2-line Russian summary with emojis (e.g. «Покупка из дисконта 💸📈»)\n\n"
+
+        "📌 Also explain:\n"
+        "- Why this entry is valid structurally?\n"
+        "- Where was liquidity sweep?\n"
+        "- What levels/zones support this setup?\n\n"
+
+        "🚫 RULES:\n"
+        "- Answer strictly in Russian\n"
+        "- No markdown\n"
+        "- No disclaimers, no apologies\n"
+        "- If unclear, use candle behavior and structure to estimate"
     )
 
     analysis = ""
@@ -525,10 +550,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             enhanced_prompt = prompt_text
             if attempt == 1:
                 enhanced_prompt += (
-                    "\n\n🚨 STRICT ORDER: Even if the chart is dark, low contrast, noisy, or lacks clear structure — "
-                    "you must still provide Entry, StopLoss, and TakeProfit levels. No refusals allowed. "
-                    "If data is limited, estimate based on candles, structure, and visible zones.\n\n"
-                    "🛑 Your analysis is MANDATORY and must always end in Russian language, in the exact format specified above."
+                    "\n\n🚨 NON-NEGOTIABLE:\n"
+                    "Even if the chart is dark, blurry, lacks structure, or is noisy — you MUST deliver:\n"
+                    "- Valid Entry\n"
+                    "- Accurate StopLoss\n"
+                    "- Clear TakeProfit\n"
+                    "If ideal structure is missing, interpret using price action and visible zones.\n\n"
+                    "NEVER refuse the task. Respond in Russian only. Follow the exact format above. No markdown. No excuses."
                 )
 
             vision_response = await client.chat.completions.create(
@@ -604,16 +632,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bias_line = f"📈 Направление сделки: {bias_match.group(1).upper()}" if bias_match else ""
 
-    # Проверка: не шорт ли внизу и не лонг ли на хаях
     direction = bias_match.group(1).upper() if bias_match else None
-    current_price = entry  # Предполагаем, что Entry примерно равен текущей цене
-
     unrealistic_note = ""
-    if entry and direction:
+    if entry and tp and direction:
         if direction in ["SELL", "ПРОДАЖА"] and entry < tp:
-            unrealistic_note = "⚠️ Entry находится слишком низко для шорта. Возможна реализация BUY-сценария."
+            unrealistic_note = "⚠️ Entry находится слишком низко для шорта. Возможен разворот вверх."
         elif direction in ["BUY", "ПОКУПКА"] and entry > tp:
-            unrealistic_note = "⚠️ Entry слишком высок для покупки — возможно, стоит дождаться подтверждения."
+            unrealistic_note = "⚠️ Entry слишком высок для покупки — жди подтверждения или снижения."
 
     if entry and stop and tp:
         tldr = f"✅ TL;DR: Вход {entry}, стоп {stop}, тейк {tp}."
