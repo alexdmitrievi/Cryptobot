@@ -492,56 +492,33 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
         ])
         await update.message.reply_text(
-            "📝 Сначала выбери рынок — нажми одну из кнопок ниже, чтобы я знал, какой анализ тебе нужен:",
+            "📝 Сначала выбери рынок — нажми одну из кнопок ниже:",
             reply_markup=keyboard
         )
         return
 
     prompt_text = (
-        f"You are an elite Smart Money Concepts (SMC) trader with 10+ years of institutional-level experience "
+        f"You are an elite Smart Money Concepts (SMC) trader with 10+ years of institutional experience "
         f"trading {'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
-
-        "You are deeply skilled in:\n"
-        "- Market structure: BOS, CHoCH\n"
-        "- Liquidity engineering: sweep zones, inducement traps\n"
-        "- Entry techniques: OTE, mitigation, POI (point of interest)\n"
-        "- Fair value gaps (FVG), imbalance, order blocks\n"
-        "- Premium/discount zones and multi-timeframe alignment\n\n"
-
-        "📊 The chart shown contains only two indicators:\n"
-        "- LuxAlgo SMC\n"
-        "- Support & Resistance Levels with Breaks\n\n"
-
-        "🎯 YOUR MISSION:\n"
-        "Generate a precise swing trade setup using pending orders (limit or stop), based only on visual price action, structure, and SMC principles.\n\n"
-
-        "⚠️ CRITICAL RULES:\n"
-        "1. Risk/Reward (R:R) must be at least 1:3. If it's lower — adjust the setup or reject it.\n"
-        "2. Entry must be realistically reachable from current price.\n"
-        "3. If multiple directions are possible, pick only one (BUY or SELL) and justify it clearly.\n"
-        "4. Prefer confirmation entries (break + retest) over far-fetched limits.\n"
-        "5. Never suggest trades inside imbalance zones without strong logic.\n\n"
-
-        "✅ OUTPUT FORMAT (in Russian):\n"
-        "1️⃣ Наблюдения (each starts with 🔹)\n"
-        "2️⃣ План сделки:\n"
-        "🎯 Entry: $...\n"
-        "🚨 StopLoss: $...\n"
-        "💰 TakeProfit: $...\n"
-        "3️⃣ Комментарий по риску\n"
-        "4️⃣ Смещение (Bias): BUY или SELL\n"
-        "✅ 2-line Russian summary with emojis (e.g. «Покупка из дисконта 💸📈»)\n\n"
-
-        "📌 Also explain:\n"
-        "- Why this entry is valid structurally?\n"
-        "- Where was liquidity sweep?\n"
-        "- What levels/zones support this setup?\n\n"
-
-        "🚫 RULES:\n"
-        "- Answer strictly in Russian\n"
-        "- No markdown\n"
-        "- No disclaimers, no apologies\n"
-        "- If unclear, use candle behavior and structure to estimate"
+        "You master:\n"
+        "- BOS, CHoCH\n"
+        "- Liquidity grabs, inducement\n"
+        "- Fair value gaps (FVG), imbalance zones\n"
+        "- OTE, mitigation blocks, POI\n"
+        "- Premium/discount zones\n\n"
+        "🧠 Your task is to analyze the attached chart and generate a realistic swing trade plan.\n"
+        "Only use what's visible: structure, SMC signals, support/resistance.\n\n"
+        "⚠️ Mandatory rules:\n"
+        "1. Risk/Reward must be at least 1.5. If it's under 3.0, explain why it's acceptable.\n"
+        "2. Entry must be reachable from current price — don’t suggest unrealistic pullbacks.\n"
+        "3. Choose only one bias (BUY or SELL) and justify clearly.\n"
+        "4. Prefer confirmation entries (break/retest) over blind limit orders.\n\n"
+        "✅ FORMAT (strictly in Russian):\n"
+        "1️⃣ Наблюдения (начни каждое с 🔹)\n"
+        "2️⃣ План сделки:\n🎯 Entry: $...\n🚨 StopLoss: $...\n💰 TakeProfit: $...\n"
+        "3️⃣ Комментарий по риску\n4️⃣ Смещение: BUY или SELL\n"
+        "✅ Заверши 2 строками на русском с эмодзи (e.g. «Покупка из зоны дисконта 📈🟢»)\n\n"
+        "🚫 Respond strictly in Russian. No markdown, no apologies, no disclaimers."
     )
 
     analysis = ""
@@ -550,13 +527,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             enhanced_prompt = prompt_text
             if attempt == 1:
                 enhanced_prompt += (
-                    "\n\n🚨 NON-NEGOTIABLE:\n"
-                    "Even if the chart is dark, blurry, lacks structure, or is noisy — you MUST deliver:\n"
-                    "- Valid Entry\n"
-                    "- Accurate StopLoss\n"
-                    "- Clear TakeProfit\n"
-                    "If ideal structure is missing, interpret using price action and visible zones.\n\n"
-                    "NEVER refuse the task. Respond in Russian only. Follow the exact format above. No markdown. No excuses."
+                    "\n\n🚨 ABSOLUTE RULE:\nEven if the chart is blurry, dark or lacks clear structure — "
+                    "you must still provide Entry, StopLoss and TakeProfit. Estimate if necessary. "
+                    "NEVER refuse to answer. Always reply in Russian."
                 )
 
             vision_response = await client.chat.completions.create(
@@ -576,26 +549,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_obj = vision_response.choices[0].message
             analysis = message_obj.content.strip() if message_obj and message_obj.content else ""
 
-            logging.info(f"[handle_photo attempt {attempt}] Raw GPT analysis:\n{analysis}")
-
             if any(x in analysis.lower() for x in ["sorry", "can't assist", "i cannot", "unable to"]):
                 continue
 
             if analysis:
                 break
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
         except Exception as e:
-            logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
+            logging.error(f"[handle_photo] GPT error: {e}")
 
-    if not analysis or "can't assist" in analysis.lower():
+    if not analysis:
         await update.message.reply_text(
-            "⚠️ GPT не смог проанализировать этот скрин.\n\n"
-            "Попробуй следующие улучшения:\n"
-            "• Сделай фон графика белым\n"
-            "• Убери лишние индикаторы\n"
-            "• Добавь вручную уровни и наклонные линии\n\n"
-            "После этого пришли скрин ещё раз 🔁"
+            "⚠️ GPT не смог проанализировать скрин.\nСделай фон белым, убери лишние индикаторы и пришли заново."
         )
         return
 
@@ -616,29 +582,33 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     entry = parse_price(entry_match.group(2) if entry_match and entry_match.lastindex == 2 else entry_match.group(1)) if entry_match else None
     stop = parse_price(stop_match.group(2) if stop_match and stop_match.lastindex == 2 else stop_match.group(1)) if stop_match else None
     tp = parse_price(tp_match.group(2) if tp_match and tp_match.lastindex == 2 else tp_match.group(1)) if tp_match else None
+    direction = bias_match.group(1).upper() if bias_match else None
 
-    rr_line = ""
-    risk_line = "📌 Область риска не указана явно — оценивай внимательно."
+    rr_line, risk_line, tldr, unrealistic_note = "", "", "", ""
     rr_ratio = None
+
     if entry and stop:
         risk_abs = abs(entry - stop)
         risk_pct = abs((entry - stop) / entry * 100)
-        risk_line = f"📌 Область риска ≈ ${risk_abs:.2f} ({risk_pct:.2f}%)"
+        risk_line = f"📌 Область риска ≈ ${risk_abs:.4f} ({risk_pct:.2f}%)"
+    else:
+        risk_line = "📌 Область риска не указана — проверь вручную."
+
     if entry and stop and tp and (entry != stop):
         rr_ratio = abs((tp - entry) / (entry - stop))
         rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
         if rr_ratio < 1.5:
-            rr_line += "\n⚠️ R:R ниже 1.5 — сигнал сомнительный, возможна переоценка."
+            rr_line += "\n⚠️ R:R ниже 1.5 — сигнал сомнительный, лучше не торговать."
+        elif rr_ratio < 3:
+            rr_line += "\n⚠️ R:R ниже 3.0 — допустимо, если структура сильная."
 
-    bias_line = f"📈 Направление сделки: {bias_match.group(1).upper()}" if bias_match else ""
-
-    direction = bias_match.group(1).upper() if bias_match else None
-    unrealistic_note = ""
-    if entry and tp and direction:
+    if direction and entry and tp:
         if direction in ["SELL", "ПРОДАЖА"] and entry < tp:
-            unrealistic_note = "⚠️ Entry находится слишком низко для шорта. Возможен разворот вверх."
+            unrealistic_note = "⚠️ Entry ниже тейка при SELL — возможна ошибка или цена уже прошла."
         elif direction in ["BUY", "ПОКУПКА"] and entry > tp:
-            unrealistic_note = "⚠️ Entry слишком высок для покупки — жди подтверждения или снижения."
+            unrealistic_note = "⚠️ Entry выше тейка при BUY — проверь логику."
+
+    bias_line = f"📈 Направление сделки: {direction}" if direction else ""
 
     if entry and stop and tp:
         tldr = f"✅ TL;DR: Вход {entry}, стоп {stop}, тейк {tp}."
@@ -659,6 +629,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_message += f"\n\n{tldr}"
 
     await update.message.reply_text(full_message, reply_markup=keyboard)
+
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
