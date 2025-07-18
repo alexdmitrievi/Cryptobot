@@ -12,6 +12,7 @@ import base64
 import csv
 from datetime import datetime
 from io import BytesIO
+from bs4 import BeautifulSoup
 
 from telegram import (
     Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
@@ -374,24 +375,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✉️ Напиши свой email для получения секретного PDF со стратегиями:"
         )
 
-    elif query.data == "interpret_calendar":
+    elif query.data == "interpret_calendar" or query.data == "interpret_other":
         context.user_data["awaiting_news"] = "calendar"
         await query.message.reply_text(
-            "📅 Опиши событие из экономического календаря в таком формате:\n\n"
-            "Событие: ...\n"
-            "Прогноз: ...\n"
-            "Факт: ...\n\n"
-            "Пример:\n"
-            "Событие: Данные по инфляции в США (CPI)\n"
-            "Прогноз: 3.2%\n"
-            "Факт: 3.7%\n\n"
-            "Чем яснее напишешь, тем точнее будет мой разбор."
-        )
-
-    elif query.data == "interpret_other":
-        context.user_data["awaiting_news"] = "other"
-        await query.message.reply_text(
-            "🌐 Опиши новость, которая может повлиять на финансовый рынок."
+            "📎 Пришли ссылку на статью (например, с investing.com, fxstreet.com, reuters.com) — я сам распознаю событие и выдам интерпретацию."
         )
 
     elif query.data == "start_risk_calc":
@@ -848,11 +835,30 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         )
         context.user_data.clear()
 
+async def fetch_article_text(url: str) -> str:
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=10)
+        if not response.ok:
+            return None
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        article_body = soup.find("div", class_="WYSIWYG") or soup.find("article")
+        if not article_body:
+            return None
+
+        paragraphs = article_body.find_all("p")
+        text = "\n".join(p.get_text(strip=True) for p in paragraphs)
+        return text if len(text) > 200 else None
+    except Exception as e:
+        logging.error(f"[fetch_article_text error] {e}")
+        return None
+
 async def generate_news_interpretation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip()
+    url = update.message.text.strip()
 
     # 🚪 Выход из режима по кнопке
-    if user_text == "↩️ Выйти в меню":
+    if url == "↩️ Выйти в меню":
         context.user_data.pop("awaiting_news", None)
         await update.message.reply_text(
             "🔙 Ты вышел из режима анализа новостей. Возвращаемся в главное меню.",
@@ -860,25 +866,27 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
         )
         return
 
-    news_type = context.user_data.get("awaiting_news")
-    logging.info(f"[NEWS_INTERPRETATION] Пользователь {update.effective_user.id}: {user_text}")
+    if not url.startswith("http"):
+        await update.message.reply_text("⚠️ Пожалуйста, пришли ссылку на статью (например, с investing.com, fxstreet.com, reuters.com)")
+        return
 
-    context_label = (
-        "📅 Это событие из экономического календаря."
-        if news_type == "calendar"
-        else "🌐 Это общая экономическая или геополитическая новость, которая может повлиять на финансовые рынки."
-    )
+    if not any(domain in url for domain in ["investing.com", "fxstreet.com", "reuters.com"]):
+        await update.message.reply_text("⚠️ Сейчас поддерживаются только ссылки с investing.com, fxstreet.com и reuters.com")
+        return
+
+    article_text = await fetch_article_text(url)
+    if not article_text:
+        await update.message.reply_text("⚠️ Не удалось получить текст статьи. Попробуй другую ссылку.")
+        return
 
     prompt = (
         "You are a senior market strategist with over 20 years of expertise in global macro analysis, "
         "covering economic calendar surprises, geopolitical shocks, and liquidity dynamics. "
         "You advise institutional funds, prop desks, and advanced retail traders. "
         "Your analysis is known for razor-sharp clarity, step-by-step logic, and real price level focus.\n\n"
-        f"Event description provided by the user:\n{user_text}\n\n"
-        f"{context_label}\n\n"
+        f"The following article was shared by the user:\n{article_text}\n\n"
         "Create a comprehensive multi-part market analysis strictly in Russian. "
         "Structure it as a professional trading report with short paragraphs (1-3 sentences) for easy reading in Telegram.\n\n"
-
         "Your report must include:\n\n"
         "1️⃣ Brief clear summary of what this event means fundamentally. Is it positive or negative? Why?\n\n"
         "2️⃣ Deep dive into liquidity, volatility, and trader sentiment impact over the next 1-3 days.\n\n"
@@ -888,7 +896,6 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
         "4️⃣ Short historical parallel (1-2 sentences) from past 1-2 years.\n\n"
         "5️⃣ A final short direct actionable signal for traders' chat like:\n"
         "'LONG above $XXX, SL $YYY, TP $ZZZ — wait for liquidity sweep.'\n\n"
-
         "⚠️ Do NOT use asterisks, underscores or any Markdown formatting. "
         "Write only in plain Russian text, with short paragraphs. "
         "Use emojis to visually anchor sections if natural. "
@@ -1178,7 +1185,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_invest_question"):
         return await handle_invest_question(update, context)
     if context.user_data.get("awaiting_teacher_question"):
-        return await teacher_response(update, context)  # <-- исправлено тут
+        return await teacher_response(update, context)
     if context.user_data.get("awaiting_definition_term"):
         return await handle_definition_term(update, context)
     if context.user_data.get("awaiting_news"):
