@@ -846,28 +846,24 @@ async def fetch_article_text(url: str) -> str:
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Спецобработка для investing.com economic-calendar карточек
+        # Спецобработка для economic-calendar
         if "economic-calendar" in url:
             try:
                 text_blocks = []
 
-                # Заголовок события
+                # Заголовок события — отлично
                 heading = soup.find("h1")
                 if heading:
                     text_blocks.append(heading.get_text(strip=True))
 
-                # Значения Факт / Прогноз / Пред
-                fact = soup.find("span", string=re.compile(r"Факт"))
-                forecast = soup.find("span", string=re.compile(r"Прогноз"))
-                previous = soup.find("span", string=re.compile(r"Пред"))
-
-                for tag in [fact, forecast, previous]:
-                    if tag and tag.find_next("span"):
-                        label = tag.get_text(strip=True)
-                        value = tag.find_next("span").get_text(strip=True)
+                # Извлечение значения "Факт", "Прогноз", "Предыдущее"
+                for label in ["Факт", "Прогноз", "Пред", "Предыдущее"]:
+                    span = soup.find("span", string=re.compile(rf"^{label}$"))
+                    if span and span.find_next("span"):
+                        value = span.find_next("span").get_text(strip=True)
                         text_blocks.append(f"{label}: {value}")
 
-                # Основной текст
+                # Добавление параграфов
                 paragraphs = soup.find_all("p")
                 for p in paragraphs:
                     p_text = p.get_text(strip=True)
@@ -875,11 +871,12 @@ async def fetch_article_text(url: str) -> str:
                         text_blocks.append(p_text)
 
                 return "\n".join(text_blocks)
+
             except Exception as e:
                 logging.error(f"[economic-calendar parse error] {e}")
                 return None
 
-        # Обычные статьи
+        # Для обычных статей
         article_body = soup.find("div", class_="WYSIWYG") or soup.find("article")
         if not article_body:
             return None
@@ -887,6 +884,7 @@ async def fetch_article_text(url: str) -> str:
         paragraphs = article_body.find_all("p")
         text = "\n".join(p.get_text(strip=True) for p in paragraphs)
         return text if len(text) > 100 else None
+
     except Exception as e:
         logging.error(f"[fetch_article_text error] {e}")
         return None
@@ -894,20 +892,25 @@ async def fetch_article_text(url: str) -> str:
 def extract_calendar_values(text: str) -> dict:
     result = {}
 
-    match_event = re.search(r"(Число|Индекс|Уровень|Объём|ВВП|Безработиц[аы]|Инфляци[яи]|CPI|PPI|Retail Sales)[^\n]{10,100}", text)
+    # Находим событие
+    match_event = re.search(
+        r"(Число|Индекс|Уровень|Объём|ВВП|Безработиц[аы]|Инфляци[яи]|CPI|PPI|Retail Sales)[^\n]{10,100}",
+        text
+    )
     if match_event:
         result["event"] = match_event.group(0).strip()
 
-    match_fact = re.search(r"Факт[:\s]*([\d.,KMBkmb]+)", text)
-    match_forecast = re.search(r"Прогноз[:\s]*([\d.,KMBkmb]+)", text)
-    match_previous = re.search(r"(Предыдущее|Пред|Прошлое)[:\s]*([\d.,KMBkmb]+)", text)
+    # Находим значения
+    match_fact = re.search(r"Факт[:\s]*([+-]?[\d\s.,KMBkmb]+)", text)
+    match_forecast = re.search(r"Прогноз[:\s]*([+-]?[\d\s.,KMBkmb]+)", text)
+    match_previous = re.search(r"(Предыдущее|Пред|Прошлое)[:\s]*([+-]?[\d\s.,KMBkmb]+)", text)
 
     if match_fact:
-        result["fact"] = match_fact.group(1).strip()
+        result["fact"] = match_fact.group(1).replace(" ", "").strip()
     if match_forecast:
-        result["forecast"] = match_forecast.group(1).strip()
+        result["forecast"] = match_forecast.group(1).replace(" ", "").strip()
     if match_previous:
-        result["previous"] = match_previous.group(2).strip()
+        result["previous"] = match_previous.group(2).replace(" ", "").strip()
 
     return result
 
@@ -948,7 +951,6 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
     interpreted_forecast = values.get("forecast", "")
     interpreted_previous = values.get("previous", "")
 
-    # 🔥 Промпт (английский, ответ строго на русском)
     prompt = (
         "Act as a world-class macroeconomic strategist with 20+ years of experience advising hedge funds, prop trading desks, and crypto funds. "
         "You specialize in interpreting economic calendar data, surprises in forecasts, and macro releases to assess their short-term market impact.\n\n"
