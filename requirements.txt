@@ -8,5 +8,6 @@ oauth2client
 flask
 aiocron
 tenacity>=8.2
+beautifulsoup4
 
 
