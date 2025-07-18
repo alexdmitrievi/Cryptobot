@@ -846,32 +846,33 @@ async def fetch_article_text(url: str) -> str:
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Спецобработка для economic-calendar
+        # Спецобработка экономического календаря Investing
         if "economic-calendar" in url:
             try:
                 text_blocks = []
 
-                # Название события
+                # Заголовок события
                 heading = soup.find("h1")
                 if heading:
                     text_blocks.append(heading.get_text(strip=True))
 
-                # Latest Release: Actual / Forecast / Previous
-                lr = soup.find(string=re.compile("Latest Release", re.IGNORECASE))
-                if lr:
-                    container = lr.find_parent()
-                    spans = container.find_all("span")
-                    for span in spans:
-                        txt = span.get_text(strip=True)
-                        if txt:
-                            text_blocks.append(txt)
+                # Извлечение значений Факт / Прогноз / Пред из таблицы
+                table = soup.find("table")
+                if table:
+                    for row in table.find_all("tr"):
+                        cells = row.find_all("td")
+                        if len(cells) >= 2:
+                            label = cells[0].get_text(strip=True)
+                            value = cells[1].get_text(strip=True)
+                            if any(x in label for x in ["Факт", "Прогноз", "Пред"]):
+                                text_blocks.append(f"{label}: {value}")
 
-                # Дополнительно тянем текст абзацев
+                # Основной текст (если есть)
                 paragraphs = soup.find_all("p")
                 for p in paragraphs:
-                    text = p.get_text(strip=True)
-                    if text:
-                        text_blocks.append(text)
+                    p_text = p.get_text(strip=True)
+                    if p_text:
+                        text_blocks.append(p_text)
 
                 return "\n".join(text_blocks)
             except Exception as e:
@@ -886,6 +887,7 @@ async def fetch_article_text(url: str) -> str:
         paragraphs = article_body.find_all("p")
         text = "\n".join(p.get_text(strip=True) for p in paragraphs)
         return text if len(text) > 100 else None
+
     except Exception as e:
         logging.error(f"[fetch_article_text error] {e}")
         return None
@@ -893,21 +895,22 @@ async def fetch_article_text(url: str) -> str:
 def extract_calendar_values(text: str) -> dict:
     result = {}
 
-    # Событие: первая строка
-    first_line = text.strip().split("\n")[0]
-    if first_line:
-        result["event"] = first_line
+    # Событие — первая строка, если начинается с "Число", "Индекс" и т.п.
+    match_event = re.search(r"^(Число|Индекс|Уровень|Объ[eё]м|ВВП|Безработиц[аы]|Инфляци[яи]|CPI|PPI|Retail Sales)[^\n]{5,100}", text, re.MULTILINE)
+    if match_event:
+        result["event"] = match_event.group(0).strip()
 
-    m_fact = re.search(r"Actual\s*([\d.,KMBkmb]+)", text)
-    m_forecast = re.search(r"Forecast\s*([\d.,KMBkmb]+)", text)
-    m_prev = re.search(r"Previous\s*([\d.,KMBkmb]+)", text)
+    # Факт, Прогноз, Предыдущее — ищем с учётом разных форм и регистра
+    match_fact = re.search(r"(Факт)[:\s]*([\d.,KMBkmb]+)", text, re.IGNORECASE)
+    match_forecast = re.search(r"(Прогноз)[:\s]*([\d.,KMBkmb]+)", text, re.IGNORECASE)
+    match_previous = re.search(r"(Пред|Предыдущее|Прошлое)[:\s]*([\d.,KMBkmb]+)", text, re.IGNORECASE)
 
-    if m_fact:
-        result["fact"] = m_fact.group(1).strip()
-    if m_forecast:
-        result["forecast"] = m_forecast.group(1).strip()
-    if m_prev:
-        result["previous"] = m_prev.group(1).strip()
+    if match_fact:
+        result["fact"] = match_fact.group(2).strip()
+    if match_forecast:
+        result["forecast"] = match_forecast.group(2).strip()
+    if match_previous:
+        result["previous"] = match_previous.group(2).strip()
 
     return result
 
