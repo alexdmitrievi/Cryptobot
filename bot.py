@@ -846,45 +846,42 @@ async def fetch_article_text(url: str) -> str:
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Спецобработка для economic-calendar
         if "economic-calendar" in url:
-            try:
-                text_blocks = []
+            text_blocks = []
 
-                # Заголовок
-                heading = soup.find("h1")
-                if heading:
-                    text_blocks.append(heading.get_text(strip=True))
+            heading = soup.find("h1")
+            if heading:
+                text_blocks.append(heading.get_text(strip=True))
 
-                # Извлечение значений Факт, Прогноз, Пред из releaseInfo
-                release_info = soup.find("div", id="releaseInfo")
-                if release_info:
-                    spans = release_info.find_all("span")
-                    for i, span in enumerate(spans):
-                        label = span.get_text(strip=True)
-                        if label.startswith("Факт") and i + 1 < len(spans):
-                            value = spans[i + 1].get_text(strip=True)
-                            text_blocks.append(f"Факт: {value}")
-                        elif label.startswith("Прогноз") and i + 1 < len(spans):
-                            value = spans[i + 1].get_text(strip=True)
-                            text_blocks.append(f"Прогноз: {value}")
-                        elif label.startswith("Пред") and i + 1 < len(spans):
-                            value = spans[i + 1].get_text(strip=True)
-                            text_blocks.append(f"Предыдущее: {value}")
+            release_block = soup.find("div", id="releaseInfo")
+            if release_block:
+                label_map = {
+                    "Факт.": "Факт",
+                    "Прогноз": "Прогноз",
+                    "Пред.": "Предыдущее"
+                }
 
-                # Основной текст
-                paragraphs = soup.find_all("p")
-                for p in paragraphs:
-                    p_text = p.get_text(strip=True)
-                    if p_text:
-                        text_blocks.append(p_text)
+                children = list(release_block.children)
+                for i, el in enumerate(children):
+                    if el.name == "span" and el.get_text(strip=True) in label_map:
+                        label = label_map[el.get_text(strip=True)]
+                        # Ищем ближайший следующий div
+                        for j in range(i + 1, len(children)):
+                            sibling = children[j]
+                            if sibling.name == "div" and "arial_14" in sibling.get("class", []):
+                                value = sibling.get_text(strip=True)
+                                text_blocks.append(f"{label}: {value}")
+                                break
 
-                return "\n".join(text_blocks)
-            except Exception as e:
-                logging.error(f"[economic-calendar parse error] {e}")
-                return None
+            # Основной текст
+            for p in soup.find_all("p"):
+                p_text = p.get_text(strip=True)
+                if p_text:
+                    text_blocks.append(p_text)
 
-        # Обычные статьи
+            return "\n".join(text_blocks)
+
+        # Обычные статьи (не календарь)
         article_body = soup.find("div", class_="WYSIWYG") or soup.find("article")
         if not article_body:
             return None
