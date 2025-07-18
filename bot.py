@@ -846,7 +846,7 @@ async def fetch_article_text(url: str) -> str:
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Экономический календарь investing.com
+        # Спецобработка для economic-calendar
         if "economic-calendar" in url:
             try:
                 text_blocks = []
@@ -856,19 +856,23 @@ async def fetch_article_text(url: str) -> str:
                 if heading:
                     text_blocks.append(heading.get_text(strip=True))
 
-                # Факт / Прогноз / Предыдущее
+                # Извлечение значений Факт, Прогноз, Пред из releaseInfo
                 release_info = soup.find("div", id="releaseInfo")
                 if release_info:
                     spans = release_info.find_all("span")
                     for i, span in enumerate(spans):
                         label = span.get_text(strip=True)
-                        if label in ["Факт", "Прогноз", "Пред"]:
-                            next_div = span.find_next("div")
-                            if next_div:
-                                value = next_div.get_text(strip=True)
-                                text_blocks.append(f"{label}: {value}")
+                        if label.startswith("Факт") and i + 1 < len(spans):
+                            value = spans[i + 1].get_text(strip=True)
+                            text_blocks.append(f"Факт: {value}")
+                        elif label.startswith("Прогноз") and i + 1 < len(spans):
+                            value = spans[i + 1].get_text(strip=True)
+                            text_blocks.append(f"Прогноз: {value}")
+                        elif label.startswith("Пред") and i + 1 < len(spans):
+                            value = spans[i + 1].get_text(strip=True)
+                            text_blocks.append(f"Предыдущее: {value}")
 
-                # Текст описания события
+                # Основной текст
                 paragraphs = soup.find_all("p")
                 for p in paragraphs:
                     p_text = p.get_text(strip=True)
@@ -880,7 +884,7 @@ async def fetch_article_text(url: str) -> str:
                 logging.error(f"[economic-calendar parse error] {e}")
                 return None
 
-        # Для обычных новостей
+        # Обычные статьи
         article_body = soup.find("div", class_="WYSIWYG") or soup.find("article")
         if not article_body:
             return None
