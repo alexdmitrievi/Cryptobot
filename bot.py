@@ -476,6 +476,25 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
+    # 📊 Если ожидаем интерпретацию календаря — выполняем другую ветку
+    if context.user_data.get("awaiting_calendar_photo"):
+        context.user_data.pop("awaiting_calendar_photo", None)
+        await update.message.reply_text("🔎 Распознаю значения и формирую интерпретацию...")
+
+        result = await generate_news_from_image(image_base64)
+        if result:
+            await update.message.reply_text(
+                f"📈 Интерпретация по скриншоту:\n\n{result}",
+                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+            )
+        else:
+            await update.message.reply_text(
+                "⚠️ Не удалось распознать данные. Попробуйте загрузить более чёткий скрин.",
+                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+            )
+        return
+
+    # 🔍 Иначе — стандартный анализ по графику (SMC)
     selected_market = context.user_data.get("selected_market")
     if not selected_market:
         keyboard = InlineKeyboardMarkup([
@@ -1043,12 +1062,11 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 🔍 Анализ
     if text == "🔍 Анализ":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Экономический календарь", callback_data="interpret_calendar")]
-        ])
+        context.user_data.clear()
+        context.user_data["awaiting_calendar_photo"] = True
         await update.message.reply_text(
-            "🗓 Хочешь получить интерпретацию по скриншоту из экономического календаря (например, CPI, NFP)? Пришли изображение события.",
-            reply_markup=keyboard
+            "📸 Пришли скриншот из экономического календаря (например, CPI, NFP и т.д.). Я распознаю событие и дам интерпретацию.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
         return
 
@@ -1148,8 +1166,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await teacher_response(update, context)
     if context.user_data.get("awaiting_definition_term"):
         return await handle_definition_term(update, context)
-    if context.user_data.get("awaiting_news"):
-        return await generate_news_interpretation(update, context)
     if context.user_data.get("awaiting_therapy_input"):
         return await gpt_psychologist_response(update, context)
     if context.user_data.get("awaiting_uid"):
