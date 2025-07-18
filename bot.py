@@ -381,7 +381,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         context.user_data["awaiting_calendar_photo"] = True
         await query.message.reply_text(
-            "📸 Пришли скриншот из экономического календаря (например, CPI, NFP и т.д.). Я распознаю событие и дам интерпретацию.",
+            "📸 Пришли скриншот из экономического календаря. Я распознаю событие и дам интерпретацию.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
 
@@ -476,7 +476,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
-    # 📊 Если ожидаем интерпретацию календаря — выполняем другую ветку
+    # 📊 Ветка: интерпретация скриншота из экономического календаря
     if context.user_data.get("awaiting_calendar_photo"):
         context.user_data.pop("awaiting_calendar_photo", None)
         await update.message.reply_text("🔎 Распознаю значения и формирую интерпретацию...")
@@ -494,7 +494,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 🔍 Иначе — стандартный анализ по графику (SMC)
+    # 📉 Ветка: SMC-анализ графика (по выбранному рынку)
     selected_market = context.user_data.get("selected_market")
     if not selected_market:
         keyboard = InlineKeyboardMarkup([
@@ -1065,7 +1065,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         context.user_data["awaiting_calendar_photo"] = True
         await update.message.reply_text(
-            "📸 Пришли скриншот из экономического календаря (например, CPI, NFP и т.д.). Я распознаю событие и дам интерпретацию.",
+            "📸 Пришли скриншот из экономического календаря. Я распознаю событие и дам интерпретацию.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
         return
@@ -1180,7 +1180,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔄 Если ничего не ожидаем - сброс
+    # 🔄 Если ничего не ожидаем — сброс
     saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
     context.user_data.clear()
     context.user_data.update(saved_data)
