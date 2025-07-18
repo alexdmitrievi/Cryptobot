@@ -849,9 +849,16 @@ async def fetch_article_text(url: str) -> str:
         # Спецобработка экономического календаря
         if "economic-calendar" in url:
             try:
-                table = soup.find("table", class_="economicCalendarTable")
+                table = soup.find("table")
                 if table:
-                    return table.get_text(separator="\n", strip=True)
+                    rows = table.find_all("tr")
+                    extracted = []
+                    for row in rows:
+                        cols = row.find_all(["td", "th"])
+                        text = " | ".join(col.get_text(strip=True) for col in cols)
+                        if text:
+                            extracted.append(text)
+                    return "\n".join(extracted)
             except Exception as e:
                 logging.error(f"[economic-calendar parse error] {e}")
                 return None
@@ -867,7 +874,6 @@ async def fetch_article_text(url: str) -> str:
     except Exception as e:
         logging.error(f"[fetch_article_text error] {e}")
         return None
-
 
 def extract_calendar_values(text: str) -> dict:
     result = {}
@@ -888,7 +894,6 @@ def extract_calendar_values(text: str) -> dict:
         result["previous"] = match_previous.group(2).strip()
 
     return result
-
 
 async def generate_news_interpretation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = update.message.text.strip()
