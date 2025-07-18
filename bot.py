@@ -377,10 +377,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✉️ Напиши свой email для получения секретного PDF со стратегиями:"
         )
 
-    elif query.data == "interpret_calendar" or query.data == "interpret_other":
-        context.user_data["awaiting_news"] = "calendar"
+    elif query.data == "interpret_calendar":
+        context.user_data.clear()
+        context.user_data["awaiting_calendar_photo"] = True
         await query.message.reply_text(
-            "📎 Пришли ссылку на статью (например, с investing.com, fxstreet.com, reuters.com) — я сам распознаю событие и выдам интерпретацию."
+            "📸 Пришли скриншот из экономического календаря (например, CPI, NFP и т.д.). Я распознаю событие и дам интерпретацию.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
 
     elif query.data == "start_risk_calc":
@@ -837,129 +839,33 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         )
         context.user_data.clear()
 
-async def fetch_article_text(url: str) -> str:
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=10)
-        if not response.ok:
-            return None
+async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    photo = update.message.photo[-1]
+    file = await photo.get_file()
+    image_bytes = await file.download_as_bytearray()
 
-        soup = BeautifulSoup(response.text, "html.parser")
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=80)
+    image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
-        if "economic-calendar" in url:
-            text_blocks = []
+    await update.message.reply_text("🔎 Распознаю значения и формирую интерпретацию...")
 
-            heading = soup.find("h1")
-            if heading:
-                text_blocks.append(heading.get_text(strip=True))
+    result = await generate_news_from_image(image_base64)
 
-            release_block = soup.find("div", id="releaseInfo")
-            if release_block:
-                label_map = {
-                    "Факт.": "Факт",
-                    "Прогноз": "Прогноз",
-                    "Пред.": "Предыдущее"
-                }
+    if result:
+        await update.message.reply_text(f"📈 Интерпретация по скриншоту:\n\n{result}", reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True))
+    else:
+        await update.message.reply_text("⚠️ Не удалось распознать данные. Попробуйте загрузить более чёткий скрин.", reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True))
 
-                children = list(release_block.children)
-                for i, el in enumerate(children):
-                    if el.name == "span" and el.get_text(strip=True) in label_map:
-                        label = label_map[el.get_text(strip=True)]
-                        # Ищем ближайший следующий div
-                        for j in range(i + 1, len(children)):
-                            sibling = children[j]
-                            if sibling.name == "div" and "arial_14" in sibling.get("class", []):
-                                value = sibling.get_text(strip=True)
-                                text_blocks.append(f"{label}: {value}")
-                                break
-
-            # Основной текст
-            for p in soup.find_all("p"):
-                p_text = p.get_text(strip=True)
-                if p_text:
-                    text_blocks.append(p_text)
-
-            return "\n".join(text_blocks)
-
-        # Обычные статьи (не календарь)
-        article_body = soup.find("div", class_="WYSIWYG") or soup.find("article")
-        if not article_body:
-            return None
-
-        paragraphs = article_body.find_all("p")
-        text = "\n".join(p.get_text(strip=True) for p in paragraphs)
-        return text if len(text) > 100 else None
-
-    except Exception as e:
-        logging.error(f"[fetch_article_text error] {e}")
-        return None
-
-def extract_calendar_values(text: str) -> dict:
-    result = {}
-
-    match_event = re.search(r"(Число|Индекс|Уровень|Объём|ВВП|Безработиц[аы]|Инфляци[яи]|CPI|PPI|Retail Sales)[^\n]{10,100}", text)
-    if match_event:
-        result["event"] = match_event.group(0).strip()
-
-    match_fact = re.search(r"Факт[:\s]*([\d.,KMBkmb]+)", text)
-    match_forecast = re.search(r"Прогноз[:\s]*([\d.,KMBkmb]+)", text)
-    match_previous = re.search(r"(Предыдущее|Пред|Прошлое)[:\s]*([\d.,KMBkmb]+)", text)
-
-    if match_fact:
-        result["fact"] = match_fact.group(1).strip()
-    if match_forecast:
-        result["forecast"] = match_forecast.group(1).strip()
-    if match_previous:
-        result["previous"] = match_previous.group(2).strip()
-
-    return result
-
-
-async def generate_news_interpretation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message_text = update.message.text.strip()
-    urls = re.findall(r'https?://\S+', message_text)
-    if not urls:
-        await update.message.reply_text("⚠️ Пришли ссылку на статью (с сайтов investing.com, fxstreet.com, reuters.com)")
-        return
-
-    url = urls[0]
-    if not any(domain in url for domain in ["investing.com", "fxstreet.com", "reuters.com"]):
-        await update.message.reply_text("⚠️ Поддерживаются только investing.com, fxstreet.com и reuters.com")
-        return
-
-    article_text = await fetch_article_text(url)
-    if not article_text:
-        await update.message.reply_text("⚠️ Не удалось извлечь текст. Попробуй другую ссылку.")
-        return
-
-    # Извлечение значений
-    values = extract_calendar_values(article_text)
-    summary_parts = []
-    if "event" in values:
-        summary_parts.append(f"📊 Событие: {values['event']}")
-    if "fact" in values:
-        summary_parts.append(f"✅ Факт: {values['fact']}")
-    if "forecast" in values:
-        summary_parts.append(f"📉 Прогноз: {values['forecast']}")
-    if "previous" in values:
-        summary_parts.append(f"🕓 Предыдущее: {values['previous']}")
-
-    if summary_parts:
-        await update.message.reply_text("\n".join(summary_parts))
-
+async def generate_news_from_image(image_base64: str) -> str:
     prompt = (
         "Act as a world-class macroeconomic strategist with 20+ years of experience advising hedge funds, prop trading desks, and crypto funds. "
         "You specialize in interpreting economic calendar data, surprises in forecasts, and macro releases to assess their short-term market impact.\n\n"
-        "Your task is to analyze the following article and extracted economic data. "
-        "Your audience is professional traders who operate in Forex and Crypto markets. "
-        "They need a clear, fast, logic-driven interpretation of what the data means for market behavior over the next 1–3 days.\n\n"
-        "📰 Article:\n"
-        f"{article_text}\n\n"
-        "📊 Extracted values:\n"
-        f"- Event: {values.get('event', '')}\n"
-        f"- Fact: {values.get('fact', '')}\n"
-        f"- Forecast: {values.get('forecast', '')}\n"
-        f"- Previous: {values.get('previous', '')}\n\n"
+        "You are analyzing a screenshot from an economic calendar (such as 'Initial Jobless Claims', 'CPI', etc). Extract from the image:\n"
+        "- Event\n- Fact\n- Forecast\n- Previous\n\n"
+        "Then give a professional, concise macroeconomic interpretation.\n\n"
         "🎯 Your response must be written STRICTLY in Russian, without using markdown symbols (*, _, -).\n\n"
         "📐 Structure your analysis as follows:\n\n"
         "1️⃣ Фундаментальная интерпретация события:\n"
@@ -975,21 +881,17 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
     try:
         response = await client.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[
+                {"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                ]}
+            ]
         )
-
-        text = response.choices[0].message.content.strip()
-        reply_markup = ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-
-        if not text or len(text) < 100:
-            await update.message.reply_text("⚠️ GPT не дал ответа. Попробуй снова.", reply_markup=reply_markup)
-            return
-
-        await update.message.reply_text(f"📈 Интерпретация новости:\n\n{text}", reply_markup=reply_markup)
-
+        return response.choices[0].message.content.strip()
     except Exception as e:
-        logging.error(f"[NEWS_INTERPRETATION] GPT error: {e}")
-        await update.message.reply_text("⚠️ GPT временно недоступен. Попробуй позже.", reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True))
+        logging.error(f"[generate_news_from_image error] {e}")
+        return None
 
 async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
@@ -1142,12 +1044,10 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🔍 Анализ
     if text == "🔍 Анализ":
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Экономический календарь", callback_data="interpret_calendar")],
-            [InlineKeyboardButton("Другие новости", callback_data="interpret_other")]
+            [InlineKeyboardButton("Экономический календарь", callback_data="interpret_calendar")]
         ])
         await update.message.reply_text(
-            "Ты хочешь интерпретировать новость из экономического календаря "
-            "или любые другие новости, влияющие на финансовый рынок?",
+            "🗓 Хочешь получить интерпретацию по скриншоту из экономического календаря (например, CPI, NFP)? Пришли изображение события.",
             reply_markup=keyboard
         )
         return
@@ -1593,13 +1493,8 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop("awaiting_email", None)
         return
 
-    # ✅ Блок для интерпретации новостей
-    elif context.user_data.get("awaiting_news"):
-        await generate_news_interpretation(update, context)
-        return
-
     # ✅ Остальные режимы
-    elif context.user_data.get("awaiting_potential"):
+    if context.user_data.get("awaiting_potential"):
         await handle_potential(update, context)
     elif context.user_data.get("awaiting_definition_term"):
         await handle_definition(update, context)
