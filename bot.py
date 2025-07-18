@@ -851,32 +851,34 @@ async def fetch_article_text(url: str) -> str:
             try:
                 text_blocks = []
 
-                # Заголовок события — отлично
+                # Название события
                 heading = soup.find("h1")
                 if heading:
                     text_blocks.append(heading.get_text(strip=True))
 
-                # Извлечение значения "Факт", "Прогноз", "Предыдущее"
-                for label in ["Факт", "Прогноз", "Пред", "Предыдущее"]:
-                    span = soup.find("span", string=re.compile(rf"^{label}$"))
-                    if span and span.find_next("span"):
-                        value = span.find_next("span").get_text(strip=True)
-                        text_blocks.append(f"{label}: {value}")
+                # Latest Release: Actual / Forecast / Previous
+                lr = soup.find(string=re.compile("Latest Release", re.IGNORECASE))
+                if lr:
+                    container = lr.find_parent()
+                    spans = container.find_all("span")
+                    for span in spans:
+                        txt = span.get_text(strip=True)
+                        if txt:
+                            text_blocks.append(txt)
 
-                # Добавление параграфов
+                # Дополнительно тянем текст абзацев
                 paragraphs = soup.find_all("p")
                 for p in paragraphs:
-                    p_text = p.get_text(strip=True)
-                    if p_text:
-                        text_blocks.append(p_text)
+                    text = p.get_text(strip=True)
+                    if text:
+                        text_blocks.append(text)
 
                 return "\n".join(text_blocks)
-
             except Exception as e:
                 logging.error(f"[economic-calendar parse error] {e}")
                 return None
 
-        # Для обычных статей
+        # Обычные статьи
         article_body = soup.find("div", class_="WYSIWYG") or soup.find("article")
         if not article_body:
             return None
@@ -884,7 +886,6 @@ async def fetch_article_text(url: str) -> str:
         paragraphs = article_body.find_all("p")
         text = "\n".join(p.get_text(strip=True) for p in paragraphs)
         return text if len(text) > 100 else None
-
     except Exception as e:
         logging.error(f"[fetch_article_text error] {e}")
         return None
@@ -892,25 +893,21 @@ async def fetch_article_text(url: str) -> str:
 def extract_calendar_values(text: str) -> dict:
     result = {}
 
-    # Находим событие
-    match_event = re.search(
-        r"(Число|Индекс|Уровень|Объём|ВВП|Безработиц[аы]|Инфляци[яи]|CPI|PPI|Retail Sales)[^\n]{10,100}",
-        text
-    )
-    if match_event:
-        result["event"] = match_event.group(0).strip()
+    # Событие: первая строка
+    first_line = text.strip().split("\n")[0]
+    if first_line:
+        result["event"] = first_line
 
-    # Находим значения
-    match_fact = re.search(r"Факт[:\s]*([+-]?[\d\s.,KMBkmb]+)", text)
-    match_forecast = re.search(r"Прогноз[:\s]*([+-]?[\d\s.,KMBkmb]+)", text)
-    match_previous = re.search(r"(Предыдущее|Пред|Прошлое)[:\s]*([+-]?[\d\s.,KMBkmb]+)", text)
+    m_fact = re.search(r"Actual\s*([\d.,KMBkmb]+)", text)
+    m_forecast = re.search(r"Forecast\s*([\d.,KMBkmb]+)", text)
+    m_prev = re.search(r"Previous\s*([\d.,KMBkmb]+)", text)
 
-    if match_fact:
-        result["fact"] = match_fact.group(1).replace(" ", "").strip()
-    if match_forecast:
-        result["forecast"] = match_forecast.group(1).replace(" ", "").strip()
-    if match_previous:
-        result["previous"] = match_previous.group(2).replace(" ", "").strip()
+    if m_fact:
+        result["fact"] = m_fact.group(1).strip()
+    if m_forecast:
+        result["forecast"] = m_forecast.group(1).strip()
+    if m_prev:
+        result["previous"] = m_prev.group(1).strip()
 
     return result
 
@@ -931,9 +928,10 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
         await update.message.reply_text("⚠️ Не удалось получить текст статьи. Попробуй другую ссылку.")
         return
 
-    # Извлечение ключевых значений
+    # Попытка извлечь значения экономических индикаторов
     values = extract_calendar_values(article_text)
     summary_parts = []
+
     if "event" in values:
         summary_parts.append(f"📊 Событие: {values['event']}")
     if "fact" in values:
@@ -946,6 +944,7 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
     if summary_parts:
         await update.message.reply_text("\n".join(summary_parts))
 
+    # Подготовка данных к промпту
     interpreted_event = values.get("event", "")
     interpreted_fact = values.get("fact", "")
     interpreted_forecast = values.get("forecast", "")
@@ -953,10 +952,8 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
 
     prompt = (
         "Act as a world-class macroeconomic strategist with 20+ years of experience advising hedge funds, prop trading desks, and crypto funds. "
-        "You specialize in interpreting economic calendar data, surprises in forecasts, and macro releases to assess their short-term market impact.\n\n"
-        "Your task is to analyze the following article and extracted economic data. "
-        "Your audience is professional traders who operate in Forex and Crypto markets. "
-        "They need a clear, fast, logic-driven interpretation of what the data means for market behavior over the next 1–3 days.\n\n"
+        "You specialize in interpreting economic data, market-moving news, and calendar releases.\n\n"
+        "Your audience is professional traders in the Forex and Crypto markets. They require sharp, logic-driven analysis of the information's impact on price action over the next 1–3 days.\n\n"
         "📰 Article:\n"
         f"{article_text}\n\n"
         "📊 Extracted values:\n"
@@ -964,19 +961,13 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
         f"- Fact: {interpreted_fact}\n"
         f"- Forecast: {interpreted_forecast}\n"
         f"- Previous: {interpreted_previous}\n\n"
-        "🎯 Your response must be written STRICTLY in Russian, without using markdown symbols (*, _, -).\n\n"
-        "📐 Structure your analysis as follows:\n\n"
-        "1️⃣ Фундаментальная интерпретация события:\n"
-        "What happened, why it matters, and whether the result is fundamentally positive or negative.\n\n"
-        "2️⃣ Влияние на ликвидность, волатильность и поведение участников:\n"
-        "Describe how different types of traders (funds, speculators, arbitrage desks) may react, and how this affects market flow.\n\n"
-        "3️⃣ Возможные сценарии:\n"
-        "➡️ Bullish — what could cause upside?\n"
-        "➡️ Bearish — what might lead to downside?\n\n"
-        "4️⃣ Историческая аналогия:\n"
-        "Briefly mention 1–2 similar past events from recent years and how the market reacted.\n\n"
-        "🚫 Do NOT give trade entries, SL, or TP levels. Focus only on macro reasoning, narrative shifts, and positioning logic.\n"
-        "Use short paragraphs. Be direct, sharp, and professional. Absolutely no markdown."
+        "🎯 Your reply MUST be written in Russian. DO NOT use markdown formatting.\n\n"
+        "📐 Structure your reply strictly as follows:\n"
+        "1️⃣ Фундаментальная интерпретация события: What happened and why it matters.\n"
+        "2️⃣ Влияние на ликвидность, волатильность и поведение участников.\n"
+        "3️⃣ Возможные сценарии:\n➡️ Bullish\n➡️ Bearish\n"
+        "4️⃣ Историческая аналогия с похожими событиями.\n\n"
+        "⚠️ DO NOT provide trade entries or targets. Only macroeconomic reasoning."
     )
 
     try:
@@ -996,7 +987,10 @@ async def generate_news_interpretation(update: Update, context: ContextTypes.DEF
 
     except Exception as e:
         logging.error(f"[NEWS_INTERPRETATION] GPT error: {e}")
-        await update.message.reply_text("⚠️ GPT временно недоступен. Попробуй позже.", reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True))
+        await update.message.reply_text(
+            "⚠️ GPT временно недоступен. Попробуй позже.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
 
 async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
