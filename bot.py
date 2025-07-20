@@ -276,9 +276,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "market_crypto":
         context.user_data["selected_market"] = "crypto"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
-        ])
+        if user_id == 407721399:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🧠 У меня PRO-доступ на TradingView", callback_data="pro_access_confirm")],
+                [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
+            ])
+        else:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
+            ])
         await query.edit_message_text(
             "📈 Smart Money Concepts (SMC) для крипты\n\n"
             "1️⃣ Сначала включи индикатор LazyScalp Board и проверь, чтобы DV ≥ 300M.\n"
@@ -299,9 +305,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "market_forex":
         context.user_data["selected_market"] = "forex"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
-        ])
+        if user_id == 407721399:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🧠 У меня PRO-доступ на TradingView", callback_data="pro_access_confirm")],
+                [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
+            ])
+        else:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
+            ])
         await query.edit_message_text(
             "📈 Smart Money Concepts (SMC) для форекса\n\n"
             "⚠️ На Forex нет централизованного объёма, поэтому сразу включи два индикатора:\n"
@@ -319,42 +331,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard
         )
 
-    elif query.data == "forecast_by_image":
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
-        ])
+    elif query.data == "pro_access_confirm":
+        context.user_data["is_pro_user"] = True
         await query.message.reply_text(
-            "📸 Пришли скриншот графика — я сделаю технический разбор и прогноз.\n\n"
-            "Если не уверен, как его оформить — нажми кнопку ниже:",
-            reply_markup=keyboard
+            "🔓 Включён PRO-анализ графиков.\n\n"
+            "Теперь я буду учитывать:\n"
+            "✅ Коррекцию / проекцию по Fibo\n"
+            "✅ Наклонные и горизонтальные уровни\n"
+            "✅ Зоны дисбаланса (FVG)\n"
+            "✅ Совпадения по нескольким уровням фибоначчи (кластерные зоны)\n\n"
+            "📸 Пришли скрин — я сделаю расширенный анализ!"
         )
 
     elif query.data == "screenshot_help":
         await query.message.reply_text(
             "📸 Как правильно подготовить скрин для точного анализа:\n\n"
-            "1. Таймфрейм:\n"
-            "- Используй 4H или 1H. Это лучшие варианты для анализа по SMC.\n\n"
-            "2. Цвет фона:\n"
-            "- Рекомендуется белый фон. GPT Vision лучше видит уровни и свечи на светлом фоне.\n"
-            "- Как изменить: нажми правой кнопкой мыши по графику → Настройки → Вкладка 'Внешний вид' → Измени фон на белый.\n\n"
-            "3. Индикаторы:\n"
-            "- Включи только два:\n"
-            "  • LuxAlgo SMC\n"
-            "  • Support & Resistance Levels with Breaks\n"
-            "- Удали все остальные (MACD, RSI, объёмы и т.д.)\n\n"
-            "4. Что должно быть видно на скрине:\n"
-            "- Уровни BOS и CHoCH\n"
-            "- Поддержка и сопротивление\n"
-            "- Зоны дисбаланса (imbalance)\n"
-            "- 2–3 последних импульсных движения цены\n\n"
-            "5. Дополнительно:\n"
-            "- Можно вручную нарисовать горизонтальные уровни и наклонные линии тренда — это улучшит результат.\n\n"
-            "6. Перед скрином:\n"
-            "- Убери лишние панели (внизу и сбоку)\n"
-            "- Сделай график на весь экран\n\n"
-            "7. Скриншот:\n"
-            "- Используй кнопку 📷 вверху справа или нажми Windows + Shift + S\n\n"
-            "✅ Чем чище и информативнее скрин, тем точнее Entry / Stop / TakeProfit",
+            "1. Таймфрейм: 4H или 1H\n"
+            "2. Белый фон графика (лучше видно уровни и свечи)\n"
+            "3. Включи только LuxAlgo SMC и Support & Resistance Levels\n"
+            "4. Удали лишние индикаторы (MACD, RSI и т.д.)\n"
+            "5. Видимость: BOS, CHoCH, импульсы, imbalance\n"
+            "6. Ручные уровни и наклонки — приветствуются!\n"
+            "7. Скрин без панелей, на весь экран\n\n"
+            "✅ Чем чище скрин, тем точнее Entry / Stop / TP.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("↩️ Вернуться к сигналу", callback_data="back_to_signal")]
             ])
@@ -362,12 +361,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "back_to_signal":
         context.user_data.pop("selected_market", None)
+        context.user_data.pop("is_pro_user", None)
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📉 Crypto", callback_data="market_crypto")],
             [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
         ])
         await query.message.reply_text(
-            "📝 Сначала выбери рынок — нажми одну из кнопок ниже, чтобы я знал, какой анализ тебе нужен:",
+            "📝 Сначала выбери рынок — нажми одну из кнопок ниже:",
             reply_markup=keyboard
         )
 
@@ -476,7 +476,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
-    # 📊 Ветка: интерпретация скриншота из экономического календаря
+    # 📊 Интерпретация скриншота экономического календаря
     if context.user_data.get("awaiting_calendar_photo"):
         context.user_data.pop("awaiting_calendar_photo", None)
         await update.message.reply_text("🔎 Распознаю значения и формирую интерпретацию...")
@@ -494,7 +494,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 📉 Ветка: SMC-анализ графика (по выбранному рынку)
+    # 📉 Анализ по графику
     selected_market = context.user_data.get("selected_market")
     if not selected_market:
         keyboard = InlineKeyboardMarkup([
@@ -502,35 +502,73 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
         ])
         await update.message.reply_text(
-            "📝 Please select the market first:",
+            "📝 Сначала выбери рынок:",
             reply_markup=keyboard
         )
         return
 
-    prompt_text = (
-        f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years experience in "
-        f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
-        "You are skilled in BOS, CHoCH, liquidity grabs, FVG, OTE, mitigation, POI, premium/discount zones.\n"
-        "The chart includes only:\n- LuxAlgo SMC\n- Support & Resistance Levels with Breaks\n\n"
-        "🎯 Your task: interpret the price action and produce a high-confidence swing trade plan with pending orders.\n\n"
-        "✅ FORMAT (your response must be in Russian):\n"
-        "1️⃣ Наблюдения (start each with 🔹)\n"
-        "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
-        "3️⃣ Комментарий по риску\n"
-        "4️⃣ Смещение (BUY или SELL)\n"
-        "✅ Заверши двумя строками резюме с эмодзи (e.g. «Покупка из дисконта 📈🟢»)\n\n"
-        "📌 Rules:\n"
-        "- Risk/Reward must be at least 1.5. If < 3.0, explain why it's acceptable.\n"
-        "- Entry must be realistic and reachable.\n"
-        "- Choose BUY or SELL (not both). Justify.\n"
-        "- Prefer confirmation-based entries.\n\n"
-        "🚫 ABSOLUTE:\n"
-        "- Reply STRICTLY in Russian\n"
-        "- No markdown\n"
-        "- No apologies or refusal\n"
-        "- Analysis is MANDATORY. If structure unclear — estimate from candles, BOS/CHoCH hints, zones."
-    )
+    # Выбор промпта
+    if user_id == 407721399:
+        prompt_text = (
+            f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years of experience in "
+            f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
+            "You are deeply skilled in:\n"
+            "- Market structure: BOS, CHoCH\n"
+            "- Liquidity grabs and internal/external liquidity\n"
+            "- Fair Value Gaps (Imbalance), Order Blocks (OB), POI\n"
+            "- OTE (Optimal Trade Entry), mitigation, premium/discount zones\n"
+            "- Trendlines (diagonal S/R), horizontal levels, S&D zones\n"
+            "- Fibonacci clusters: correction (retracement), projection, and extension\n\n"
+            "The chart includes multiple indicators such as:\n"
+            "- LuxAlgo SMC\n"
+            "- Support & Resistance Levels\n"
+            "- Fibonacci retracement/projection tools (cluster zones)\n"
+            "- Manually drawn trendlines and levels\n\n"
+            "🎯 Your task: Provide a full swing trade plan based on confluence from multiple tools.\n"
+            "Highlight areas where multiple tools align (e.g., FVG + Fibo + level).\n\n"
+            "✅ FORMAT (answer strictly in Russian):\n"
+            "1️⃣ Наблюдения (начинай каждое с 🔹, упоминай совпадения по уровням, Imbalance, Fibo)\n"
+            "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
+            "3️⃣ Комментарий по риску\n"
+            "4️⃣ Смещение (BUY или SELL)\n"
+            "✅ Заверши двумя строками резюме с эмодзи (например: «Покупка из кластера FVG + 0.618 📈🟢»)\n\n"
+            "📌 Rules:\n"
+            "- Risk/Reward должен быть минимум 1.5. Объясни, если < 3.0\n"
+            "- Entry должен быть достижимым\n"
+            "- Выбери только BUY или SELL и обоснуй\n"
+            "- Учитывай фибоначчи-кластеры и зоны совпадений\n\n"
+            "🚫 ABSOLUTE:\n"
+            "- Строгий ответ на русском\n"
+            "- Без markdown\n"
+            "- Без извинений и отказов\n"
+            "- Анализ обязателен. Даже если структура неочевидна — оцени по свечам, BOS/CHoCH и зонам"
+        )
+    else:
+        prompt_text = (
+            f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years experience in "
+            f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
+            "You are skilled in BOS, CHoCH, liquidity grabs, FVG, OTE, mitigation, POI, premium/discount zones.\n"
+            "The chart includes only:\n- LuxAlgo SMC\n- Support & Resistance Levels with Breaks\n\n"
+            "🎯 Your task: interpret the price action and produce a high-confidence swing trade plan with pending orders.\n\n"
+            "✅ FORMAT (your response must be in Russian):\n"
+            "1️⃣ Наблюдения (start each with 🔹)\n"
+            "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
+            "3️⃣ Комментарий по риску\n"
+            "4️⃣ Смещение (BUY или SELL)\n"
+            "✅ Заверши двумя строками резюме с эмодзи (e.g. «Покупка из дисконта 📈🟢»)\n\n"
+            "📌 Rules:\n"
+            "- Risk/Reward must be at least 1.5. If < 3.0, explain why it's acceptable.\n"
+            "- Entry must be realistic and reachable.\n"
+            "- Choose BUY or SELL (not both). Justify.\n"
+            "- Prefer confirmation-based entries.\n\n"
+            "🚫 ABSOLUTE:\n"
+            "- Reply STRICTLY in Russian\n"
+            "- No markdown\n"
+            "- No apologies or refusal\n"
+            "- Analysis is MANDATORY. If structure unclear — estimate from candles, BOS/CHoCH hints, zones."
+        )
 
+    # Запрос в GPT Vision
     analysis = ""
     for attempt in range(2):
         try:
@@ -578,6 +616,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📸 Затем отправь скрин снова."
         )
         return
+
+    await update.message.reply_text(f"📉 Анализ графика по SMC:\n\n{analysis}")
 
     def parse_price(raw_text):
         try:
