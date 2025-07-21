@@ -786,7 +786,7 @@ async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
 
-    # 🚪 Выход в главное меню по кнопке
+    # 🚪 Выход по кнопке
     if user_text == "↩️ Выйти в меню":
         context.user_data.pop("awaiting_invest_question", None)
         await update.message.reply_text(
@@ -797,7 +797,7 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
 
     user_id = update.effective_user.id
 
-    # 🪝 Fetch BTC & ETH prices
+    # 📈 Получаем цену BTC и ETH
     try:
         btc_data = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()
         eth_data = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT").json()
@@ -807,65 +807,69 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         logging.error(f"[handle_invest_question] Binance price fetch error: {e}")
         btc_price = eth_price = None
 
-    # 📝 Build advanced prompt
+    # 🧠 Усиленный промпт на английском
     prompt = (
-        "You are a premier investment strategist with over 20 years of expertise in managing multi-asset portfolios. "
-        "You specialize in creating highly personalized investment plans specifically for Russian clients, "
-        "leveraging three primary asset classes: cryptocurrencies, Forex, and Moscow Exchange (MOEX) instruments. "
-        "You also include gold and silver only via MOEX futures or unallocated metal accounts.\n\n"
-        
-        f"The client's question or goal is:\n{user_text}\n\n"
-        
-        "📌 For context, here are current prices:\n"
+        "You are a top-tier investment strategist with over 20 years of experience in multi-asset portfolio management. "
+        "You specialize in creating fully personalized investment strategies specifically for Russian-speaking clients. "
+        "Your strategies are simple, clear, beginner-friendly, and always explained with warmth, care, and confidence.\n\n"
+
+        "📌 You are only allowed to recommend the following asset classes:\n"
+        "- Cryptocurrencies: BTC, ETH, USDT\n"
+        "- Forex pairs: EUR/USD, GBP/USD, etc.\n"
+        "- Moscow Exchange instruments: Russian stocks, OFZ bonds, FinEx ETFs\n"
+        "- Gold/silver only via MOEX futures or unallocated metal accounts (ОМС)\n\n"
+        "🚫 DO NOT mention Eurobonds, foreign brokers, or international ETFs — these are strictly forbidden.\n\n"
+
+        f"🧑‍💬 The client's question or investment goal is:\n{user_text}\n\n"
+
+        "💰 Current market context:\n"
         f"{('- BTC: $' + str(btc_price)) if btc_price else ''}\n"
         f"{('- ETH: $' + str(eth_price)) if eth_price else ''}\n\n"
 
-        "🚀 Your task is to craft an ultra-detailed, step-by-step personalized investment strategy that feels like a high-end private consultation. "
-        "Respond entirely in Russian. Use a warm, human, beginner-friendly tone with plenty of emojis. "
-        "Always write in short paragraphs (1-3 sentences), never use markdown (no asterisks or underscores). "
-        "Immediately explain any financial term in simple words.\n\n"
+        "🎯 Your task:\n"
+        "Craft a full, step-by-step, deeply personalized investment strategy that feels like a private consultation. "
+        "Make it friendly, structured, easy to read, and 100% suitable for Telegram.\n\n"
 
-        "Structure your response exactly as follows:\n\n"
+        "⚠️ MANDATORY RULES:\n"
+        "- Your reply must be entirely in Russian — no English words without explanation.\n"
+        "- Use no markdown (no **bold**, _italics_, etc.)\n"
+        "- Each section must be clearly separated with emojis and headers.\n"
+        "- Use short paragraphs (1–3 sentences max) for readability.\n"
+        "- Make it beginner-friendly and emotionally supportive.\n\n"
 
-        "1️⃣ 👀 Client profile\n"
-        "- Estimate their investment horizon (short, medium, long-term) and risk appetite (aggressive, moderate, conservative) with a short justification.\n"
-        "- State their primary goal: capital growth, protecting savings, or passive income.\n\n"
+        "📦 REQUIRED FORMAT:\n\n"
 
-        "2️⃣ 📊 Recommended portfolio breakdown\n"
-        "- Divide the portfolio across three groups: crypto (BTC, ETH, USDT), Forex (e.g. EUR/USD, GBP/USD), and MOEX instruments (stocks like Sberbank, Gazprom, OFZ bonds, FinEx ETFs), plus gold and silver.\n"
-        "- Provide approximate percentages for each category and explain in plain language why each is included.\n"
-        "- Emphasize the protective role of gold and silver during uncertainty.\n\n"
+        "1️⃣ 👤 Профиль инвестора\n"
+        "- Estimate the investor’s risk tolerance and horizon.\n"
+        "- Identify their goal: savings, preservation, or passive income.\n\n"
 
-        "3️⃣ 💎 Risk management & DCA tactics\n"
-        "- Explain dollar-cost averaging (buying in portions), when to take partial profits (like after +20-30%), and why simple stop-losses matter.\n\n"
+        "2️⃣ 📊 Рекомендуемый портфель\n"
+        "- Allocate assets between crypto, Forex, MOEX, and metals.\n"
+        "- For each asset class, briefly explain why it’s included.\n\n"
 
-        "4️⃣ 🌍 Macro & local risks\n"
-        "- List key macroeconomic and geopolitical risks for Russian investors: Central Bank rates, inflation, RUB volatility, global tensions.\n"
-        "- Describe how this portfolio structure helps reduce these risks.\n\n"
+        "3️⃣ 🛡️ Управление рисками\n"
+        "- Explain position sizing, averaging, profit-taking, and stop-loss basics.\n\n"
 
-        "5️⃣ 🚀 Immediate action plan\n"
-        "- Clearly tell the client what to do right now: open a MOEX brokerage account, activate Forex, register on a crypto exchange.\n"
-        "- How to set up auto-deposits or partial buys.\n"
-        "- How often to review the portfolio (e.g. every 3-6 months) and what to watch for.\n\n"
+        "4️⃣ 🌐 Защита от рыночных рисков\n"
+        "- What risks exist and how portfolio structure helps mitigate them.\n\n"
 
-        "6️⃣ 📈 Scenario playbook\n"
-        "- If markets rise: where to lock in some gains and when adding more makes sense.\n"
-        "- If markets drop: why not to panic-sell and how to average down or hold.\n\n"
+        "5️⃣ 🚀 План действий\n"
+        "- What to do immediately: open account, where to begin.\n\n"
 
-        "7️⃣ ✅ Short conclusion\n"
-        "- Finish with 2-3 lines in Russian using emojis. Example:\n"
-        "🚀 Стратегия на 3+ года, сбалансированный риск и золотая подушка. Пересмотр дважды в год — строим капитал шаг за шагом.\n\n"
+        "6️⃣ 📈📉 Сценарии рынка\n"
+        "- What to do if the market goes up or down.\n\n"
 
-        "⚠️ VERY IMPORTANT: Write everything in Russian, be extremely clear, use emojis in every block, "
-        "avoid English jargon without instant translation, separate sections with empty lines for easy Telegram reading."
+        "7️⃣ ✅ Заключение\n"
+        "- Wrap up with 2–3 warm lines of encouragement, with emojis.\n\n"
+
+        "🧠 Always imagine you're talking to a beginner who trusts you.\n"
+        "Your mission is to inspire, guide, and protect their capital.\n"
     )
 
     try:
         gpt_response = await client.chat.completions.create(
             model="gpt-4o",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             max_tokens=1000
         )
 
@@ -878,25 +882,18 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         await update.message.reply_text(
-            f"💼 Вот твоя персональная инвестиционная стратегия:\n\n{analysis}",
+            f"📈 Вот твоя персональная стратегия:\n\n{analysis}",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
 
     except Exception as e:
         logging.error(f"[handle_invest_question] GPT error: {e}")
         await update.message.reply_text(
-            "⚠️ GPT временно недоступен.\n\n"
-            "На глаз: для умеренного риска обычно делают так 📊\n"
-            "- 40-50% акции MOEX (Сбер, Газпром и др.)\n"
-            "- 20-30% облигации ОФЗ\n"
-            "- 10-15% золото и серебро через MOEX или ОМС\n"
-            "- 10-15% крипта (BTC, ETH)\n"
-            "- и часть в Forex (EUR/USD, GBP/USD) для валютной подушки.\n\n"
-            "📝 Пересматривай портфель раз в 6 месяцев, усредняй покупки частями и фиксируй часть прибыли при росте +20-30%.\n"
-            "Детальнее подскажу после восстановления сервиса!",
+            "⚠️ GPT временно недоступен. Попробуй позже.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
-        context.user_data.clear()
+
+    context.user_data.clear()
 
 async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
