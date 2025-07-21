@@ -476,7 +476,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
-    # 📅 Обработка экономического календаря
     if context.user_data.get("awaiting_calendar_photo"):
         context.user_data.pop("awaiting_calendar_photo", None)
         await update.message.reply_text("🔎 Распознаю значения и формирую интерпретацию...")
@@ -494,7 +493,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 📊 Анализ графика
     selected_market = context.user_data.get("selected_market")
     if not selected_market:
         keyboard = InlineKeyboardMarkup([
@@ -504,7 +502,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📝 Сначала выбери рынок:", reply_markup=keyboard)
         return
 
-    # 📌 Промпт для GPT Vision (SMC + Fibo)
     prompt_text = (
         f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years of experience in "
         f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
@@ -533,7 +530,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- No markdown. No English terms"
     )
 
-    # 🧠 Отправка в GPT Vision (2 попытки с усилением)
     analysis = ""
     for attempt in range(2):
         try:
@@ -561,8 +557,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message = response.choices[0].message
             analysis = message.content.strip() if message and message.content else ""
 
-            # ⚠️ Проверка на отказ (но не по длине)
-            if "can't assist" in analysis.lower() or "извин" in analysis.lower():
+            # 🔒 Улучшенная защита от отказов
+            failure_phrases = [
+                "can't assist", "i'm sorry", "i cannot help", "not enough",
+                "недостаточно", "не могу помочь", "не удалось", "отказ", "insufficient"
+            ]
+            if any(phrase in analysis.lower() for phrase in failure_phrases) or len(analysis.strip()) < 50:
                 analysis = ""
                 continue
 
@@ -573,7 +573,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.error(f"[handle_photo] GPT Vision error: {e}")
             continue
 
-    # 🛑 Если GPT всё же не дал ответ
     if not analysis:
         await update.message.reply_text(
             "⚠️ GPT не смог проанализировать этот скрин.\n\n"
@@ -585,7 +584,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ✅ Успешный ответ
     await update.message.reply_text(f"📉 Анализ графика по SMC:\n\n{analysis}")
 
     def parse_price(raw_text):
