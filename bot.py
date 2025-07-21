@@ -466,7 +466,6 @@ async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка при обновлении пользователей: {e}")
         logging.error(f"[reload_users] Ошибка: {e}")
 
-
 def clean_unicode(text):
     return unicodedata.normalize("NFKD", text).encode("utf-8", "ignore").decode("utf-8")
 
@@ -503,113 +502,74 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
-    # 📊 Экономический календарь
-    if context.user_data.get("awaiting_calendar_photo"):
-        context.user_data.pop("awaiting_calendar_photo", None)
-        await update.message.reply_text("🔎 Распознаю значения и формирую интерпретацию...")
-
-        result = await generate_news_from_image(image_base64)
-        if result:
-            await update.message.reply_text(
-                clean_unicode(f"📈 Интерпретация по скриншоту:\n\n{result}"),
-                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-            )
-        else:
-            await update.message.reply_text(
-                "⚠️ Не удалось распознать данные. Попробуйте загрузить более чёткий скрин.",
-                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-            )
-        return
-
-    # 📉 Анализ по графику
     selected_market = context.user_data.get("selected_market")
     if not selected_market:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📉 Crypto", callback_data="market_crypto")],
             [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
         ])
-        await update.message.reply_text("📝 Сначала выбери рынок:", reply_markup=keyboard)
+        await update.message.reply_text(
+            "📝 Сначала выбери рынок — нажми одну из кнопок ниже, чтобы я знал, какой анализ тебе нужен:",
+            reply_markup=keyboard
+        )
         return
 
-    # 🧠 Промпт
-    if user_id == 407721399:
-        prompt_text = (
-            f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years of experience in "
-            f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
-            "You are deeply skilled in:\n"
-            "- Market structure: BOS, CHoCH\n"
-            "- Liquidity grabs and internal/external liquidity\n"
-            "- Fair Value Gaps (Imbalance), Order Blocks (OB), POI\n"
-            "- OTE (Optimal Trade Entry), mitigation, premium/discount zones\n"
-            "- Trendlines (diagonal S/R), horizontal levels, S&D zones\n"
-            "- Fibonacci clusters: correction (retracement), projection, and extension\n\n"
-            "The chart includes multiple indicators such as:\n"
-            "- LuxAlgo SMC\n"
-            "- Support & Resistance Levels\n"
-            "- Fibonacci retracement/projection tools (cluster zones)\n"
-            "- Manually drawn trendlines and levels\n\n"
-            "🎯 Your task: Provide a full swing trade plan based on confluence from multiple tools.\n"
-            "Highlight areas where multiple tools align (e.g., FVG + Fibo + level).\n\n"
-            "✅ FORMAT (answer strictly in Russian):\n"
-            "1️⃣ Наблюдения (начинай каждое с 🔹, упоминай совпадения по уровням, Imbalance, Fibo)\n"
-            "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
-            "3️⃣ Комментарий по риску\n"
-            "4️⃣ Смещение (BUY или SELL)\n"
-            "✅ Заверши двумя строками резюме с эмодзи (например: «Покупка из кластера FVG + 0.618 📈🟢»)\n\n"
-            "📌 Rules:\n"
-            "- Risk/Reward должен быть минимум 1.5. Объясни, если < 3.0\n"
-            "- Entry должен быть достижимым\n"
-            "- Выбери только BUY или SELL и обоснуй\n"
-            "- Учитывай фибоначчи-кластеры и зоны совпадений\n\n"
-            "🚫 ABSOLUTE:\n"
-            "- Строгий ответ на русском\n"
-            "- Без markdown\n"
-            "- Без извинений и отказов\n"
-            "- Анализ обязателен. Даже если структура неочевидна — оцени по свечам, BOS/CHoCH и зонам"
-        )
-    else:
-        prompt_text = (
-            f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years experience in "
-            f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
-            "You are skilled in BOS, CHoCH, liquidity grabs, FVG, OTE, mitigation, POI, premium/discount zones.\n"
-            "The chart includes only:\n- LuxAlgo SMC\n- Support & Resistance Levels with Breaks\n\n"
-            "🎯 Your task: interpret the price action and produce a high-confidence swing trade plan with pending orders.\n\n"
-            "✅ FORMAT (your response must be in Russian):\n"
-            "1️⃣ Наблюдения (start each with 🔹)\n"
-            "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
-            "3️⃣ Комментарий по риску\n"
-            "4️⃣ Смещение (BUY или SELL)\n"
-            "✅ Заверши двумя строками резюме с эмодзи (e.g. «Покупка из дисконта 📈🟢»)\n\n"
-            "📌 Rules:\n"
-            "- Risk/Reward must be at least 1.5. If < 3.0, explain why it's acceptable.\n"
-            "- Entry must be realistic and reachable.\n"
-            "- Choose BUY or SELL (not both). Justify.\n"
-            "- Prefer confirmation-based entries.\n\n"
-            "🚫 ABSOLUTE:\n"
-            "- Reply STRICTLY in Russian\n"
-            "- No markdown\n"
-            "- No apologies or refusal\n"
-            "- Analysis is MANDATORY. If structure unclear — estimate from candles, BOS/CHoCH hints, zones."
-        )
+    use_pro = context.user_data.get("use_pro") is True and user_id == 407721399
 
-    # 🧠 Запрос в GPT
-    analysis = await ask_gpt_vision(prompt_text, image_base64)
+    prompt_text = (
+        f"You are a professional SMC (Smart Money Concepts) trader with 10+ years experience in "
+        f"{'crypto' if selected_market == 'crypto' else 'forex'} markets. "
+        "You master BOS, CHoCH, liquidity grabs, imbalance zones, OTE, premium/discount levels.\n\n"
+        "The chart includes only:\n"
+        "- LuxAlgo SMC\n"
+        "- Support & Resistance Levels\n\n"
+        "🎯 Your task: create a swing trade plan with pending orders (limit or stop).\n"
+        "Risk/Reward ratio must be at least 1:3. Even if unclear — estimate based on price action.\n\n"
+        "✅ Format:\n"
+        "1️⃣ Observations — each bullet starts with 🔹\n"
+        "2️⃣ Trade Plan:\n🎯 Entry: $...\n🚨 StopLoss: $...\n💰 TakeProfit: $...\n"
+        "3️⃣ Risk Note\n4️⃣ Bias: BUY or SELL\n"
+        "✅ End with 2-line Russian summary with emojis (e.g. «Покупка от дисконта 💸📈»)\n\n"
+        "📌 Важно: если вход идёт ПРОТИВ текущего тренда (например, SELL в восходящем канале), обязательно объясни, почему он оправдан.\n\n"
+        "🚫 Rules:\n- Answer in Russian only\n- No markdown\n- No refusal\n- No apologies"
+    )
 
-    if not analysis or "I can't" in analysis or "I'm sorry" in analysis or len(analysis) < 100:
-        fallback_msg = (
-            "⚠️ GPT не дал ответ. \n"
-            "• Скрин слишком загружен индикаторами\n"
-            "• Или отсутствуют BOS / CHoCH / FVG\n"
-            "📸 Сделай более чистый скрин и повтори"
+    analysis = ""
+    for attempt in range(2):
+        try:
+            enhanced_prompt = prompt_text
+            if attempt == 1:
+                enhanced_prompt += (
+                    "\n\n🚨 STRICT ORDER: Даже если график тёмный, малоконтрастный, с шумом или без чёткой структуры — "
+                    "ты обязан выдать Entry, StopLoss и TakeProfit. Не отказывайся. "
+                    "Если мало данных — оцени по свечам, структуре и зонам. Торговый план ОБЯЗАТЕЛЕН."
+                )
+
+            analysis = await ask_gpt_vision(enhanced_prompt, image_base64)
+            logging.info(f"[handle_photo attempt {attempt}] Raw GPT analysis:\n{analysis}")
+
+            if any(x in analysis.lower() for x in ["sorry", "can't assist", "i cannot", "unable to"]):
+                continue
+            if analysis:
+                break
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
+
+    if not analysis or "can't assist" in analysis.lower():
+        await update.message.reply_text(
+            "⚠️ GPT не смог проанализировать этот скрин.\n\n"
+            "Попробуй следующие улучшения:\n"
+            "• Сделай фон графика белым\n"
+            "• Убери лишние индикаторы\n"
+            "• Добавь вручную уровни и наклонные линии\n\n"
+            "После этого пришли скрин ещё раз 🔁"
         )
-        await update.message.reply_text(clean_unicode(fallback_msg))
         return
-
-    await update.message.reply_text(clean_unicode(f"📉 Анализ графика по SMC:\n\n{analysis}"))
 
     def parse_price(raw_text):
         try:
-            return float(raw_text.replace(" ", "").replace(",", ".").replace("$", ""))
+            return float(raw_text.replace(" ", "").replace(",", "").replace("$", ""))
         except:
             return None
 
@@ -624,50 +584,39 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     entry = parse_price(entry_match.group(2) if entry_match and entry_match.lastindex == 2 else entry_match.group(1)) if entry_match else None
     stop = parse_price(stop_match.group(2) if stop_match and stop_match.lastindex == 2 else stop_match.group(1)) if stop_match else None
     tp = parse_price(tp_match.group(2) if tp_match and tp_match.lastindex == 2 else tp_match.group(1)) if tp_match else None
-    direction = bias_match.group(1).upper() if bias_match else None
-
-    rr_line, risk_line, tldr, unrealistic_note = "", "", "", ""
-    rr_ratio = None
 
     if entry and stop:
         risk_abs = abs(entry - stop)
         risk_pct = abs((entry - stop) / entry * 100)
-        risk_line = f"📌 Область риска ≈ ${risk_abs:.4f} ({risk_pct:.2f}%)"
+        risk_line = f"📌 Область риска ≈ ${risk_abs:.2f} ({risk_pct:.2f}%)"
     else:
-        risk_line = "📌 Область риска не указана — проверь вручную."
+        risk_line = "📌 Область риска не указана явно — оценивай внимательно."
 
+    rr_line = ""
     if entry and stop and tp and (entry != stop):
         rr_ratio = abs((tp - entry) / (entry - stop))
         rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
-        if rr_ratio < 1.5:
-            rr_line += "\n⚠️ R:R ниже 1.5 — вход может быть неэффективным."
-        elif rr_ratio < 3.0:
-            rr_line += "\n⚠️ R:R ниже 3.0 — допустимо, если структура сильная."
+        if rr_ratio < 3:
+            rr_line += "\n⚠️ R:R ниже 1:3 — план рискованный, подумай дважды."
 
-    if direction and entry and tp:
-        if direction in ["SELL", "ПРОДАЖА"] and entry < tp:
-            unrealistic_note = "⚠️ Entry ниже тейка при SELL — возможна ошибка или цена уже прошла."
-        elif direction in ["BUY", "ПОКУПКА"] and entry > tp:
-            unrealistic_note = "⚠️ Entry выше тейка при BUY — проверь логику."
-
-    bias_line = f"📈 Направление сделки: {direction}" if direction else ""
+    bias_line = f"📈 Направление сделки: {bias_match.group(1).upper()}" if bias_match else ""
 
     if entry and stop and tp:
         tldr = f"✅ TL;DR: Вход {entry}, стоп {stop}, тейк {tp}."
-        if rr_ratio:
-            tldr += f" 📊 R:R ≈ {rr_ratio:.2f}"
+        if rr_line:
+            tldr += f" {rr_line.splitlines()[0]}"
     else:
         tldr = "✅ Краткий план не сформирован — проверь вход/стоп/тейк."
 
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]])
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
+    ])
 
     full_message = f"📉 Анализ графика по SMC:\n\n{analysis}\n\n{risk_line}"
     if rr_line:
         full_message += f"\n{rr_line}"
     if bias_line:
         full_message += f"\n{bias_line}"
-    if unrealistic_note:
-        full_message += f"\n{unrealistic_note}"
     full_message += f"\n\n{tldr}"
 
     await update.message.reply_text(full_message, reply_markup=keyboard)
