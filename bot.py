@@ -237,7 +237,7 @@ async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def check_access(update: Update):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS:
-        await update.message.reply_text("🔒 Доступ ограничен. Подключи помощника за $25.", reply_markup=REPLY_MARKUP)
+        await update.message.reply_text("🔒 Доступ ограничен. Подключи помощника за $49.", reply_markup=REPLY_MARKUP)
         return False
     return True
 
@@ -771,7 +771,7 @@ async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS:
         await update.message.reply_text(
-            "🔒 Доступ только после активации подписки за $25.",
+            "🔒 Доступ только после активации подписки за 49$.",
             reply_markup=REPLY_MARKUP
         )
         return
@@ -1077,7 +1077,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🚪 Проверка доступа
     if user_id not in ALLOWED_USERS and text not in ["💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера"]:
         await update.message.reply_text(
-            "🔒 Доступ только после активации подписки за $25 или через брокера.",
+            "🔒 Доступ только после активации подписки за $49 или через брокера.",
             reply_markup=REPLY_MARKUP
         )
         return
@@ -1383,7 +1383,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎯 Плюс:\n"
         "• VIP-сетапы с уровнями, которые публикуем в канал\n"
         "• Курс по скальпингу и позиционке (10+ уроков и PDF)\n\n"
-        "🚀 *Подключи GPT-Трейдера всего за $25 и получи доступ навсегда.*\n\n"
+        "🚀 *Подключи GPT-Трейдера всего за $49 и получи доступ навсегда.*\n\n"
         "💰 Не плати каждый месяц — активируй один раз и используй сколько хочешь.\n\n"
         "💬 Задай вопрос 👉 [@zhbankov_alex](https://t.me/zhbankov_alex)\n"
         "👥 Чат для трейдеров 👉 [ai4traders_chat](https://t.me/ai4traders_chat)"
