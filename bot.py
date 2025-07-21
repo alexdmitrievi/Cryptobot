@@ -1553,7 +1553,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     if context.user_data.get("awaiting_potential"):
         await handle_potential(update, context)
     elif context.user_data.get("awaiting_definition_term"):
-        await handle_definition(update, context)
+        await handle_definition_term(update, context)
     elif context.user_data.get("awaiting_invest_question"):
         await handle_invest_question(update, context)
     elif context.user_data.get("awaiting_teacher_question"):
