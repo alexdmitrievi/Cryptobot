@@ -10,6 +10,7 @@ import hmac
 import hashlib
 import base64
 import csv
+import unicodedata  # ✅ Добавлено для защиты от битых Unicode
 from datetime import datetime
 from io import BytesIO
 from bs4 import BeautifulSoup
@@ -468,54 +469,101 @@ async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def clean_unicode(text: str) -> str:
     return unicodedata.normalize("NFC", text).encode("utf-8", "ignore").decode("utf-8")
 
+def clean_unicode(text: str) -> str:
+    return unicodedata.normalize("NFC", text).encode("utf-8", "ignore").decode("utf-8")
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     photo = update.message.photo[-1]
     file = await photo.get_file()
-    photo_bytes = await file.download_as_bytearray()
+    original_photo_bytes = await file.download_as_bytearray()
 
-    image = Image.open(BytesIO(photo_bytes)).convert("RGB")
+    # Конвертируем изображение в base64
+    image = Image.open(BytesIO(original_photo_bytes)).convert("RGB")
     buffer = BytesIO()
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
-    selected_market = context.user_data.get("selected_market", "crypto")
-    style = context.user_data.get("style", "swing")
-
-    logging.info(f"[handle_photo] Пользователь {user_id} отправил скрин, рынок: {selected_market}, стиль: {style}")
+    selected_market = context.user_data.get("selected_market")
+    if not selected_market:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📉 Crypto", callback_data="market_crypto")],
+            [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
+        ])
+        await update.message.reply_text("📝 Сначала выбери рынок:", reply_markup=keyboard)
+        return
 
     prompt = (
-        "You are a world-class professional Smart Money Concepts (SMC) analyst.\n"
-        "Analyze the chart image below and generate a precise entry plan using the following:\n"
-        "- Market structure (BOS, CHoCH)\n"
-        "- Order blocks and liquidity zones\n"
-        "- Fair Value Gaps (Imbalance)\n"
-        "- Support & Resistance Levels\n"
-        "- Price impulses\n"
-        "- Trendline and horizontal level confluences (if drawn manually)\n"
-        "- Fibonacci retracement and extension zones (if visible)\n\n"
-        "🎯 Output:\n"
-        "1. Clear market bias (long or short)\n"
-        "2. Entry price\n"
-        "3. Stop-loss level\n"
-        "4. Take-Profit target(s)\n"
-        "5. Risk/Reward ratio\n"
-        "6. Short justification (2-3 sentences)\n\n"
-        "Respond strictly in Russian using a warm, human tone.\n"
-        "Even if the chart is messy or incomplete — still give your best shot at identifying Entry / SL / TP."
+        f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years of experience in "
+        f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
+        "You are highly skilled in:\n"
+        "- Market structure: BOS, CHoCH\n"
+        "- Liquidity zones (internal/external)\n"
+        "- Fair Value Gaps (FVG), Order Blocks (OB)\n"
+        "- Trendlines (diagonal and horizontal)\n"
+        "- Fibonacci tools (retracement, extension, premium/discount zones)\n\n"
+        "🎯 Your task:\n"
+        "Generate a full swing trade plan based on the chart. Use visible confluence between structure, liquidity, imbalance, and Fibonacci if present.\n"
+        "If Fibonacci is not clearly visible — ignore it and proceed using BOS, CHoCH, candles and basic price structure.\n\n"
+        "✅ FORMAT (strictly reply in Russian):\n"
+        "1️⃣ Наблюдения (начинай с 🔹, опиши BOS, CHoCH, FVG, зоны ликвидности)\n"
+        "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
+        "3️⃣ Комментарий по риску\n"
+        "4️⃣ Смещение: BUY или SELL с пояснением\n"
+        "✅ Заверши 2 строками с выводом и эмодзи (например: «Покупка от зоны FVG + BOS 📈🟢»)\n\n"
+        "⚠️ Rules:\n"
+        "- Entry / Stop / TP are MANDATORY\n"
+        "- Risk/Reward must be ≥ 1.5. Explain if < 3.0\n"
+        "- If structure is unclear — estimate from candles and hints\n\n"
+        "🚫 ABSOLUTE:\n"
+        "- Reply strictly in Russian\n"
+        "- Never say 'I can't assist', 'not enough data', or similar\n"
+        "- No markdown. No English terms"
     )
 
-    try:
-        gpt_response = await ask_gpt_vision(image_base64, prompt)
-        clean_response = clean_unicode(gpt_response)
+    analysis = ""
+    for attempt in range(2):
+        try:
+            enhanced_prompt = prompt
+            if attempt == 1:
+                enhanced_prompt += (
+                    "\n\n🚨 SECOND ATTEMPT: You MUST provide Entry, StopLoss, TakeProfit — even if the chart is unclear. "
+                    "Estimate from price action and structure. Do not refuse. Reply strictly in Russian."
+                )
 
-        if "I can't" in clean_response or "I am sorry" in clean_response:
-            raise ValueError("GPT отказался от анализа")
+            response = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": enhanced_prompt},
+                        {"type": "image_url", "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_base64}"
+                        }}
+                    ]
+                }],
+                max_tokens=1000
+            )
 
-        await update.message.reply_text(f"📊 Анализ графика по SMC:\n\n{clean_response}")
+            message = response.choices[0].message
+            analysis = message.content.strip() if message and message.content else ""
 
-    except Exception as e:
-        logging.error(f"[handle_photo] GPT error: {e}")
+            failure_phrases = [
+                "can't assist", "i'm sorry", "cannot help", "not enough",
+                "insufficient", "не могу", "извин", "отказ"
+            ]
+            if any(p in analysis.lower() for p in failure_phrases) or len(analysis.strip()) < 50:
+                analysis = ""
+                continue
+
+            if analysis:
+                break
+
+        except Exception as e:
+            logging.error(f"[handle_photo] GPT error: {e}")
+            continue
+
+    if not analysis:
         fallback_msg = (
             "⚠️ GPT не смог проанализировать этот скрин.\n\n"
             "Проверь следующее:\n"
@@ -525,6 +573,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📸 Затем отправь скрин снова."
         )
         await update.message.reply_text(clean_unicode(fallback_msg))
+        return
+
+    await update.message.reply_text(clean_unicode(f"📉 Анализ графика по SMC:\n\n{analysis}"))
 
     def parse_price(raw_text):
         try:
