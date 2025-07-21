@@ -1016,7 +1016,7 @@ async def teacher_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
 
-async def handle_definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_definition_term(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
 
     # 🚪 Выход по кнопке
