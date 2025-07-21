@@ -473,25 +473,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     image = Image.open(BytesIO(original_photo_bytes)).convert("RGB")
     buffer = BytesIO()
-    image.save(buffer, format="JPEG", quality=80)
+    image.save(buffer, format="JPEG", quality=90)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
-
-    if context.user_data.get("awaiting_calendar_photo"):
-        context.user_data.pop("awaiting_calendar_photo", None)
-        await update.message.reply_text("🔎 Распознаю значения и формирую интерпретацию...")
-
-        result = await generate_news_from_image(image_base64)
-        if result:
-            await update.message.reply_text(
-                f"📈 Интерпретация по скриншоту:\n\n{result}",
-                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-            )
-        else:
-            await update.message.reply_text(
-                "⚠️ Не удалось распознать данные. Попробуй загрузить более чёткий скрин.",
-                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-            )
-        return
 
     selected_market = context.user_data.get("selected_market")
     if not selected_market:
@@ -511,44 +494,36 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- Fair Value Gaps (FVG), Order Blocks (OB)\n"
         "- Trendlines (diagonal and horizontal)\n"
         "- Fibonacci tools (retracement, extension, premium/discount zones)\n\n"
-        "🎯 Your task:\n"
-        "Generate a full swing trade plan based on the chart. Use visible confluence between structure, liquidity, imbalance, and Fibonacci if present.\n"
-        "If Fibonacci is not clearly visible — ignore it and proceed using BOS, CHoCH, candles and basic price structure.\n\n"
-        "✅ FORMAT (strictly reply in Russian):\n"
-        "1️⃣ Наблюдения (начинай с 🔹, опиши BOS, CHoCH, FVG, зоны ликвидности)\n"
-        "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
-        "3️⃣ Комментарий по риску\n"
-        "4️⃣ Смещение: BUY или SELL с пояснением\n"
-        "✅ Заверши 2 строками с выводом и эмодзи (например: «Покупка от зоны FVG + BOS 📈🟢»)\n\n"
-        "⚠️ Rules:\n"
-        "- Entry / Stop / TP are MANDATORY\n"
-        "- Risk/Reward must be ≥ 1.5. Explain if < 3.0\n"
-        "- If structure is unclear — estimate from candles and hints\n\n"
-        "🚫 ABSOLUTE:\n"
-        "- Reply strictly in Russian\n"
-        "- Never say 'I can't assist', 'not enough data', or similar\n"
-        "- No markdown. No English terms"
+        "\ud83c\udf1f Your task:\n"
+        "Generate a swing trade plan from the chart. Use visible confluence between structure, liquidity, imbalance, and Fibonacci if present.\n"
+        "If Fibonacci is not shown — ignore it and proceed.\n\n"
+        "\u2705 FORMAT (reply in Russian):\n"
+        "1\ufe0f\ufe0f\ufe0f \ud83d\udc40 Наблюдения\n"
+        "2\ufe0f\ufe0f\ufe0f \ud83d\udcca Entry / Stop / TakeProfit\n"
+        "3\ufe0f\ufe0f\ufe0f Риск\n"
+        "4\ufe0f\ufe0f\ufe0f Смещение: BUY / SELL\n"
+        "\u2705 Вывод с эмодзи\n\n"
+        "\u26a0\ufe0f RULES:\n"
+        "- Entry / Stop / TP обязательны\n"
+        "- Never say 'not enough info' or 'can't help'\n"
+        "- Even if chart is unclear — make assumptions\n"
+        "- Answer STRICTLY IN RUSSIAN"
     )
 
     analysis = ""
     for attempt in range(2):
         try:
-            current_prompt = prompt_text
+            prompt = prompt_text
             if attempt == 1:
-                current_prompt += (
-                    "\n\n🚨 SECOND ATTEMPT: You MUST provide Entry, StopLoss, TakeProfit — even if the chart is unclear. "
-                    "Estimate from price action and structure. Do not refuse. Reply strictly in Russian."
-                )
+                prompt += ("\n\nSECOND ATTEMPT: give Entry / StopLoss / TakeProfit no matter what. Estimate from price action. Answer in Russian. No refusals.")
 
             response = await client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": current_prompt},
-                        {"type": "image_url", "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        }}
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
                     ]
                 }],
                 max_tokens=1000
@@ -557,12 +532,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message = response.choices[0].message
             analysis = message.content.strip() if message and message.content else ""
 
-            # 🔒 Улучшенная защита от отказов
-            failure_phrases = [
-                "can't assist", "i'm sorry", "i cannot help", "not enough",
-                "недостаточно", "не могу помочь", "не удалось", "отказ", "insufficient"
-            ]
-            if any(phrase in analysis.lower() for phrase in failure_phrases) or len(analysis.strip()) < 50:
+            failure_phrases = ["can't assist", "i'm sorry", "cannot help", "not enough", "insufficient", "не могу", "извин", "отказ"]
+            if any(p in analysis.lower() for p in failure_phrases) or len(analysis) < 50:
                 analysis = ""
                 continue
 
@@ -570,21 +541,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
         except Exception as e:
-            logging.error(f"[handle_photo] GPT Vision error: {e}")
+            logging.error(f"[handle_photo] GPT error: {e}")
             continue
 
     if not analysis:
         await update.message.reply_text(
-            "⚠️ GPT не смог проанализировать этот скрин.\n\n"
-            "Проверь следующее:\n"
-            "• Сделай фон графика белым\n"
-            "• Удали лишние индикаторы (LuxAlgo, S&R и т.п.)\n"
-            "• Убедись, что видны BOS, CHoCH, зоны ликвидности и структура\n\n"
-            "📸 Затем отправь скрин снова."
+            "\u26a0\ufe0f GPT не дал ответ. \n"
+            "\u2022 Скрин слишком загружен индикаторами\n"
+            "\u2022 Или отсутствуют BOS / CHoCH / FVG\n"
+            "\ud83d\udcf8 Сделай более чистый скрин и повтори"
         )
         return
 
-    await update.message.reply_text(f"📉 Анализ графика по SMC:\n\n{analysis}")
+    await update.message.reply_text(f"📉 Анализ по SMC:\n\n{analysis}")
 
     def parse_price(raw_text):
         try:
