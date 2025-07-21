@@ -476,7 +476,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
-    # 📊 Интерпретация скриншота экономического календаря
+    # Интерпретация скриншота календаря
     if context.user_data.get("awaiting_calendar_photo"):
         context.user_data.pop("awaiting_calendar_photo", None)
         await update.message.reply_text("🔎 Распознаю значения и формирую интерпретацию...")
@@ -494,7 +494,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 📉 Анализ по графику
+    # Анализ по графику
     selected_market = context.user_data.get("selected_market")
     if not selected_market:
         keyboard = InlineKeyboardMarkup([
@@ -507,76 +507,43 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Выбор промпта
-    if user_id == 407721399:
-        prompt_text = (
-            f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years of experience in "
-            f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
-            "You are deeply skilled in:\n"
-            "- Market structure: BOS, CHoCH\n"
-            "- Liquidity grabs and internal/external liquidity\n"
-            "- Fair Value Gaps (Imbalance), Order Blocks (OB), POI\n"
-            "- OTE (Optimal Trade Entry), mitigation, premium/discount zones\n"
-            "- Trendlines (diagonal S/R), horizontal levels, S&D zones\n"
-            "- Fibonacci clusters: correction (retracement), projection, and extension\n\n"
-            "The chart includes multiple indicators such as:\n"
-            "- LuxAlgo SMC\n"
-            "- Support & Resistance Levels\n"
-            "- Fibonacci retracement/projection tools (cluster zones)\n"
-            "- Manually drawn trendlines and levels\n\n"
-            "🎯 Your task: Provide a full swing trade plan based on confluence from multiple tools.\n"
-            "Highlight areas where multiple tools align (e.g., FVG + Fibo + level).\n\n"
-            "✅ FORMAT (answer strictly in Russian):\n"
-            "1️⃣ Наблюдения (начинай каждое с 🔹, упоминай совпадения по уровням, Imbalance, Fibo)\n"
-            "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
-            "3️⃣ Комментарий по риску\n"
-            "4️⃣ Смещение (BUY или SELL)\n"
-            "✅ Заверши двумя строками резюме с эмодзи (например: «Покупка из кластера FVG + 0.618 📈🟢»)\n\n"
-            "📌 Rules:\n"
-            "- Risk/Reward должен быть минимум 1.5. Объясни, если < 3.0\n"
-            "- Entry должен быть достижимым\n"
-            "- Выбери только BUY или SELL и обоснуй\n"
-            "- Учитывай фибоначчи-кластеры и зоны совпадений\n\n"
-            "🚫 ABSOLUTE:\n"
-            "- Строгий ответ на русском\n"
-            "- Без markdown\n"
-            "- Без извинений и отказов\n"
-            "- Анализ обязателен. Даже если структура неочевидна — оцени по свечам, BOS/CHoCH и зонам"
-        )
-    else:
-        prompt_text = (
-            f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years experience in "
-            f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
-            "You are skilled in BOS, CHoCH, liquidity grabs, FVG, OTE, mitigation, POI, premium/discount zones.\n"
-            "The chart includes only:\n- LuxAlgo SMC\n- Support & Resistance Levels with Breaks\n\n"
-            "🎯 Your task: interpret the price action and produce a high-confidence swing trade plan with pending orders.\n\n"
-            "✅ FORMAT (your response must be in Russian):\n"
-            "1️⃣ Наблюдения (start each with 🔹)\n"
-            "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
-            "3️⃣ Комментарий по риску\n"
-            "4️⃣ Смещение (BUY или SELL)\n"
-            "✅ Заверши двумя строками резюме с эмодзи (e.g. «Покупка из дисконта 📈🟢»)\n\n"
-            "📌 Rules:\n"
-            "- Risk/Reward must be at least 1.5. If < 3.0, explain why it's acceptable.\n"
-            "- Entry must be realistic and reachable.\n"
-            "- Choose BUY or SELL (not both). Justify.\n"
-            "- Prefer confirmation-based entries.\n\n"
-            "🚫 ABSOLUTE:\n"
-            "- Reply STRICTLY in Russian\n"
-            "- No markdown\n"
-            "- No apologies or refusal\n"
-            "- Analysis is MANDATORY. If structure unclear — estimate from candles, BOS/CHoCH hints, zones."
-        )
+    # 🧠 PROMPT: SMC + Fibo (устойчивый, строго EN → ответ RU)
+    prompt_text = (
+        f"You are a world-class Smart Money Concepts (SMC) trader with 10+ years of experience in "
+        f"{'cryptocurrency' if selected_market == 'crypto' else 'forex'} markets.\n\n"
+        "You are highly skilled in:\n"
+        "- Market structure: BOS, CHoCH\n"
+        "- Liquidity zones (internal/external)\n"
+        "- Fair Value Gaps (FVG), Order Blocks (OB)\n"
+        "- Trendlines (diagonal and horizontal)\n"
+        "- Fibonacci tools (retracement, extension, premium/discount zones)\n\n"
+        "🎯 Your task:\n"
+        "Generate a full swing trade plan based on the provided chart. Use visible confluence from market structure, liquidity, imbalance, and if present — Fibonacci zones or clusters.\n"
+        "If Fibonacci is not clearly shown — ignore it and proceed using BOS/CHoCH, candles, and price structure.\n\n"
+        "✅ FORMAT (strictly reply in Russian):\n"
+        "1️⃣ Наблюдения (начинай с 🔹, комментируй BOS, CHoCH, FVG, зоны ликвидности)\n"
+        "2️⃣ План сделки: Entry / StopLoss / TakeProfit\n"
+        "3️⃣ Комментарий по риску (например: возврат в зону, откат от OB и т.д.)\n"
+        "4️⃣ Смещение: BUY или SELL и почему\n"
+        "✅ Заверши двумя строками резюме с эмодзи (например: «Покупка из FVG + BOS 📈🟢»)\n\n"
+        "⚠️ Rules:\n"
+        "- Entry / Stop / TP are MANDATORY. No excuses.\n"
+        "- Risk/Reward must be ≥ 1.5. Explain if < 3.0\n"
+        "- If structure is unclear — estimate based on candle shape and BOS/CHoCH hints\n\n"
+        "🚫 ABSOLUTE:\n"
+        "- Reply STRICTLY in Russian\n"
+        "- No markdown, no English, no refusals\n"
+        "- Never say 'I can't' — give a plan even if structure is weak"
+    )
 
-    # Запрос в GPT Vision
     analysis = ""
     for attempt in range(2):
         try:
             enhanced_prompt = prompt_text
             if attempt == 1:
                 enhanced_prompt += (
-                    "\n\n🚨 SECOND ATTEMPT: You MUST give Entry, StopLoss and TakeProfit even if chart lacks clarity. "
-                    "Estimate from candles and structure. Never say 'I can't'. Response MUST be in Russian. Format required."
+                    "\n\n🚨 SECOND ATTEMPT: You MUST provide Entry, StopLoss and TakeProfit even if the chart lacks clarity. "
+                    "Estimate from candles, BOS/CHoCH or price zones. Answer STRICTLY in Russian. Format REQUIRED."
                 )
 
             vision_response = await client.chat.completions.create(
