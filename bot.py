@@ -277,15 +277,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "market_crypto":
         context.user_data["selected_market"] = "crypto"
-        if user_id == 407721399:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🧠 У меня PRO-доступ на TradingView", callback_data="pro_access_confirm")],
-                [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
-            ])
-        else:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
-            ])
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
+        ])
         await query.edit_message_text(
             "📈 Smart Money Concepts (SMC) для крипты\n\n"
             "1️⃣ Сначала включи индикатор LazyScalp Board и проверь, чтобы DV ≥ 300M.\n"
