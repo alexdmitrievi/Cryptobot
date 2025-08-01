@@ -275,26 +275,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # --- Логика для выбора рынка (Crypto / Forex) ---
     if query.data == "market_crypto":
         context.user_data["selected_market"] = "crypto"
-
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
         ])
         await query.edit_message_text(
             "📈 Smart Money Concepts (SMC) для крипты\n\n"
-            "1️⃣ Сначала включи индикатор LazyScalp Board и проверь, чтобы DV ≥ 300M.\n"
-            "2️⃣ Потом отключи LazyScalp и включи два индикатора:\n"
+            "1️⃣ Включи индикатор LazyScalp Board и проверь, чтобы DV ≥ 300M.\n"
+            "2️⃣ Потом отключи LazyScalp и включи:\n"
             "- LuxAlgo SMC\n"
             "- Support & Resistance Levels\n\n"
             "📸 Чтобы я выдал максимально точный торговый план:\n"
-            "✅ Выбери таймфрейм 4H или 1H\n"
-            "✅ Убедись, что на скрине видны:\n"
-            "• Уровни BOS и CHoCH\n"
-            "• Поддержка и сопротивление\n"
-            "• Импульсы цены\n"
-            "• Зоны дисбаланса (imbalance)\n\n"
-            "📏 Хочешь ещё точнее? Нарисуй вручную горизонтальные уровни и наклонные линии тренда — я это тоже увижу и учту.\n\n"
+            "✅ Таймфрейм 4H или 1H\n"
+            "✅ Видны BOS, CHoCH, поддержка/сопротивление, импульсы цены, imbalance\n\n"
             "🔽 Пришли скрин — я выдам Entry / Stop / TakeProfit 💰",
             reply_markup=keyboard
         )
@@ -312,17 +307,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         await query.edit_message_text(
             "📈 Smart Money Concepts (SMC) для форекса\n\n"
-            "⚠️ На Forex нет централизованного объёма, поэтому сразу включи два индикатора:\n"
+            "⚠️ На Forex нет централизованного объёма, поэтому включи:\n"
             "- LuxAlgo SMC\n"
             "- Support & Resistance Levels\n\n"
             "📸 Чтобы получить точный разбор:\n"
-            "✅ Выбери таймфрейм 4H или 1H\n"
-            "✅ Убедись, что на скрине видны:\n"
-            "• BOS и CHoCH\n"
-            "• Поддержка и сопротивление\n"
-            "• Импульсы цены\n"
-            "• Зоны дисбаланса\n\n"
-            "📏 Рекомендуется вручную добавить горизонтальные уровни и линии тренда — это улучшит точность прогноза.\n\n"
+            "✅ Таймфрейм 4H или 1H\n"
+            "✅ Видны BOS, CHoCH, поддержка/сопротивление, импульсы цены, imbalance\n\n"
             "🔽 Пришли скрин — я сделаю SMC-анализ и выдам Entry / SL / TP 📊",
             reply_markup=keyboard
         )
@@ -332,7 +322,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             "🔓 Включён PRO-анализ графиков.\n\n"
             "Теперь я буду учитывать:\n"
-            "✅ Коррекцию / проекцию по Fibo\n"
+            "✅ Коррекцию/проекцию по Fibo\n"
             "✅ Наклонные и горизонтальные уровни\n"
             "✅ Зоны дисбаланса (FVG)\n"
             "✅ Совпадения по нескольким уровням фибоначчи (кластерные зоны)\n\n"
@@ -343,12 +333,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             "📸 Как правильно подготовить скрин для точного анализа:\n\n"
             "1. Таймфрейм: 4H или 1H\n"
-            "2. Белый фон графика (лучше видно уровни и свечи)\n"
-            "3. Включи только LuxAlgo SMC и Support & Resistance Levels\n"
-            "4. Удали лишние индикаторы (MACD, RSI и т.д.)\n"
+            "2. Белый фон графика\n"
+            "3. Включи LuxAlgo SMC и Support & Resistance Levels\n"
+            "4. Удали лишние индикаторы\n"
             "5. Видимость: BOS, CHoCH, импульсы, imbalance\n"
-            "6. Ручные уровни и наклонки — приветствуются!\n"
-            "7. Скрин без панелей, на весь экран\n\n"
+            "6. Ручные уровни и наклонки приветствуются\n"
+            "7. Скрин на весь экран, без панелей\n\n"
             "✅ Чем чище скрин, тем точнее Entry / Stop / TP.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("↩️ Вернуться к сигналу", callback_data="back_to_signal")]
@@ -367,6 +357,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard
         )
 
+    # --- Логика стратегии (новое) ---
+    elif query.data == "strategy_text":
+        context.user_data.clear()
+        context.user_data["awaiting_strategy"] = "text"
+        await query.message.reply_text(
+            "✍️ Напиши свою инвестиционную цель или вопрос. "
+            "Я составлю стратегию с учётом текущего рынка.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
+
+    elif query.data == "strategy_photo":
+        context.user_data.clear()
+        context.user_data["awaiting_strategy"] = "photo"
+        await query.message.reply_text(
+            "📸 Пришли скриншот позиции с Bybit или TradingView. "
+            "Я дам стратегию: покупки, усреднения и фиксацию прибыли.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
+
+    # --- Остальные кнопки ---
     elif query.data == "get_email":
         context.user_data["awaiting_email"] = True
         await query.message.reply_text(
@@ -698,6 +708,95 @@ def fetch_price_from_binance(symbol: str) -> float | None:
         logging.warning(f"[BINANCE] Ошибка получения цены для {symbol}: {e}")
         return None
 
+async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    photo = update.message.photo[-1]
+    file = await photo.get_file()
+    original_photo_bytes = await file.download_as_bytearray()
+
+    image = Image.open(BytesIO(original_photo_bytes)).convert("RGB")
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    image_base64 = base64.b64encode(buffer.getvalue()).decode()
+
+    # Новый инвест-промпт (вместо SMC-трейда)
+    prompt_text = (
+        "You are an elite investment strategist with 20+ years of experience in crypto, Forex, and stocks. "
+        "You analyze a screenshot (Bybit or TradingView) and provide a professional step-by-step INVESTMENT STRATEGY. "
+        "⚠️ Focus on investment logic (buying, averaging, profit-taking), not intraday trading.\n\n"
+
+        "📌 Your task:\n"
+        "- Identify the market context (trend, support, resistance, momentum).\n"
+        "- Suggest initial purchase and 1–2 averaging levels (DCA).\n"
+        "- Provide at least 2 TakeProfit targets.\n"
+        "- Define StopLoss for risk control (≤10% of deposit).\n"
+        "- Recommend position size for each step as % of deposit.\n"
+        "- Use simple, clear Russian. Answer without markdown, strictly in Russian.\n\n"
+
+        "⚖️ Style rules:\n"
+        "- Write confidently, no vague phrases like 'maybe' or 'probably'.\n"
+        "- Use short sentences (max 2–3 per block).\n"
+        "- Add emojis for clarity.\n\n"
+
+        "✅ Format:\n"
+        "🔹 Наблюдения:\n"
+        "…\n\n"
+        "🎯 План покупок и усреднения:\n"
+        "• Первая покупка: $...\n"
+        "• Усреднение 1: $...\n"
+        "• Усреднение 2: $...\n\n"
+        "📈 Фиксация прибыли:\n"
+        "• Частичная фиксация: $...\n"
+        "• Следующая цель: $...\n\n"
+        "🚨 Ограничение убытков:\n"
+        "• Стоп-лосс: $...\n\n"
+        "💰 Размер позиции:\n"
+        "• Первая покупка: ...% от депозита\n"
+        "• Усреднение 1: ...%\n"
+        "• Усреднение 2: ...%\n\n"
+        "📌 Комментарий:\n"
+        "…"
+    )
+
+    analysis = ""
+    for attempt in range(2):
+        try:
+            enhanced_prompt = prompt_text
+            if attempt == 1:
+                enhanced_prompt += (
+                    "\n\n🚨 STRICT ORDER: Даже если график тёмный, с низким контрастом или мало данных — "
+                    "ты ОБЯЗАН выдать уровни для покупок, усреднения, TakeProfit и StopLoss. "
+                    "Не отказывайся, оценивай по свечам и структуре. Стратегия обязательна."
+                )
+
+            analysis = await ask_gpt_vision(enhanced_prompt, image_base64)
+            logging.info(f"[handle_strategy_photo attempt {attempt}] Raw GPT analysis:\n{analysis}")
+
+            if any(x in analysis.lower() for x in ["sorry", "can't assist", "i cannot", "unable to"]):
+                continue
+            if analysis:
+                break
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logging.error(f"[handle_strategy_photo retry {attempt}] GPT Vision error: {e}")
+
+    if not analysis or "can't assist" in analysis.lower():
+        await update.message.reply_text(
+            "⚠️ GPT не смог составить стратегию по этому скрину.\n\n"
+            "Попробуй улучшить:\n"
+            "• Сделай фон графика белым\n"
+            "• Удали лишние индикаторы\n"
+            "• Добавь вручную уровни поддержки/сопротивления\n\n"
+            "Загрузи скрин ещё раз 🔁"
+        )
+        return
+
+    # Отправляем итог пользователю
+    await update.message.reply_text(
+        f"📊 Инвестиционная стратегия по твоему скрину:\n\n{analysis}",
+        reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+    )
+    context.user_data.clear()
 
 async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1011,13 +1110,16 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 💡 Стратегия
+    # 💡 Стратегия (с выбором формата)
     if text == "💡 Стратегия":
-        context.user_data["awaiting_invest_question"] = True
+        context.user_data.clear()
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✍️ Написать текст", callback_data="strategy_text")],
+            [InlineKeyboardButton("📸 Отправить скрин", callback_data="strategy_photo")]
+        ])
         await update.message.reply_text(
-            "✍️ Напиши свой вопрос или опиши свою инвестиционную цель, "
-            "чтобы я составил стратегию с учётом текущих цен BTC/ETH и рекомендациями по диверсификации.",
-            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+            "👇 Выберите формат стратегии:",
+            reply_markup=keyboard
         )
         return
 
@@ -1041,6 +1143,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 📖 Обучение
     if text == "📖 Обучение":
+        context.user_data.clear()
         context.user_data["awaiting_teacher_question"] = True
         await update.message.reply_text(
             "✍️ Напиши свой вопрос — я отвечу как преподаватель с 20+ годами опыта в трейдинге и инвестициях.",
@@ -1050,6 +1153,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 📚 Термин
     if text == "📚 Термин":
+        context.user_data.clear()
         context.user_data["awaiting_definition_term"] = True
         await update.message.reply_text(
             "✍️ Напиши термин, который нужно объяснить.",
@@ -1128,7 +1232,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
         return SETUP_1
 
-    # ✅ Обработка открытых диалогов для всех режимов
+    # ✅ Обработка открытых диалогов
     if context.user_data.get("awaiting_invest_question"):
         return await handle_invest_question(update, context)
     if context.user_data.get("awaiting_teacher_question"):
@@ -1140,7 +1244,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_uid"):
         return await handle_uid_submission(update, context)
 
-    # ↩️ Вернуться в меню (универсальный выход)
+    # ↩️ Универсальный выход
     if text in ["↩️ Вернуться в меню", "↩️ Выйти в меню"]:
         context.user_data.clear()
         await update.message.reply_text(
@@ -1442,9 +1546,11 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Не удалось выгрузить пользователей.")
 
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    # Проверка, что это сообщение содержит текст или фото
+    text = update.message.text.strip() if update.message.text else None
+    has_photo = bool(update.message.photo)
 
-    # ✅ Явная проверка на текстовые "/start" и "/restart"
+    # ✅ Явная проверка на команды
     if text == "/start":
         await start(update, context)
         return
@@ -1454,13 +1560,12 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # ✅ Блок обработки email
     if context.user_data.get("awaiting_email"):
-        email = text
-        if "@" in email and "." in email:
+        if text and "@" in text and "." in text:
             try:
                 sheet.append_row([
                     str(update.effective_user.id),
                     update.effective_user.username or "",
-                    email
+                    text
                 ])
                 await update.message.reply_text(
                     "✅ Email сохранён! Бонус придёт в ближайшее время."
@@ -1481,12 +1586,34 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # ✅ Остальные режимы
     if context.user_data.get("awaiting_potential"):
         await handle_potential(update, context)
+
     elif context.user_data.get("awaiting_definition_term"):
         await handle_definition_term(update, context)
+
     elif context.user_data.get("awaiting_invest_question"):
         await handle_invest_question(update, context)
+
     elif context.user_data.get("awaiting_teacher_question"):
         await teacher_response(update, context)
+
+    elif context.user_data.get("awaiting_strategy") == "text":
+        # Режим стратегии через текст
+        if text:
+            await handle_strategy_text(update, context)
+        else:
+            await update.message.reply_text(
+                "❌ Для текстовой стратегии нужно отправить текстовое сообщение."
+            )
+
+    elif context.user_data.get("awaiting_strategy") == "photo":
+        # Режим стратегии через фото
+        if has_photo:
+            await handle_strategy_photo(update, context)
+        else:
+            await update.message.reply_text(
+                "❌ Для стратегии по скриншоту отправьте фото."
+            )
+
     else:
         await handle_main(update, context)
 
@@ -1607,10 +1734,9 @@ def main():
     app.add_handler(risk_calc_handler)
     app.add_handler(setup_handler)
 
-    # ✅ CallbackQuery, фото и текстовые
+    # ✅ CallbackQuery и универсальный обработчик текста/фото
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main))
+    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, unified_text_handler))
 
     # 🚀 Запуск polling
     app.run_polling()
