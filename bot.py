@@ -814,14 +814,14 @@ async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return
 
-async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_strategy_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
 
     # 🚪 Выход по кнопке
     if user_text == "↩️ Выйти в меню":
-        context.user_data.pop("awaiting_invest_question", None)
+        context.user_data.pop("awaiting_strategy", None)
         await update.message.reply_text(
-            "🔙 Ты вышел из режима стратегий. Возвращаемся в главное меню.",
+            "🔙 Ты вышел из режима стратегии. Возвращаемся в главное меню.",
             reply_markup=REPLY_MARKUP
         )
         return
@@ -835,10 +835,10 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         btc_price = float(btc_data["price"])
         eth_price = float(eth_data["price"])
     except Exception as e:
-        logging.error(f"[handle_invest_question] Binance price fetch error: {e}")
+        logging.error(f"[handle_strategy_text] Binance price fetch error: {e}")
         btc_price = eth_price = None
 
-    # 🧠 Усиленный промпт на английском
+    # 🧠 Промпт для GPT
     prompt = (
         "You are a top-tier investment strategist with over 20 years of experience in multi-asset portfolio management. "
         "You specialize in creating fully personalized investment strategies specifically for Russian-speaking clients. "
@@ -849,7 +849,7 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         "- Forex pairs: EUR/USD, GBP/USD, etc.\n"
         "- Moscow Exchange instruments: Russian stocks, OFZ bonds, FinEx ETFs\n"
         "- Gold/silver only via MOEX futures or unallocated metal accounts (ОМС)\n\n"
-        "🚫 DO NOT mention Eurobonds, foreign brokers, or international ETFs — these are strictly forbidden.\n\n"
+        "🚫 DO NOT mention Eurobonds, foreign brokers, or international ETFs — strictly forbidden.\n\n"
 
         f"🧑‍💬 The client's question or investment goal is:\n{user_text}\n\n"
 
@@ -862,39 +862,39 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         "Make it friendly, structured, easy to read, and 100% suitable for Telegram.\n\n"
 
         "⚠️ MANDATORY RULES:\n"
-        "- Your reply must be entirely in Russian — no English words without explanation.\n"
-        "- Use no markdown (no **bold**, _italics_, etc.)\n"
+        "- Answer strictly in Russian — no English words without explanation.\n"
+        "- No markdown (no **bold**, _italics_, etc.)\n"
         "- Each section must be clearly separated with emojis and headers.\n"
         "- Use short paragraphs (1–3 sentences max) for readability.\n"
-        "- Make it beginner-friendly and emotionally supportive.\n\n"
+        "- Beginner-friendly and emotionally supportive.\n\n"
 
         "📦 REQUIRED FORMAT:\n\n"
 
         "1️⃣ 👤 Профиль инвестора\n"
-        "- Estimate the investor’s risk tolerance and horizon.\n"
-        "- Identify their goal: savings, preservation, or passive income.\n\n"
+        "- Оцени риск-профиль и горизонт инвестора.\n"
+        "- Определи его цель: накопление, сохранение капитала или пассивный доход.\n\n"
 
         "2️⃣ 📊 Рекомендуемый портфель\n"
-        "- Allocate assets between crypto, Forex, MOEX, and metals.\n"
-        "- For each asset class, briefly explain why it’s included.\n\n"
+        "- Распредели активы между криптой, Forex, MOEX и металлами.\n"
+        "- Для каждого класса укажи причины включения.\n\n"
 
         "3️⃣ 🛡️ Управление рисками\n"
-        "- Explain position sizing, averaging, profit-taking, and stop-loss basics.\n\n"
+        "- Объясни принципы размера позиций, усреднения, фиксации прибыли и стопов.\n\n"
 
         "4️⃣ 🌐 Защита от рыночных рисков\n"
-        "- What risks exist and how portfolio structure helps mitigate them.\n\n"
+        "- Опиши риски и как портфельная структура их снижает.\n\n"
 
         "5️⃣ 🚀 План действий\n"
-        "- What to do immediately: open account, where to begin.\n\n"
+        "- Конкретные шаги прямо сейчас: где открыть счёт, с чего начать.\n\n"
 
         "6️⃣ 📈📉 Сценарии рынка\n"
-        "- What to do if the market goes up or down.\n\n"
+        "- Дай план на случай роста и падения.\n\n"
 
         "7️⃣ ✅ Заключение\n"
-        "- Wrap up with 2–3 warm lines of encouragement, with emojis.\n\n"
+        "- 2–3 тёплые строки поддержки с эмодзи.\n\n"
 
-        "🧠 Always imagine you're talking to a beginner who trusts you.\n"
-        "Your mission is to inspire, guide, and protect their capital.\n"
+        "🧠 Всегда говори так, будто клиент — новичок, который доверяет тебе. "
+        "Твоя задача — вдохновить, направить и защитить его капитал.\n"
     )
 
     try:
@@ -918,7 +918,7 @@ async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_T
         )
 
     except Exception as e:
-        logging.error(f"[handle_invest_question] GPT error: {e}")
+        logging.error(f"[handle_strategy_text] GPT error: {e}")
         await update.message.reply_text(
             "⚠️ GPT временно недоступен. Попробуй позже.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
