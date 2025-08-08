@@ -10,11 +10,10 @@ import hmac
 import hashlib
 import base64
 import csv
-import unicodedata  # защита от битых Unicode
+import unicodedata
 from datetime import datetime
 from io import BytesIO
 from urllib.parse import urlencode
-from aiohttp import web
 
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
@@ -31,9 +30,12 @@ from telegram.ext import (
 from openai import AsyncOpenAI
 from PIL import Image
 
-# 📊 Google Sheets API
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+
+import aiocron
+from tenacity import retry, wait_fixed, stop_after_attempt
+
 
 # 🔄 AioCron для еженедельных рассылок
 import aiocron
@@ -1435,16 +1437,14 @@ async def send_payment_link(update, context):
     ])
     await update.message.reply_text("💵 Выбери вариант доступа к GPT‑Трейдеру:", reply_markup=keyboard)
 
-# ✅ Webhook от CryptoCloud
 @app_flask.route("/cryptocloud_webhook", methods=["POST"])
 def cryptocloud_webhook():
     body = request.get_data()
     signature = request.headers.get("X-Signature-SHA256") or ""
     calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest()
 
-    # Безопасное сравнение подписи
     if not hmac.compare_digest(signature, calc_sig):
-        logging.warning(f"⚠ Неверная подпись IPN: {signature} != {calc_sig}")
+        logging.warning("⚠ Неверная подпись IPN")
         return jsonify({"status": "invalid signature"}), 400
 
     data = request.json or {}
@@ -1452,11 +1452,6 @@ def cryptocloud_webhook():
 
     if data.get("status") == "paid":
         raw_order_id = (data.get("order_id") or "").strip()
-
-        # Ожидаемые форматы:
-        # 1) user_{user_id}_{username}_{plan}
-        # 2) user_{user_id}_{plan}
-        # 3) user_{user_id}
         user_id = None
         username = ""
         plan = "unknown"
@@ -1465,8 +1460,7 @@ def cryptocloud_webhook():
             if not raw_order_id.startswith("user_"):
                 raise ValueError(f"Unexpected order_id prefix: {raw_order_id}")
 
-            rest = raw_order_id[len("user_"):]  # "12345_username_with_underscores_monthly" | "12345_monthly" | "12345"
-            # выцепляем user_id (первая часть до "_", либо вся строка)
+            rest = raw_order_id[len("user_"):]
             if "_" in rest:
                 uid_str, remainder = rest.split("_", 1)
             else:
@@ -1475,11 +1469,9 @@ def cryptocloud_webhook():
             user_id = int(uid_str)
 
             if remainder:
-                # если есть остаток, последний сегмент — план, всё до него — username (может содержать "_")
                 if "_" in remainder:
                     username, plan = remainder.rsplit("_", 1)
                 else:
-                    # формата username нет — значит это был план
                     username, plan = "", remainder
 
             plan = (plan or "unknown").lower()
@@ -1490,10 +1482,8 @@ def cryptocloud_webhook():
             logging.error(f"❌ Ошибка парсинга order_id='{raw_order_id}': {e}")
             return jsonify({"status": "bad order_id"}), 400
 
-        # ✅ Активируем доступ
         ALLOWED_USERS.add(user_id)
 
-        # ✅ Пишем в Google Sheets: user_id, username, datetime, plan
         try:
             safe_append_row([
                 str(user_id),
@@ -1504,18 +1494,18 @@ def cryptocloud_webhook():
         except Exception as e:
             logging.error(f"❌ Ошибка записи в Google Sheets: {e}")
 
-        # ✅ Уведомляем через Telegram (асинхронно в loop бота)
         try:
             asyncio.run_coroutine_threadsafe(
                 notify_user_payment(user_id),
                 app_flask.loop
             )
         except Exception as e:
-            logging.error(f"❌ Не удалось запустить уведомление пользователю {user_id}: {e}")
+            logging.error(f"❌ Не удалось запланировать уведомление {user_id}: {e}")
 
         logging.info(f"🎉 Пользователь {user_id} активирован! План: {plan}, username: '{username}'")
 
     return jsonify({"ok": True})
+
 
 # 🚀 Запуск Flask в отдельном потоке с loop
 def run_flask(loop):
@@ -1763,6 +1753,7 @@ def main():
 
     # 🚀 Главный asyncio loop
     loop = asyncio.get_event_loop()
+    threading.Thread(target=run_flask, args=(loop,), daemon=True).start()
 
     # 🚀 Flask webhook (для CryptoCloud) в отдельном потоке
     threading.Thread(target=run_flask, args=(loop,)).start()
