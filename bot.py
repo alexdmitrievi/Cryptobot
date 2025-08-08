@@ -14,6 +14,7 @@ import unicodedata  # ✅ Добавлено для защиты от битых
 from datetime import datetime
 from io import BytesIO
 from bs4 import BeautifulSoup
+from urllib.parse import urlencode
 
 from telegram import (
     Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
@@ -43,8 +44,6 @@ import aiocron
 
 # ✅ Для защиты от rate limit Google Sheets
 from tenacity import retry, wait_fixed, stop_after_attempt
-
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 global_bot = None
 
@@ -98,6 +97,11 @@ def load_allowed_users():
 ALLOWED_USERS = set()
 ALLOWED_USERS_TIMESTAMP = 0
 
+MONTHLY_PRICE_USD = 25
+LIFETIME_PRICE_USD = 199
+PAY_CURRENCY = "USDT"
+PAY_NETWORK = "TRC20"
+
 def get_allowed_users():
     global ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP
     if time.time() - ALLOWED_USERS_TIMESTAMP > 300:
@@ -113,9 +117,9 @@ PENDING_USERS = {}
 RECEIVED_MEMOS = set()
 
 reply_keyboard = [
-    ["💡 Стратегия", "🚀 Сигнал", "🔍 Анализ"],
+    ["💡 Инвестор", "🚀 Трейдер", "🔍 Новости"],
     ["📖 Обучение", "📚 Термин", "🌱 Психолог"],
-    ["🎯 Риск", "💸 Криптообмен"],
+    ["🎯 Калькулятор", "💸 Криптообмен"],
     ["💰 Купить", "ℹ️ О боте"],
     ["🔗 Бесплатный доступ через брокера"],
     ["📌 Сетап"]
@@ -238,7 +242,10 @@ async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def check_access(update: Update):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS:
-        await update.message.reply_text("🔒 Доступ ограничен. Подключи помощника за $49.", reply_markup=REPLY_MARKUP)
+        await update.message.reply_text(
+            f"🔒 Доступ ограничен. Подключи помощника: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.",
+            reply_markup=REPLY_MARKUP
+        )
         return False
     return True
 
@@ -522,7 +529,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     use_pro = context.user_data.get("use_pro") is True and user_id == 407721399
 
     prompt_text = (
-        f"You are a professional SMC (Smart Money Concepts) trader with 10+ years experience in "
+        f"You are a professional SMC (Smart Money Concepts) trader with 20+ years experience in "
         f"{'crypto' if selected_market == 'crypto' else 'forex'} markets. "
         "You master BOS, CHoCH, liquidity grabs, imbalance zones, OTE, premium/discount levels.\n\n"
         "The chart includes only:\n"
@@ -719,26 +726,38 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
     image.save(buffer, format="JPEG", quality=85)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
-    # Новый инвест-промпт (вместо SMC-трейда)
+    # Base EN prompt (answer strictly in Russian, with quality control)
     prompt_text = (
-        "You are an elite investment strategist with 20+ years of experience in crypto, Forex, and stocks. "
-        "You analyze a screenshot (Bybit or TradingView) and provide a professional step-by-step INVESTMENT STRATEGY. "
-        "⚠️ Focus on investment logic (buying, averaging, profit-taking), not intraday trading.\n\n"
+        "You are an ELITE MULTI-ASSET STRATEGIST with over 20 years of institutional experience in Smart Money Concepts (SMC), "
+        "portfolio management, and risk control across crypto, Forex, and global stocks. "
+        "You combine the precision of a professional fund manager, the market-structure expertise of an SMC trader, "
+        "and the discipline of a senior risk manager.\n\n"
 
-        "📌 Your task:\n"
-        "- Identify the market context (trend, support, resistance, momentum).\n"
-        "- Suggest initial purchase and 1–2 averaging levels (DCA).\n"
-        "- Provide at least 2 TakeProfit targets.\n"
-        "- Define StopLoss for risk control (≤10% of deposit).\n"
-        "- Recommend position size for each step as % of deposit.\n"
-        "- Use simple, clear Russian. Answer without markdown, strictly in Russian.\n\n"
+        "You will receive a trading chart screenshot (Bybit or TradingView) and MUST produce a COMPLETE, ACTIONABLE, STEP-BY-STEP "
+        "investment strategy focused on swing and position trading (buying, averaging, profit-taking) — NOT intraday scalping.\n\n"
+
+        "📌 Your analysis must include:\n"
+        "1. Market context (trend, support/resistance, momentum, volatility).\n"
+        "2. Exact numeric levels for Initial Buy and 1–2 Averaging levels (DCA) — two decimal places, no ranges.\n"
+        "3. Two exact numeric TakeProfit targets.\n"
+        "4. One exact numeric StopLoss (≤10% of total deposit risk).\n"
+        "5. Position size for each step as a percentage of deposit.\n"
+        "6. Key risks and protective measures.\n"
+        "7. Assumptions: if data is unclear, deduce levels from candle bodies/wicks, last swing high/low, visible S/R, round-number magnets (00/50), and recent ATR.\n"
+        "8. Confidence (0–100%) and Invalidation (when the plan is wrong).\n"
+        "9. Data that would improve accuracy (max 2 items).\n\n"
 
         "⚖️ Style rules:\n"
-        "- Write confidently, no vague phrases like 'maybe' or 'probably'.\n"
-        "- Use short sentences (max 2–3 per block).\n"
-        "- Add emojis for clarity.\n\n"
+        "- ALWAYS answer strictly in Russian language.\n"
+        "- No markdown formatting.\n"
+        "- Speak with absolute confidence — no vague phrases like 'maybe' or 'probably'.\n"
+        "- Use short, impactful sentences (max 2–3 per block).\n"
+        "- Add relevant emojis for clarity.\n"
+        "- Do not leave any section empty.\n"
+        "- Do not repeat the same number in different blocks without explanation.\n"
+        "- Sanity-check before answering: TP1 > Entry; SL < Entry (for long); sum of position % ≤ 100%; all numbers unique unless justified.\n\n"
 
-        "✅ Format:\n"
+        "✅ Output Format:\n"
         "🔹 Наблюдения:\n"
         "…\n\n"
         "🎯 План покупок и усреднения:\n"
@@ -755,43 +774,72 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         "• Усреднение 1: ...%\n"
         "• Усреднение 2: ...%\n\n"
         "📌 Комментарий:\n"
-        "…"
+        "…\n\n"
+        "📝 Assumptions:\n"
+        "…\n\n"
+        "📊 Confidence: ...%\n"
+        "❌ Invalidation:\n"
+        "…\n\n"
+        "ℹ️ Data to improve accuracy:\n"
+        "1. ...\n"
+        "2. ..."
     )
+
+    # Retry prompt — zero tolerance to refusal, with fallback heuristics
+    retry_prompt_text = (
+        prompt_text +
+        "\n\n🚨 FINAL STRICT ORDER (NO EXCEPTIONS):\n"
+        "- Even if the chart is dark, low contrast, cropped, or contains limited data — you MUST still provide full numeric strategy levels.\n"
+        "- It is FORBIDDEN to say there is not enough information or that you cannot assist.\n"
+        "- If confidence is below 70%, still provide all levels but mark ⚠️ in the comment.\n"
+        "- Every section is MANDATORY and cannot be empty.\n"
+        "- Use fallback heuristics: candle bodies/wicks, swing structure, round-number magnets, ATR-based projections.\n"
+        "- Assume missing market details explicitly and proceed."
+    )
+
+    # Common refusal markers (EN/RU)
+    refusal_markers = [
+        "sorry", "can't assist", "cannot assist", "i cannot", "unable to", "not enough information",
+        "insufficient data", "i don't have", "can't help",
+        "не могу", "не в состоянии", "я не могу", "недостаточно данных", "недостаточно информации",
+        "извини", "простите", "нет данных"
+    ]
 
     analysis = ""
     for attempt in range(2):
         try:
-            enhanced_prompt = prompt_text
-            if attempt == 1:
-                enhanced_prompt += (
-                    "\n\n🚨 STRICT ORDER: Даже если график тёмный, с низким контрастом или мало данных — "
-                    "ты ОБЯЗАН выдать уровни для покупок, усреднения, TakeProfit и StopLoss. "
-                    "Не отказывайся, оценивай по свечам и структуре. Стратегия обязательна."
-                )
-
+            enhanced_prompt = prompt_text if attempt == 0 else retry_prompt_text
             analysis = await ask_gpt_vision(enhanced_prompt, image_base64)
             logging.info(f"[handle_strategy_photo attempt {attempt}] Raw GPT analysis:\n{analysis}")
 
-            if any(x in analysis.lower() for x in ["sorry", "can't assist", "i cannot", "unable to"]):
+            if not analysis:
+                await asyncio.sleep(0.5)
                 continue
-            if analysis:
-                break
-            await asyncio.sleep(0.5)
+
+            low = analysis.lower()
+            if any(marker in low for marker in refusal_markers):
+                continue
+
+            if len(analysis.strip()) < 200:
+                continue
+
+            break
+
         except Exception as e:
             logging.error(f"[handle_strategy_photo retry {attempt}] GPT Vision error: {e}")
 
-    if not analysis or "can't assist" in analysis.lower():
+    if (not analysis) or any(m in analysis.lower() for m in refusal_markers):
         await update.message.reply_text(
             "⚠️ GPT не смог составить стратегию по этому скрину.\n\n"
             "Попробуй улучшить:\n"
             "• Сделай фон графика белым\n"
             "• Удали лишние индикаторы\n"
+            "• Покажи больше истории цены (прокрути влево)\n"
             "• Добавь вручную уровни поддержки/сопротивления\n\n"
             "Загрузи скрин ещё раз 🔁"
         )
         return
 
-    # Отправляем итог пользователю
     await update.message.reply_text(
         f"📊 Инвестиционная стратегия по твоему скрину:\n\n{analysis}",
         reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
@@ -802,7 +850,7 @@ async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS:
         await update.message.reply_text(
-            "🔒 Доступ только после активации подписки за 49$.",
+            "🔒 Доступ только после активации: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.",
             reply_markup=REPLY_MARKUP
         )
         return
@@ -1105,13 +1153,13 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🚪 Проверка доступа
     if user_id not in ALLOWED_USERS and text not in ["💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера"]:
         await update.message.reply_text(
-            "🔒 Доступ только после активации подписки за $49 или через брокера.",
+            "🔒 Доступ только после активации: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD}. Либо через брокера.",
             reply_markup=REPLY_MARKUP
         )
         return
 
-    # 💡 Стратегия (с выбором формата)
-    if text == "💡 Стратегия":
+    # 💡 Инвестор (с выбором формата)
+    if text == "💡 Инвестор":
         context.user_data.clear()
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✍️ Написать текст", callback_data="strategy_text")],
@@ -1132,7 +1180,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await start_therapy(update, context)
 
     # 🔍 Анализ
-    if text == "🔍 Анализ":
+    if text == "🔍 Новости":
         context.user_data.clear()
         context.user_data["awaiting_calendar_photo"] = True
         await update.message.reply_text(
@@ -1162,7 +1210,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # 🚀 Сигнал
-    if text == "🚀 Сигнал":
+    if text == "🚀 Трейдер":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💎 Crypto", callback_data="market_crypto")],
             [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
@@ -1325,65 +1373,120 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
 
-# 🚀 Функция генерации ссылки POS для Telegram
+def sanitize_username(u: str | None) -> str:
+    if not u:
+        return "nouser"
+    # оставляем только [A-Za-z0-9_], режем до 32 символов
+    return re.sub(r"[^\w]+", "", u)[:32]
+
+# 🚀 Функция генерации ссылок POS: месяц и навсегда (с username в order_id)
 async def send_payment_link(update, context):
     user_id = update.effective_user.id
-    pay_link = (
-        f"https://pay.cryptocloud.plus/pos/{CRYPTOCLOUD_SHOP_ID}"
-        f"?amount=25&currency=USDT&network=TRC20&order_id=user_{user_id}&desc=GPT_Trader_Bot"
-    )
+    uname = sanitize_username(update.effective_user.username)
+
+    monthly_qs = urlencode({
+        "amount": MONTHLY_PRICE_USD,
+        "currency": PAY_CURRENCY,
+        "network": PAY_NETWORK,
+        "order_id": f"user_{user_id}_{uname}_monthly",
+        "desc": "GPT_Trader_Monthly"
+    })
+    lifetime_qs = urlencode({
+        "amount": LIFETIME_PRICE_USD,
+        "currency": PAY_CURRENCY,
+        "network": PAY_NETWORK,
+        "order_id": f"user_{user_id}_{uname}_lifetime",
+        "desc": "GPT_Trader_Lifetime"
+    })
+
+    monthly_link  = f"https://pay.cryptocloud.plus/pos/{CRYPTOCLOUD_SHOP_ID}?{monthly_qs}"
+    lifetime_link = f"https://pay.cryptocloud.plus/pos/{CRYPTOCLOUD_SHOP_ID}?{lifetime_qs}"
+
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Оплатить через CryptoCloud", url=pay_link)]
+        [InlineKeyboardButton(f"💳 Оплатить ${MONTHLY_PRICE_USD}/мес", url=monthly_link)],
+        [InlineKeyboardButton(f"🏆 Разово ${LIFETIME_PRICE_USD} навсегда", url=lifetime_link)]
     ])
-    await update.message.reply_text(
-        "💵 Перейдите по кнопке для оплаты подписки GPT Trader Bot:",
-        reply_markup=keyboard
-    )
-
-# 🚀 Flask webhook для IPN от POS с проверкой HMAC
-app_flask = Flask(__name__)
-
-# ✅ Healthcheck endpoint
-@app_flask.route("/")
-def index():
-    return jsonify({"status": "ok", "allowed_users": len(get_allowed_users())})
+    await update.message.reply_text("💵 Выбери вариант доступа к GPT‑Трейдеру:", reply_markup=keyboard)
 
 # ✅ Webhook от CryptoCloud
 @app_flask.route("/cryptocloud_webhook", methods=["POST"])
 def cryptocloud_webhook():
     body = request.get_data()
-    signature = request.headers.get("X-Signature-SHA256")
+    signature = request.headers.get("X-Signature-SHA256") or ""
     calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest()
 
-    if signature != calc_sig:
+    # Безопасное сравнение подписи
+    if not hmac.compare_digest(signature, calc_sig):
         logging.warning(f"⚠ Неверная подпись IPN: {signature} != {calc_sig}")
-        return jsonify({"status": "invalid signature"})
+        return jsonify({"status": "invalid signature"}), 400
 
-    data = request.json
+    data = request.json or {}
     logging.info(f"✅ IPN от CryptoCloud:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
 
     if data.get("status") == "paid":
-        order_id = data.get("order_id")
-        if order_id and order_id.startswith("user_"):
-            try:
-                user_id = int(order_id.split("_")[1])
-            except (IndexError, ValueError):
-                logging.error(f"❌ Ошибка парсинга user_id в order_id: {order_id}")
-                return jsonify({"status": "bad order_id"})
+        raw_order_id = (data.get("order_id") or "").strip()
 
-            username = order_id.split("_")[2] if len(order_id.split("_")) > 2 else ""
+        # Ожидаемые форматы:
+        # 1) user_{user_id}_{username}_{plan}
+        # 2) user_{user_id}_{plan}
+        # 3) user_{user_id}
+        user_id = None
+        username = ""
+        plan = "unknown"
 
-            # ✅ Добавляем пользователя в кеш
-            ALLOWED_USERS.add(user_id)
-            # ✅ Записываем в Google Sheets
-            safe_append_row([str(user_id), username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+        try:
+            if not raw_order_id.startswith("user_"):
+                raise ValueError(f"Unexpected order_id prefix: {raw_order_id}")
 
-            # ✅ Уведомляем через Telegram
+            rest = raw_order_id[len("user_"):]  # "12345_username_with_underscores_monthly" | "12345_monthly" | "12345"
+            # выцепляем user_id (первая часть до "_", либо вся строка)
+            if "_" in rest:
+                uid_str, remainder = rest.split("_", 1)
+            else:
+                uid_str, remainder = rest, ""
+
+            user_id = int(uid_str)
+
+            if remainder:
+                # если есть остаток, последний сегмент — план, всё до него — username (может содержать "_")
+                if "_" in remainder:
+                    username, plan = remainder.rsplit("_", 1)
+                else:
+                    # формата username нет — значит это был план
+                    username, plan = "", remainder
+
+            plan = (plan or "unknown").lower()
+            if plan not in {"monthly", "lifetime"}:
+                plan = "unknown"
+
+        except Exception as e:
+            logging.error(f"❌ Ошибка парсинга order_id='{raw_order_id}': {e}")
+            return jsonify({"status": "bad order_id"}), 400
+
+        # ✅ Активируем доступ
+        ALLOWED_USERS.add(user_id)
+
+        # ✅ Пишем в Google Sheets: user_id, username, datetime, plan
+        try:
+            safe_append_row([
+                str(user_id),
+                username,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                plan
+            ])
+        except Exception as e:
+            logging.error(f"❌ Ошибка записи в Google Sheets: {e}")
+
+        # ✅ Уведомляем через Telegram (асинхронно в loop бота)
+        try:
             asyncio.run_coroutine_threadsafe(
                 notify_user_payment(user_id),
                 app_flask.loop
             )
-            logging.info(f"🎉 Пользователь {user_id} ({username}) активирован через POS!")
+        except Exception as e:
+            logging.error(f"❌ Не удалось запустить уведомление пользователю {user_id}: {e}")
+
+        logging.info(f"🎉 Пользователь {user_id} активирован! План: {plan}, username: '{username}'")
 
     return jsonify({"ok": True})
 
@@ -1416,8 +1519,8 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎯 Плюс:\n"
         "• VIP-сетапы с уровнями, которые публикуем в канал\n"
         "• Курс по скальпингу и позиционке (10+ уроков и PDF)\n\n"
-        "🚀 *Подключи GPT-Трейдера всего за $49 и получи доступ навсегда.*\n\n"
-        "💰 Не плати каждый месяц — активируй один раз и используй сколько хочешь.\n\n"
+        f"🚀 *Подключи GPT-Трейдера — ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.*\n\n"
+        "💰 Выбирай: подписка или разовый платёж на бессрочный доступ.\n\n"
         "💬 Задай вопрос 👉 [@zhbankov_alex](https://t.me/zhbankov_alex)\n"
         "👥 Чат для трейдеров 👉 [ai4traders_chat](https://t.me/ai4traders_chat)"
     )
