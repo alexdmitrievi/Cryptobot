@@ -10,11 +10,13 @@ import hmac
 import hashlib
 import base64
 import csv
-import unicodedata  # ✅ Добавлено для защиты от битых Unicode
+import unicodedata  # защита от битых Unicode
 from datetime import datetime
 from io import BytesIO
-from bs4 import BeautifulSoup
 from urllib.parse import urlencode
+
+from bs4 import BeautifulSoup
+from flask import Flask, request, jsonify
 
 from telegram import (
     Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
@@ -25,10 +27,6 @@ from telegram.ext import (
     ContextTypes, filters, ConversationHandler
 )
 
-from config import (
-    TELEGRAM_TOKEN, OPENAI_API_KEY, TON_API_TOKEN,
-    CRYPTOCLOUD_API_KEY, CRYPTOCLOUD_SHOP_ID, API_SECRET
-)
 from openai import AsyncOpenAI
 from PIL import Image
 
@@ -36,14 +34,17 @@ from PIL import Image
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# 🔥 Flask для webhook от CryptoCloud POS
-from flask import Flask, request, jsonify
-
 # 🔄 AioCron для еженедельных рассылок
 import aiocron
 
 # ✅ Для защиты от rate limit Google Sheets
 from tenacity import retry, wait_fixed, stop_after_attempt
+
+# 🔐 Конфиг (токены/ключи)
+from config import (
+    TELEGRAM_TOKEN, OPENAI_API_KEY, TON_API_TOKEN,
+    CRYPTOCLOUD_API_KEY, CRYPTOCLOUD_SHOP_ID, API_SECRET
+)
 
 global_bot = None
 
