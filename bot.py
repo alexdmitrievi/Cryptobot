@@ -14,6 +14,7 @@ import unicodedata  # защита от битых Unicode
 from datetime import datetime
 from io import BytesIO
 from urllib.parse import urlencode
+from aiohttp import web
 
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
@@ -47,6 +48,31 @@ from config import (
 )
 
 global_bot = None
+
+# --- Flask app: MUST be defined before any @app_flask.route ---
+from flask import Flask, request, jsonify  # (если уже импортировано выше — не дублируй)
+
+app_flask = Flask(__name__)  # <— создаём один раз глобально
+
+# Healthcheck (можно оставить как есть)
+@app_flask.route("/")
+def index():
+    return jsonify({"status": "ok", "allowed_users": len(get_allowed_users())})
+
+# ✅ Webhook от CryptoCloud
+@app_flask.route("/cryptocloud_webhook", methods=["POST"])
+def cryptocloud_webhook():
+    body = request.get_data()
+    signature = request.headers.get("X-Signature-SHA256") or ""
+    calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(signature, calc_sig):
+        logging.warning("⚠ Неверная подпись IPN")
+        return jsonify({"status": "invalid signature"}), 400
+
+    data = request.json or {}
+    # ... остальной код вебхука без изменений ...
+    return jsonify({"ok": True})
 
 # 🚨 Проверка критичных ENV переменных
 required_env = ["GOOGLE_CREDS", "TELEGRAM_TOKEN", "OPENAI_API_KEY"]
