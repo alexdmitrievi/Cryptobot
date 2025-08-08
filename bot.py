@@ -1751,18 +1751,17 @@ async def post_init(app):
 def main():
     global global_bot
 
-    # 🚀 Главный asyncio loop
+    # 🚀 Главный asyncio loop (передаём его Flask-потоку, чтобы слать уведомления из вебхука)
     loop = asyncio.get_event_loop()
-    threading.Thread(target=run_flask, args=(loop,), daemon=True).start()
 
-    # 🚀 Flask webhook (для CryptoCloud) в отдельном потоке
-    threading.Thread(target=run_flask, args=(loop,)).start()
+    # 🚀 Flask webhook (CryptoCloud) в отдельном демонизированном потоке
+    threading.Thread(target=run_flask, args=(loop,), daemon=True).start()
 
     # ✅ Инициализация Telegram бота
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     logging.info("🚀 GPT-Трейдер стартовал!")
 
-    # ✅ Глобальный bot для уведомлений
+    # ✅ Глобальный bot для уведомлений из вебхука
     global_bot = app.bot
 
     # ✅ Глобальный error handler
