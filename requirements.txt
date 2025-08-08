@@ -9,5 +9,6 @@ flask
 aiocron
 tenacity>=8.2
 beautifulsoup4
+aiohttp
 
 
