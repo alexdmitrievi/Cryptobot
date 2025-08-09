@@ -56,26 +56,6 @@ from flask import Flask, request, jsonify  # (если уже импортиро
 
 app_flask = Flask(__name__)  # <— создаём один раз глобально
 
-# Healthcheck (можно оставить как есть)
-@app_flask.route("/")
-def index():
-    return jsonify({"status": "ok", "allowed_users": len(get_allowed_users())})
-
-# ✅ Webhook от CryptoCloud
-@app_flask.route("/cryptocloud_webhook", methods=["POST"])
-def cryptocloud_webhook():
-    body = request.get_data()
-    signature = request.headers.get("X-Signature-SHA256") or ""
-    calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest()
-
-    if not hmac.compare_digest(signature, calc_sig):
-        logging.warning("⚠ Неверная подпись IPN")
-        return jsonify({"status": "invalid signature"}), 400
-
-    data = request.json or {}
-    # ... остальной код вебхука без изменений ...
-    return jsonify({"ok": True})
-
 # 🚨 Проверка критичных ENV переменных
 required_env = ["GOOGLE_CREDS", "TELEGRAM_TOKEN", "OPENAI_API_KEY"]
 for var in required_env:
