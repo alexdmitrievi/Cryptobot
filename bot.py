@@ -14,6 +14,7 @@ import unicodedata
 from datetime import datetime
 from io import BytesIO
 from urllib.parse import urlencode
+from decimal import Decimal, InvalidOperation
 
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
@@ -34,11 +35,6 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 import aiocron
-from tenacity import retry, wait_fixed, stop_after_attempt
-
-
-# 🔄 AioCron для еженедельных рассылок
-import aiocron
 
 # ✅ Для защиты от rate limit Google Sheets
 from tenacity import retry, wait_fixed, stop_after_attempt
@@ -51,10 +47,10 @@ from config import (
 
 global_bot = None
 
-# --- Flask app: MUST be defined before any @app_flask.route ---
-from flask import Flask, request, jsonify  # (если уже импортировано выше — не дублируй)
-
 app_flask = Flask(__name__)  # <— создаём один раз глобально
+
+# --- анти‑дубликаты (idempotency) ---
+PROCESSED_PAYMENTS: set[str] = set()  # хранит уникальные payment_id/tx_id/комбинации
 
 # 🚨 Проверка критичных ENV переменных
 required_env = ["GOOGLE_CREDS", "TELEGRAM_TOKEN", "OPENAI_API_KEY"]
@@ -1181,7 +1177,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # 🎯 Риск
-    if text == "🎯 Риск":
+    if text == "🎯 Калькулятор":
         return await start_risk_calc(update, context)
 
     # 🌱 Психолог
@@ -1382,6 +1378,164 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
 
+def extract_tx_id(d: dict) -> str:
+    """Пытаемся достать идентификатор транзакции из разных возможных ключей IPN."""
+    for k in ("tx_id", "txid", "txn_id", "tx_hash", "hash", "transaction_id", "payment_id", "id"):
+        v = d.get(k)
+        if v:
+            return str(v)
+    return ""
+
+def parse_order_id(raw: str) -> tuple[int | None, str, str]:
+    """
+    Поддерживаем форматы:
+      user_{user_id}_{username}_{plan}
+      user_{user_id}_{plan}
+      user_{user_id}
+    Возвращаем (user_id, username, plan)
+    """
+    user_id = None
+    username = ""
+    plan = "unknown"
+
+    if not raw.startswith("user_"):
+        raise ValueError(f"Unexpected order_id prefix: {raw}")
+
+    rest = raw[len("user_"):]
+    # сначала отделяем user_id
+    if "_" in rest:
+        uid_str, remainder = rest.split("_", 1)
+    else:
+        uid_str, remainder = rest, ""
+
+    user_id = int(uid_str)
+
+    if remainder:
+        # если есть и username, и plan — забираем план как последний сегмент
+        if "_" in remainder:
+            username, plan = remainder.rsplit("_", 1)
+        else:
+            username, plan = "", remainder
+
+    plan = (plan or "unknown").lower()
+    if plan not in {"monthly", "lifetime"}:
+        plan = "unknown"
+
+    return user_id, username, plan
+
+def validate_payment_fields(data: dict, plan: str) -> tuple[bool, str, Decimal, str, str]:
+    """
+    Жёсткая проверка суммы/валюты/сети по выбранному плану.
+    Возвращает (ok, reason, amount, currency, network)
+    """
+    # ожидаемую сумму задаём по плану
+    if plan == "monthly":
+        expected = Decimal(str(MONTHLY_PRICE_USD))
+    elif plan == "lifetime":
+        expected = Decimal(str(LIFETIME_PRICE_USD))
+    else:
+        return False, "unknown plan", Decimal(0), "", ""
+
+    # сумма может приходить как число/строка; приводим к Decimal
+    raw_amount = data.get("amount")
+    if raw_amount is None:
+        return False, "missing amount", Decimal(0), "", ""
+
+    try:
+        amount = Decimal(str(raw_amount)).quantize(Decimal("0.01"))
+    except InvalidOperation:
+        return False, f"bad amount: {raw_amount}", Decimal(0), "", ""
+
+    currency = (data.get("currency") or "").upper()
+    network = (data.get("network") or data.get("chain") or "").upper()
+
+    # жёсткие сравнения
+    if amount != expected:
+        return False, f"amount mismatch {amount} != {expected}", amount, currency, network
+    if currency != PAY_CURRENCY.upper():
+        return False, f"currency mismatch {currency} != {PAY_CURRENCY}", amount, currency, network
+    if network and PAY_NETWORK and network != PAY_NETWORK.upper():
+        # если CryptoCloud не шлёт network — пропускаем; если шлёт — сверяем
+        return False, f"network mismatch {network} != {PAY_NETWORK}", amount, currency, network
+
+    return True, "ok", amount, currency, network
+
+# ✅ Webhook от CryptoCloud
+@app_flask.route("/cryptocloud_webhook", methods=["POST"])
+def cryptocloud_webhook():
+    body = request.get_data()
+    signature = request.headers.get("X-Signature-SHA256") or ""
+    calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest()
+
+    # Безопасное сравнение подписи
+    if not hmac.compare_digest(signature, calc_sig):
+        logging.warning("⚠ Неверная подпись IPN")
+        return jsonify({"status": "invalid signature"}), 400
+
+    data = request.json or {}
+
+    status = str(data.get("status") or "").lower()
+    raw_order_id = (data.get("order_id") or "").strip()
+    tx_id = extract_tx_id(data)
+
+    # Логируем сырые ключи (без персональных данных)
+    logging.info(
+        f"✅ IPN: status={status}, order_id='{raw_order_id}', tx_id='{tx_id}', "
+        f"amount='{data.get('amount')}', currency='{data.get('currency')}', network='{data.get('network') or data.get('chain')}'"
+    )
+
+    # Принимаем только успешные платежи
+    if status != "paid":
+        return jsonify({"status": "ignored (not paid)"}), 200
+
+    # Парсим order_id → (user_id, username, plan)
+    try:
+        user_id, username, plan = parse_order_id(raw_order_id)
+    except Exception as e:
+        logging.error(f"❌ Ошибка парсинга order_id='{raw_order_id}': {e}")
+        return jsonify({"status": "bad order_id"}), 400
+
+    # Idempotency: не обрабатываем повторно одну и ту же транзакцию/платёж
+    unique_key = tx_id or f"{raw_order_id}:{data.get('amount')}:{data.get('currency')}"
+    if unique_key in PROCESSED_PAYMENTS:
+        logging.info(f"♻️ Повторная доставка IPN, пропускаем. key='{unique_key}'")
+        return jsonify({"status": "duplicate ignored"}), 200
+    PROCESSED_PAYMENTS.add(unique_key)
+
+    # Жёсткая валидация суммы/валюты/сети
+    ok, reason, amount, currency, network = validate_payment_fields(data, plan)
+    if not ok:
+        logging.error(f"⛔ Валидация не пройдена: {reason}. plan={plan}, tx_id='{tx_id}'")
+        return jsonify({"status": "validation failed", "reason": reason}), 400
+
+    # Активируем доступ
+    try:
+        ALLOWED_USERS.add(user_id)
+        safe_append_row([
+            str(user_id),
+            username,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            plan,
+        ])
+    except Exception as e:
+        logging.error(f"❌ Ошибка записи в Google Sheets: {e}")
+
+    # Уведомление пользователю — асинхронно в loop бота
+    try:
+        asyncio.run_coroutine_threadsafe(
+            notify_user_payment(user_id),
+            app_flask.loop
+        )
+    except Exception as e:
+        logging.error(f"❌ Не удалось запланировать уведомление {user_id}: {e}")
+
+    logging.info(
+        f"🎉 Оплата подтверждена: user_id={user_id}, plan={plan}, "
+        f"amount={amount} {currency} {('/' + network) if network else ''}, tx_id='{tx_id}'"
+    )
+
+    return jsonify({"ok": True}), 200
+
 def sanitize_username(u: str | None) -> str:
     if not u:
         return "nouser"
@@ -1416,76 +1570,6 @@ async def send_payment_link(update, context):
         [InlineKeyboardButton(f"🏆 Разово ${LIFETIME_PRICE_USD} навсегда", url=lifetime_link)]
     ])
     await update.message.reply_text("💵 Выбери вариант доступа к GPT‑Трейдеру:", reply_markup=keyboard)
-
-@app_flask.route("/cryptocloud_webhook", methods=["POST"])
-def cryptocloud_webhook():
-    body = request.get_data()
-    signature = request.headers.get("X-Signature-SHA256") or ""
-    calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest()
-
-    if not hmac.compare_digest(signature, calc_sig):
-        logging.warning("⚠ Неверная подпись IPN")
-        return jsonify({"status": "invalid signature"}), 400
-
-    data = request.json or {}
-    logging.info(f"✅ IPN от CryptoCloud:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
-
-    if data.get("status") == "paid":
-        raw_order_id = (data.get("order_id") or "").strip()
-        user_id = None
-        username = ""
-        plan = "unknown"
-
-        try:
-            if not raw_order_id.startswith("user_"):
-                raise ValueError(f"Unexpected order_id prefix: {raw_order_id}")
-
-            rest = raw_order_id[len("user_"):]
-            if "_" in rest:
-                uid_str, remainder = rest.split("_", 1)
-            else:
-                uid_str, remainder = rest, ""
-
-            user_id = int(uid_str)
-
-            if remainder:
-                if "_" in remainder:
-                    username, plan = remainder.rsplit("_", 1)
-                else:
-                    username, plan = "", remainder
-
-            plan = (plan or "unknown").lower()
-            if plan not in {"monthly", "lifetime"}:
-                plan = "unknown"
-
-        except Exception as e:
-            logging.error(f"❌ Ошибка парсинга order_id='{raw_order_id}': {e}")
-            return jsonify({"status": "bad order_id"}), 400
-
-        ALLOWED_USERS.add(user_id)
-
-        try:
-            safe_append_row([
-                str(user_id),
-                username,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                plan
-            ])
-        except Exception as e:
-            logging.error(f"❌ Ошибка записи в Google Sheets: {e}")
-
-        try:
-            asyncio.run_coroutine_threadsafe(
-                notify_user_payment(user_id),
-                app_flask.loop
-            )
-        except Exception as e:
-            logging.error(f"❌ Не удалось запланировать уведомление {user_id}: {e}")
-
-        logging.info(f"🎉 Пользователь {user_id} активирован! План: {plan}, username: '{username}'")
-
-    return jsonify({"ok": True})
-
 
 # 🚀 Запуск Flask в отдельном потоке с loop
 def run_flask(loop):
