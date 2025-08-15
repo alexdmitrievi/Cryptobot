@@ -246,13 +246,17 @@ async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def check_access(update: Update):
     user_id = update.effective_user.id
-    if user_id not in ALLOWED_USERS:
+
+    # ✅ Проверка доступа через кеш, который обновляется из Google Sheets
+    if user_id not in get_allowed_users():
         await update.message.reply_text(
             f"🔒 Доступ ограничен. Подключи помощника: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.",
             reply_markup=REPLY_MARKUP
         )
         return False
+
     return True
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -576,7 +580,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    use_pro = context.user_data.get("use_pro") is True and user_id == 407721399
+    use_pro = context.user_data.get("is_pro_user") is True and user_id == 407721399
 
     prompt_text = (
         f"You are a professional SMC (Smart Money Concepts) trader with 20+ years experience in "
@@ -902,19 +906,28 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in ALLOWED_USERS:
+
+    # ✅ Проверка доступа через кеш, подтягивающий Google Sheets
+    if user_id not in get_allowed_users():
         await update.message.reply_text(
-            "🔒 Доступ только после активации: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.",
+            f"🔒 Доступ только после активации: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.",
             reply_markup=REPLY_MARKUP
         )
         return
 
+    # 🧹 Чистим состояние и включаем режим вопроса по инвестам
     context.user_data.clear()
     context.user_data["awaiting_invest_question"] = True
+
     await update.message.reply_text(
-        "💡 Напишите, какую стратегию для инвестирования вы хотите получить (например: «хочу консервативный портфель на 3 года» или «куда вложить $5000 с высоким риском на полгода»)."
+        "💡 Напиши, какую стратегию тебе нужна.\n"
+        "Примеры: «консервативный портфель на 3 года», "
+        "«куда вложить $5000 с высоким риском на 6 месяцев», "
+        "«сделай план усреднений по BTC и ETH».",
+        reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
     )
     return
+
 
 async def handle_strategy_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
@@ -1204,10 +1217,10 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logging.info(f"[handle_main] Пользователь {user_id} нажал кнопку: {text}")
 
-    # 🚪 Проверка доступа
-    if user_id not in ALLOWED_USERS and text not in ["💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера"]:
+    # 🚪 Проверка доступа (кеш из Google Sheets)
+    if user_id not in get_allowed_users() and text not in ["💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера"]:
         await update.message.reply_text(
-            "🔒 Доступ только после активации: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD}. Либо через брокера.",
+            f"🔒 Доступ только после активации: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD}. Либо через брокера.",
             reply_markup=REPLY_MARKUP
         )
         return
@@ -1219,10 +1232,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("✍️ Написать текст", callback_data="strategy_text")],
             [InlineKeyboardButton("📸 Отправить скрин", callback_data="strategy_photo")]
         ])
-        await update.message.reply_text(
-            "👇 Выберите формат стратегии:",
-            reply_markup=keyboard
-        )
+        await update.message.reply_text("👇 Выберите формат стратегии:", reply_markup=keyboard)
         return
 
     # 🎯 Калькулятор риска
@@ -1233,8 +1243,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🌱 Психолог":
         return await start_therapy(update, context)
 
-    # 🔍 Новости (интерпретация скрина календаря)
-    if text == "🔍 Новости":
+    # 🔍 Новости / 🔎 Анализ (интерпретация скрина календаря)
+    if text in ("🔍 Новости", "🔎 Анализ"):
         context.user_data.clear()
         context.user_data["awaiting_calendar_photo"] = True
         await update.message.reply_text(
@@ -1269,13 +1279,10 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💎 Crypto", callback_data="market_crypto")],
             [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
         ])
-        await update.message.reply_text(
-            "⚡ Для какого рынка сделать анализ?",
-            reply_markup=keyboard
-        )
+        await update.message.reply_text("⚡ Для какого рынка сделать анализ?", reply_markup=keyboard)
         return
 
-    # 💸 Криптообмен — обновлённый текст
+    # 💸 Криптообмен
     if text == "💸 Криптообмен":
         await update.message.reply_text(
             "💸 Криптообмен — быстро, безопасно и без лишних вопросов\n\n"
@@ -1295,16 +1302,13 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 💰 Купить
     if text == "💰 Купить":
-        if user_id in ALLOWED_USERS:
-            await update.message.reply_text(
-                "✅ У тебя уже активирована подписка!",
-                reply_markup=REPLY_MARKUP
-            )
+        if user_id in get_allowed_users():
+            await update.message.reply_text("✅ У тебя уже активирована подписка!", reply_markup=REPLY_MARKUP)
         else:
             await send_payment_link(update, context)
         return
 
-    # ℹ️ О боте — обновлённый текст
+    # ℹ️ О боте
     if text == "ℹ️ О боте":
         await update.message.reply_text(
             "🤖 GPT‑Трейдер — ИИ‑ассистент в Telegram для крипты и форекса.\n\n"
@@ -1318,7 +1322,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "1) Нажми «💰 Купить» и активируй доступ.\n"
             "2) Пришли скрин — получи уровни и план.\n"
             "3) Проверь размер позиции через «🎯 Калькулятор».\n\n"
-            "Доступ: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда (USDT TRC20 через CryptoCloud).\n"
+            f"Доступ: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда (USDT TRC20 через CryptoCloud).\n"
             "Альтернатива: бесплатный доступ через регистрацию у брокера — «🔗 Бесплатный доступ через брокера».\n\n"
             "Важно: информация носит образовательный характер и не является инвестиционной рекомендацией.",
             reply_markup=REPLY_MARKUP
@@ -1348,7 +1352,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
         return SETUP_1
 
-    # ✅ Обработка открытых диалогов
+    # ✅ Открытые диалоги
     if context.user_data.get("awaiting_invest_question"):
         return await handle_invest_question(update, context)
     if context.user_data.get("awaiting_teacher_question"):
@@ -1363,20 +1367,15 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ↩️ Универсальный выход
     if text in ["↩️ Вернуться в меню", "↩️ Выйти в меню"]:
         context.user_data.clear()
-        await update.message.reply_text(
-            "🔙 Вернулись в главное меню.",
-            reply_markup=REPLY_MARKUP
-        )
+        await update.message.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
         return
 
-    # 🔄 Если ничего не ожидаем — сброс
-    saved_data = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
+    # 🔄 Если ничего не ожидаем — мягкий сброс
+    saved = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
     context.user_data.clear()
-    context.user_data.update(saved_data)
-    await update.message.reply_text(
-        "🔄 Сброс всех ожиданий. Продолжай.",
-        reply_markup=REPLY_MARKUP
-    )
+    context.user_data.update(saved)
+    await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
+
 
 async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Устанавливаем флаг, чтобы handle_main понимал, что активен психолог
@@ -1876,7 +1875,12 @@ async def post_init(app):
     ])
 
 def main():
-    global global_bot
+    global global_bot, ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP
+
+    # 🔄 Прогружаем список пользователей с доступом при старте
+    ALLOWED_USERS = load_allowed_users()
+    ALLOWED_USERS_TIMESTAMP = time.time()
+    logging.info(f"📥 ALLOWED_USERS загружен при старте: {len(ALLOWED_USERS)} пользователей")
 
     # 🚀 Главный asyncio loop (передаём его Flask-потоку, чтобы слать уведомления из вебхука)
     loop = asyncio.get_event_loop()
