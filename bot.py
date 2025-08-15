@@ -27,6 +27,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, filters, ConversationHandler
 )
+from telegram.ext import Application
 
 from openai import AsyncOpenAI
 from PIL import Image
@@ -40,12 +41,14 @@ import aiocron
 from tenacity import retry, wait_fixed, stop_after_attempt
 
 # 🔐 Конфиг (токены/ключи)
-from config import (
-    TELEGRAM_TOKEN, OPENAI_API_KEY, TON_API_TOKEN,
-    CRYPTOCLOUD_API_KEY, CRYPTOCLOUD_SHOP_ID, API_SECRET
-)
-
-global_bot = None
+ from config import (
+     TELEGRAM_TOKEN, OPENAI_API_KEY, TON_API_TOKEN,
+     CRYPTOCLOUD_API_KEY, CRYPTOCLOUD_SHOP_ID, API_SECRET
+ )
+ 
+ client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+ 
+ global_bot = None
 
 app_flask = Flask(__name__)  # <— создаём один раз глобально
 
@@ -2064,7 +2067,11 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # ✅ Остальные режимы (текст)
     if context.user_data.get("awaiting_potential"):
-        await handle_potential(update, context)
+        context.user_data.pop("awaiting_potential", None)
+        await update.message.reply_text(
+            "⚠️ Этот режим временно недоступен. Возвращаю в меню.",
+            reply_markup=REPLY_MARKUP
+        )
         return
 
     if context.user_data.get("awaiting_definition_term"):
