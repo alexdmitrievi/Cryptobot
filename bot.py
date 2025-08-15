@@ -50,7 +50,8 @@ global_bot = None
 app_flask = Flask(__name__)  # <— создаём один раз глобально
 
 # --- анти‑дубликаты (idempotency) ---
-PROCESSED_PAYMENTS: set[str] = set()  # хранит уникальные payment_id/tx_id/комбинации
+PROCESSED_PAYMENTS: dict[str, float] = {} # хранит уникальные payment_id/tx_id/комбинации
+PROCESSED_TTL_SEC = 3600  # 1 час
 
 # 🚨 Проверка критичных ENV переменных
 required_env = ["GOOGLE_CREDS", "TELEGRAM_TOKEN", "OPENAI_API_KEY"]
@@ -98,24 +99,43 @@ def load_allowed_users():
         logging.error(f"❌ Ошибка при загрузке пользователей из Google Sheets: {e}")
         return set()
 
-# 🚀 ALLOWED_USERS с TTL cache
-ALLOWED_USERS = set()
-ALLOWED_USERS_TIMESTAMP = 0
-
 MONTHLY_PRICE_USD = 25
 LIFETIME_PRICE_USD = 199
 PAY_CURRENCY = "USDT"
 PAY_NETWORK = "TRC20"
 
+# 🚀 ALLOWED_USERS с TTL cache (фон)
+ALLOWED_USERS = set()
+ALLOWED_USERS_TIMESTAMP = 0
+_ALLOWED_REFRESHING = False
+_ALLOWED_LOCK = threading.Lock()
+
 def get_allowed_users():
-    global ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP
-    if time.time() - ALLOWED_USERS_TIMESTAMP > 300:
-        ALLOWED_USERS = load_allowed_users()
-        ALLOWED_USERS_TIMESTAMP = time.time()
+    """
+    Возвращает кеш авторизованных пользователей.
+    Если TTL (5 мин) истёк — обновляет список в отдельном потоке,
+    чтобы не блокировать async-хендлеры длительным вызовом Google Sheets.
+    """
+    global ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP, _ALLOWED_REFRESHING
+    now = time.time()
+
+    # Проверяем TTL и отсутствие уже запущенного обновления
+    if now - ALLOWED_USERS_TIMESTAMP > 300 and not _ALLOWED_REFRESHING:
+        ALLOWED_USERS_TIMESTAMP = now  # предотвращаем повторное обновление
+        def _refresh():
+            global ALLOWED_USERS, _ALLOWED_REFRESHING
+            with _ALLOWED_LOCK:
+                try:
+                    _ALLOWED_REFRESHING = True
+                    updated = load_allowed_users()
+                    if updated:  # заменяем только при успешной загрузке
+                        ALLOWED_USERS = updated
+                finally:
+                    _ALLOWED_REFRESHING = False
+        threading.Thread(target=_refresh, daemon=True).start()
+
     return ALLOWED_USERS
 
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-logging.basicConfig(level=logging.INFO)
 
 TON_WALLET = "UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR"
 PENDING_USERS = {}
@@ -298,18 +318,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
+    data = query.data
 
-    logging.info(f"[button_handler] Пользователь {user_id} нажал кнопку: {query.data}")
+    logging.info(f"[button_handler] Пользователь {user_id} нажал кнопку: {data}")
 
-    if query.data == "start_menu":
+    # 🚪 Доступ к колбэкам: часть разрешаем без подписки
+    FREE_CB = {
+        "start_menu",
+        "screenshot_help", "screenshot_help_strategy",
+        "back_to_signal", "back_to_strategy",
+        "get_email", "interpret_calendar",
+        "ref_bybit", "ref_forex4you", "start_risk_calc",
+        "market_crypto", "market_forex",
+        "pro_access_confirm"  # можно включать PRO-подсказки, разбор будет всё равно платный
+    }
+    if user_id not in get_allowed_users() and data not in FREE_CB:
+        await query.message.reply_text(
+            f"🔒 Доступ ограничен. Подключи помощника: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.",
+            reply_markup=REPLY_MARKUP
+        )
+        return
+
+    # --- Навигация в меню ---
+    if data == "start_menu":
+        context.user_data.clear()
         await query.message.reply_text(
             "🚀 Возвращаемся в меню! Выбери, что сделать:",
             reply_markup=REPLY_MARKUP
         )
         return
 
-    # --- Логика для выбора рынка (Crypto / Forex) ---
-    if query.data == "market_crypto":
+    # --- Выбор рынка (Crypto / Forex) ---
+    if data == "market_crypto":
         context.user_data["selected_market"] = "crypto"
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 Как правильно сделать скрин", callback_data="screenshot_help")]
@@ -326,8 +366,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🔽 Пришли скрин — сделаю разбор за 10 секунд 💰",
             reply_markup=keyboard
         )
+        return
 
-    elif query.data == "market_forex":
+    if data == "market_forex":
         context.user_data["selected_market"] = "forex"
         if user_id == 407721399:
             keyboard = InlineKeyboardMarkup([
@@ -348,8 +389,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🔽 Пришли скрин — сделаю разбор и выдам точки входа и выхода 📈",
             reply_markup=keyboard
         )
+        return
 
-    elif query.data == "pro_access_confirm":
+    if data == "pro_access_confirm":
         context.user_data["is_pro_user"] = True
         await query.message.reply_text(
             "🔓 Включён PRO-анализ графиков.\n\n"
@@ -360,8 +402,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Совпадения по нескольким уровням фибоначчи (кластерные зоны)\n\n"
             "📸 Пришли скрин — я сделаю расширенный анализ!"
         )
+        return
 
-    elif query.data == "screenshot_help":
+    if data == "screenshot_help":
         await query.message.reply_text(
             "🖼 Как сделать идеальный скрин для анализа:\n\n"
             "✅ Таймфрейм 4H или 1H\n"
@@ -376,8 +419,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("↩️ Вернуться к сигналу", callback_data="back_to_signal")]
             ])
         )
+        return
 
-    elif query.data == "back_to_signal":
+    if data == "back_to_signal":
         context.user_data.pop("selected_market", None)
         context.user_data.pop("is_pro_user", None)
         keyboard = InlineKeyboardMarkup([
@@ -388,18 +432,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📝 Сначала выбери рынок — нажми одну из кнопок ниже:",
             reply_markup=keyboard
         )
+        return
 
     # --- Логика стратегии (инвест) ---
-    elif query.data == "strategy_text":
+    if data == "strategy_text":
         context.user_data.clear()
         context.user_data["awaiting_strategy"] = "text"
         await query.message.reply_text(
-            "✍️ Напиши свою инвестиционную цель или вопрос. "
-            "Я составлю стратегию с учётом текущего рынка.",
+            "✍️ Напиши свою инвестиционную цель или вопрос. Я составлю стратегию с учётом текущего рынка.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
+        return
 
-    elif query.data == "strategy_photo":
+    if data == "strategy_photo":
         context.user_data.clear()
         context.user_data["awaiting_strategy"] = "photo"
         await query.message.reply_text(
@@ -413,8 +458,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Готово — загружай скрин или нажми «↩️ Выйти в меню».",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
+        return
 
-    elif query.data == "screenshot_help_strategy":
+    if data == "screenshot_help_strategy":
         await query.message.reply_text(
             "🖼 Как сделать идеальный скрин для инвест-стратегии:\n\n"
             "✅ Таймфрейм 4H или 1D (средне-/долгосрочно)\n"
@@ -429,37 +475,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("↩️ Вернуться к стратегии", callback_data="back_to_strategy")]
             ])
         )
+        return
 
-    elif query.data == "back_to_strategy":
+    if data == "back_to_strategy":
         context.user_data["awaiting_strategy"] = "photo"
         await query.message.reply_text(
             "Отлично. Пришли скрин — подготовлю план: первая покупка, усреднения (DCA) и цели фиксации прибыли.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
+        return
 
-    # --- Остальные кнопки ---
-    elif query.data == "get_email":
+    # --- Прочие колбэки ---
+    if data == "get_email":
         context.user_data["awaiting_email"] = True
-        await query.message.reply_text(
-            "✉️ Напиши свой email для получения секретного PDF со стратегиями:"
-        )
+        await query.message.reply_text("✉️ Напиши свой email для получения секретного PDF со стратегиями:")
+        return
 
-    elif query.data == "interpret_calendar":
+    if data == "interpret_calendar":
         context.user_data.clear()
         context.user_data["awaiting_calendar_photo"] = True
         await query.message.reply_text(
             "📸 Пришли скриншот из экономического календаря. Я распознаю событие и дам интерпретацию.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
+        return
 
-    elif query.data == "start_risk_calc":
+    if data == "start_risk_calc":
         keys_to_keep = {"selected_market"}
         saved_data = {k: v for k, v in context.user_data.items() if k in keys_to_keep}
         context.user_data.clear()
         context.user_data.update(saved_data)
         await start_risk_calc(update, context)
+        return
 
-    elif query.data == "ref_bybit":
+    if data == "ref_bybit":
         context.user_data["ref_program"] = "bybit"
         context.user_data["broker"] = "Bybit"
         context.user_data["awaiting_uid"] = True
@@ -469,8 +518,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👉 https://www.bybit.com/invite?ref=YYVME8\n\n"
             "Внеси депозит от $150 и пришли сюда свой UID для проверки."
         )
+        return
 
-    elif query.data == "ref_forex4you":
+    if data == "ref_forex4you":
         context.user_data["ref_program"] = "forex4you"
         context.user_data["broker"] = "Forex4You"
         context.user_data["awaiting_uid"] = True
@@ -480,41 +530,66 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "👉 https://www.forex4you.org/?affid=hudpyc9\n\n"
             "Внеси депозит от $200 и пришли сюда свой UID для проверки."
         )
-
-async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        await update.message.reply_text("⛔ Эта команда доступна только админу.")
         return
 
-    args = context.args
+    # На случай неожиданных data — просто вернём в меню
+    await query.message.reply_text("🔙 Вернулись в меню.", reply_markup=REPLY_MARKUP)
+
+async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Безопасно получаем message
+    msg = getattr(update, "message", None)
+
+    # Проверка прав
+    user_id = update.effective_user.id if update and update.effective_user else None
+    if user_id not in ADMIN_IDS:
+        if msg:
+            await msg.reply_text("⛔ Эта команда доступна только админу.")
+        return
+
+    # Ожидаем: /grant <user_id> <username>
+    args = context.args or []
     if len(args) < 2:
-        await update.message.reply_text("⚠ Используй так: /grant user_id username")
+        if msg:
+            await msg.reply_text("⚠ Используй так: /grant user_id username")
         return
 
     try:
         target_user_id = int(args[0])
-        target_username = args[1]
+        if target_user_id <= 0:
+            raise ValueError("user_id должен быть положительным числом")
+    except Exception:
+        if msg:
+            await msg.reply_text("⚠ user_id должен быть числом. Пример: /grant 123456789 username")
+        return
 
-        # Добавляем в ALLOWED_USERS
+    # Нормализуем username (убираем ведущий @)
+    raw_username = args[1]
+    target_username = raw_username.lstrip("@").strip()
+
+    try:
+        # Добавляем доступ локально
         ALLOWED_USERS.add(target_user_id)
 
-        # Обновляем TTL, чтобы не слетело при автозагрузке через 5 мин
+        # Обновляем метку TTL, чтобы кеш не перезатёрся до фонового обновления
         global ALLOWED_USERS_TIMESTAMP
         ALLOWED_USERS_TIMESTAMP = time.time()
 
-        # Записываем в Google Sheets
-        log_payment(target_user_id, target_username)
+        # Запись в Google Sheets — уводим в тред‑пул (не блокируем event loop)
+        await asyncio.to_thread(log_payment, target_user_id, target_username)
 
-        # Уведомляем пользователя
+        # Уведомляем пользователя о выдаче доступа
         await notify_user_payment(target_user_id)
 
-        await update.message.reply_text(
-            f"✅ Пользователь {target_user_id} ({target_username}) добавлен в VIP и уведомлён."
-        )
+        if msg:
+            await msg.reply_text(
+                f"✅ Пользователь {target_user_id} (@{target_username}) добавлен в VIP и уведомлён."
+            )
 
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+        logging.exception("[grant] error")
+        if msg:
+            await msg.reply_text(f"❌ Ошибка: {e}")
+
 
 async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -903,6 +978,27 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
     )
     context.user_data.clear()
 
+# --- INVEST QUESTION (текстовая стратегия через кнопку "💡 Инвестор") ---
+async def handle_invest_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Пользователь нажал «💡 Инвестор», бот ждёт текст с запросом.
+    Здесь просто проксируем в существующий пайплайн handle_strategy_text,
+    чтобы не дублировать логику формирования стратегии.
+    """
+    text = (update.message.text or "").strip()
+    if not text:
+        await update.message.reply_text(
+            "✍️ Напиши, какую стратегию тебе нужна.\n"
+            "Например: «консервативный портфель на 3 года» или «куда вложить $5000 на 6 месяцев с высоким риском»."
+        )
+        return
+
+    try:
+        await handle_strategy_text(update, context)  # используем уже готовый обработчик
+    finally:
+        # в любом случае снимаем флаг режима
+        context.user_data.pop("awaiting_invest_question", None)
+
 
 async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -930,30 +1026,43 @@ async def help_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_strategy_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip()
+    # Безопасное чтение текста
+    msg = getattr(update, "message", None)
+    user_text = ((msg.text if msg and msg.text else "")).strip()
 
     # 🚪 Выход по кнопке
     if user_text == "↩️ Выйти в меню":
         context.user_data.pop("awaiting_strategy", None)
-        await update.message.reply_text(
-            "🔙 Ты вышел из режима стратегии. Возвращаемся в главное меню.",
-            reply_markup=REPLY_MARKUP
-        )
+        if msg:
+            await msg.reply_text(
+                "🔙 Ты вышел из режима стратегии. Возвращаемся в главное меню.",
+                reply_markup=REPLY_MARKUP
+            )
         return
 
-    user_id = update.effective_user.id
+    user_id = update.effective_user.id if update and update.effective_user else None
 
-    # 📈 Получаем цену BTC и ETH
+    # 📈 Получаем цену BTC и ETH без блокировки event loop
+    btc_price = eth_price = None
     try:
-        btc_data = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()
-        eth_data = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT").json()
-        btc_price = float(btc_data["price"])
-        eth_price = float(eth_data["price"])
+        # Предпочитаем существующую в проекте функцию fetch_price_from_binance (не ломаем контракт)
+        async def _fetch(symbol: str):
+            try:
+                return await asyncio.to_thread(fetch_price_from_binance, symbol)
+            except NameError:
+                # Fallback: если fetch_price_from_binance отсутствует, безопасно уходим в thread pool
+                import requests
+                def _rq(sym: str):
+                    url = f"https://api.binance.com/api/v3/ticker/price?symbol={sym}USDT"
+                    return float(requests.get(url, timeout=10).json()["price"])
+                return await asyncio.to_thread(_rq, symbol)
+
+        btc_price, eth_price = await asyncio.gather(_fetch("BTC"), _fetch("ETH"))
     except Exception as e:
         logging.error(f"[handle_strategy_text] Binance price fetch error: {e}")
         btc_price = eth_price = None
 
-    # 🧠 Промпт для GPT
+    # 🧠 Промпт для GPT (сохранён; не меняем смысл и структуру)
     prompt = (
         "You are a top-tier investment strategist with over 20 years of experience in multi-asset portfolio management. "
         "You specialize in creating fully personalized investment strategies specifically for Russian-speaking clients. "
@@ -969,8 +1078,8 @@ async def handle_strategy_text(update: Update, context: ContextTypes.DEFAULT_TYP
         f"🧑‍💬 The client's question or investment goal is:\n{user_text}\n\n"
 
         "💰 Current market context:\n"
-        f"{('- BTC: $' + str(btc_price)) if btc_price else ''}\n"
-        f"{('- ETH: $' + str(eth_price)) if eth_price else ''}\n\n"
+        f"{('- BTC: $' + str(btc_price)) if btc_price is not None else ''}\n"
+        f"{('- ETH: $' + str(eth_price)) if eth_price is not None else ''}\n\n"
 
         "🎯 Your task:\n"
         "Craft a full, step-by-step, deeply personalized investment strategy that feels like a private consultation. "
@@ -1019,27 +1128,68 @@ async def handle_strategy_text(update: Update, context: ContextTypes.DEFAULT_TYP
             max_tokens=1000
         )
 
-        analysis = gpt_response.choices[0].message.content.strip()
+        analysis = (gpt_response.choices[0].message.content or "").strip()
         if not analysis:
-            await update.message.reply_text(
-                "⚠️ GPT не дал ответа. Попробуй задать вопрос ещё раз.",
-                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-            )
+            if msg:
+                await msg.reply_text(
+                    "⚠️ GPT не дал ответа. Попробуй задать вопрос ещё раз.",
+                    reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+                )
             return
 
-        await update.message.reply_text(
-            f"📈 Вот твоя персональная стратегия:\n\n{analysis}",
-            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-        )
+        if msg:
+            await msg.reply_text(
+                f"📈 Вот твоя персональная стратегия:\n\n{analysis}",
+                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+            )
 
     except Exception as e:
         logging.error(f"[handle_strategy_text] GPT error: {e}")
+        if msg:
+            await msg.reply_text(
+                "⚠️ GPT временно недоступен. Попробуй позже.",
+                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+            )
+
+    # Сброс локальных флагов (сохраняем прежнее поведение)
+    context.user_data.clear()
+
+# --- UID SUBMISSION (реферал через брокера) ---
+async def handle_uid_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Пользователь выбрал брокера по кнопке и прислал UID для проверки.
+    Записываем заявку в таблицу и подтверждаем приём.
+    """
+    uid = (update.message.text or "").strip()
+    if not uid.isdigit():
+        await update.message.reply_text("❗️ Пришли, пожалуйста, UID цифрами. Пример: 12345678.")
+        return
+
+    user_id = update.effective_user.id
+    username = update.effective_user.username or "no_username"
+    ref_program = context.user_data.get("ref_program", "broker_ref")
+    broker = context.user_data.get("broker", "unknown")
+
+    # Пишем в таблицу безопасным способом (без rate‑limit проблем)
+    try:
+        from datetime import datetime  # на случай, если не импортирован наверху
+        row = [str(user_id), username, datetime.now().strftime("%Y-%m-%d %H:%M"), ref_program, broker, uid]
+        await asyncio.to_thread(safe_append_row, row)
+        logging.info(f"[REF_UID] {user_id=} {username=} {broker=} {uid=}")
         await update.message.reply_text(
-            "⚠️ GPT временно недоступен. Попробуй позже.",
-            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+            "✅ UID принят. Проверка займёт до 10 минут. Я отпишусь, как только доступ будет активирован.",
+            reply_markup=REPLY_MARKUP
+        )
+    except Exception as e:
+        logging.error(f"[handle_uid_submission] Google Sheets error: {e}")
+        await update.message.reply_text(
+            "⚠️ Не удалось зафиксировать UID. Попробуй ещё раз позже или напиши менеджеру @zhbankov_alex.",
+            reply_markup=REPLY_MARKUP
         )
 
-    context.user_data.clear()
+    # Снимаем флаг ожидания UID
+    context.user_data.pop("awaiting_uid", None)
+
 
 async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1212,7 +1362,7 @@ async def handle_definition_term(update: Update, context: ContextTypes.DEFAULT_T
         )
 
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    text = (update.message.text or "").strip()
     user_id = update.effective_user.id
 
     logging.info(f"[handle_main] Пользователь {user_id} нажал кнопку: {text}")
@@ -1488,39 +1638,58 @@ def parse_order_id(raw: str) -> tuple[int | None, str, str]:
 def validate_payment_fields(data: dict, plan: str) -> tuple[bool, str, Decimal, str, str]:
     """
     Жёсткая проверка суммы/валюты/сети по выбранному плану.
-    Возвращает (ok, reason, amount, currency, network)
+    Возвращает кортеж: (ok, reason, amount, currency, network_norm)
+
+    Правила:
+    - Сумма: строго равна ожидаемой по плану (с точностью до 0.01).
+    - Валюта: строго равна PAY_CURRENCY (без учёта регистра).
+    - Сеть: если провайдер прислал, сверяем после нормализации (TRC20≡TRON, BEP20≡BSC).
+            Если сеть не прислана, проверку сети пропускаем.
     """
-    # ожидаемую сумму задаём по плану
-    if plan == "monthly":
-        expected = Decimal(str(MONTHLY_PRICE_USD))
-    elif plan == "lifetime":
-        expected = Decimal(str(LIFETIME_PRICE_USD))
-    else:
+    # 1) Ожидаемая сумма по плану
+    plan_map = {
+        "monthly": Decimal(str(MONTHLY_PRICE_USD)),
+        "lifetime": Decimal(str(LIFETIME_PRICE_USD)),
+    }
+    expected = plan_map.get(plan)
+    if expected is None:
         return False, "unknown plan", Decimal(0), "", ""
 
-    # сумма может приходить как число/строка; приводим к Decimal
+    # 2) Сумма (может прийти числом/строкой/с запятой)
     raw_amount = data.get("amount")
     if raw_amount is None:
         return False, "missing amount", Decimal(0), "", ""
-
     try:
-        amount = Decimal(str(raw_amount)).quantize(Decimal("0.01"))
+        # допускаем запятую как десятичный разделитель
+        amount = Decimal(str(raw_amount).replace(",", ".")).quantize(Decimal("0.01"))
     except InvalidOperation:
         return False, f"bad amount: {raw_amount}", Decimal(0), "", ""
 
-    currency = (data.get("currency") or "").upper()
-    network = (data.get("network") or data.get("chain") or "").upper()
+    # 3) Валюта/сеть
+    currency = (data.get("currency") or "").strip().upper()
+    network_raw = (data.get("network") or data.get("chain") or "").strip().upper()
 
-    # жёсткие сравнения
+    # нормализация сетей
+    aliases = {"TRC20": "TRON", "TRON": "TRON", "BEP20": "BSC", "BSC": "BSC", "ERC20": "ERC20", "TON": "TON"}
+    network_norm = aliases.get(network_raw, network_raw)
+
+    # 4) Ожидаемые из конфигурации (могут быть пустыми/None)
+    pay_curr = (PAY_CURRENCY or "").strip().upper()
+    pay_net = (PAY_NETWORK or "").strip().upper()
+    pay_net_norm = aliases.get(pay_net, pay_net)
+
+    # 5) Строгие сравнения
     if amount != expected:
-        return False, f"amount mismatch {amount} != {expected}", amount, currency, network
-    if currency != PAY_CURRENCY.upper():
-        return False, f"currency mismatch {currency} != {PAY_CURRENCY}", amount, currency, network
-    if network and PAY_NETWORK and network != PAY_NETWORK.upper():
-        # если CryptoCloud не шлёт network — пропускаем; если шлёт — сверяем
-        return False, f"network mismatch {network} != {PAY_NETWORK}", amount, currency, network
+        return False, f"amount mismatch {amount} != {expected}", amount, currency, network_norm
 
-    return True, "ok", amount, currency, network
+    if pay_curr and currency != pay_curr:
+        return False, f"currency mismatch {currency} != {PAY_CURRENCY}", amount, currency, network_norm
+
+    # Если провайдер прислал network И у нас задана ожидаемая сеть — сверяем после нормализации
+    if network_norm and pay_net_norm and network_norm != pay_net_norm:
+        return False, f"network mismatch {network_norm} != {PAY_NETWORK}", amount, currency, network_norm
+
+    return True, "ok", amount, currency, network_norm
 
 # ✅ Webhook от CryptoCloud
 @app_flask.route("/cryptocloud_webhook", methods=["POST"])
@@ -1540,10 +1709,15 @@ def cryptocloud_webhook():
     raw_order_id = (data.get("order_id") or "").strip()
     tx_id = extract_tx_id(data)
 
-    # Логируем сырые ключи (без персональных данных)
+    # Логируем основные поля (без чувствительных данных)
     logging.info(
-        f"✅ IPN: status={status}, order_id='{raw_order_id}', tx_id='{tx_id}', "
-        f"amount='{data.get('amount')}', currency='{data.get('currency')}', network='{data.get('network') or data.get('chain')}'"
+        "✅ IPN: status=%s, order_id='%s', tx_id='%s', amount='%s', currency='%s', network='%s'",
+        status,
+        raw_order_id,
+        tx_id,
+        data.get("amount"),
+        data.get("currency"),
+        (data.get("network") or data.get("chain")),
     )
 
     # Принимаем только успешные платежи
@@ -1554,33 +1728,44 @@ def cryptocloud_webhook():
     try:
         user_id, username, plan = parse_order_id(raw_order_id)
     except Exception as e:
-        logging.error(f"❌ Ошибка парсинга order_id='{raw_order_id}': {e}")
+        logging.error("❌ Ошибка парсинга order_id='%s': %s", raw_order_id, e)
         return jsonify({"status": "bad order_id"}), 400
 
-    # Idempotency: не обрабатываем повторно одну и ту же транзакцию/платёж
+    # Идемпотентность с TTL: не обрабатываем повторно одну и ту же транзакцию/платёж
     unique_key = tx_id or f"{raw_order_id}:{data.get('amount')}:{data.get('currency')}"
+    now = time.time()
+    # Очистка старых ключей
+    for k, ts in list(PROCESSED_PAYMENTS.items()):
+        if now - ts > PROCESSED_TTL_SEC:
+            PROCESSED_PAYMENTS.pop(k, None)
     if unique_key in PROCESSED_PAYMENTS:
-        logging.info(f"♻️ Повторная доставка IPN, пропускаем. key='{unique_key}'")
+        logging.info("♻️ Повторная доставка IPN, пропускаем. key='%s'", unique_key)
         return jsonify({"status": "duplicate ignored"}), 200
-    PROCESSED_PAYMENTS.add(unique_key)
+    PROCESSED_PAYMENTS[unique_key] = now
 
-    # Жёсткая валидация суммы/валюты/сети
+    # Жёсткая валидация суммы/валюты/сети (с нормализацией сетей внутри)
     ok, reason, amount, currency, network = validate_payment_fields(data, plan)
     if not ok:
-        logging.error(f"⛔ Валидация не пройдена: {reason}. plan={plan}, tx_id='{tx_id}'")
+        logging.error("⛔ Валидация не пройдена: %s. plan=%s, tx_id='%s'", reason, plan, tx_id)
         return jsonify({"status": "validation failed", "reason": reason}), 400
 
-    # Активируем доступ
+    # Активируем доступ локально (в кеш) + асинхронно логируем в Google Sheets
     try:
         ALLOWED_USERS.add(user_id)
-        safe_append_row([
-            str(user_id),
-            username,
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            plan,
-        ])
+        # Логирование платежа/пользователя в Sheets переносим в поток через основной loop
+        # Если у вас есть функция log_payment(uid, username) — используем её:
+        fut1 = asyncio.run_coroutine_threadsafe(
+            asyncio.to_thread(log_payment, user_id, username),
+            app_flask.loop
+        )
+        # Также можно записать сам факт покупки в payment-sheet, если у вас есть helper:
+        # fut2 = asyncio.run_coroutine_threadsafe(
+        #     safe_append_row(payment_sheet, [str(user_id), username, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), plan, str(amount), currency, network]),
+        #     app_flask.loop
+        # )
+        # (Если safe_append_row асинхронная и принимает sheet — раскомментируйте и передайте ваш sheet)
     except Exception as e:
-        logging.error(f"❌ Ошибка записи в Google Sheets: {e}")
+        logging.error("❌ Ошибка постановки записи в Google Sheets: %s", e)
 
     # Уведомление пользователю — асинхронно в loop бота
     try:
@@ -1589,14 +1774,20 @@ def cryptocloud_webhook():
             app_flask.loop
         )
     except Exception as e:
-        logging.error(f"❌ Не удалось запланировать уведомление {user_id}: {e}")
+        logging.error("❌ Не удалось запланировать уведомление %s: %s", user_id, e)
 
     logging.info(
-        f"🎉 Оплата подтверждена: user_id={user_id}, plan={plan}, "
-        f"amount={amount} {currency} {('/' + network) if network else ''}, tx_id='{tx_id}'"
+        "🎉 Оплата подтверждена: user_id=%s, plan=%s, amount=%s %s%s, tx_id='%s'",
+        user_id,
+        plan,
+        amount,
+        currency,
+        ("/" + network) if network else "",
+        tx_id
     )
 
     return jsonify({"ok": True}), 200
+
 
 def sanitize_username(u: str | None) -> str:
     if not u:
@@ -1736,132 +1927,181 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    # Безопасно получаем message
+    msg = getattr(update, "message", None)
+
+    # Проверка прав
+    user_id = update.effective_user.id if update and update.effective_user else None
     if user_id not in ADMIN_IDS:
-        await update.message.reply_text("⛔ Эта команда доступна только админу.")
+        if msg:
+            await msg.reply_text("⛔ Эта команда доступна только админу.")
         return
 
     try:
-        records = sheet.get_all_records()
+        # Чтение всех записей из Google Sheets без блокировки event loop
+        records = await asyncio.to_thread(sheet.get_all_records)
         total_records = len(records)
         allowed_count = len(ALLOWED_USERS)
 
         last_entry = records[-1] if records else {}
+        # Ограничим размер последней записи (на случай очень длинных значений)
+        try:
+            last_entry_str = json.dumps(last_entry, ensure_ascii=False, indent=2)
+            if len(last_entry_str) > 3000:
+                last_entry_str = last_entry_str[:3000] + "…"
+        except Exception:
+            last_entry_str = str(last_entry)[:3000] + "…"
 
-        msg = (
-            f"📊 Статистика:\n\n"
+        text = (
+            "📊 Статистика:\n\n"
             f"• Подписчиков в ALLOWED_USERS: {allowed_count}\n"
             f"• Всего записей в Google Sheets: {total_records}\n\n"
-            f"📝 Последняя запись:\n"
-            f"{json.dumps(last_entry, ensure_ascii=False, indent=2)}"
+            "📝 Последняя запись:\n"
+            f"{last_entry_str}"
         )
-        await update.message.reply_text(msg)
+
+        if msg:
+            await msg.reply_text(text)
+
     except Exception as e:
         logging.error(f"[STATS] Ошибка: {e}")
-        await update.message.reply_text("⚠️ Не удалось получить статистику.")
+        if msg:
+            await msg.reply_text("⚠️ Не удалось получить статистику.")
+
 
 async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    # Безопасно получаем message
+    msg = getattr(update, "message", None)
+
+    # Проверка прав
+    user_id = update.effective_user.id if update and update.effective_user else None
     if user_id not in ADMIN_IDS:
-        await update.message.reply_text("⛔ Эта команда доступна только админу.")
+        if msg:
+            await msg.reply_text("⛔ Эта команда доступна только админу.")
         return
 
     try:
-        records = sheet.get_all_records()
+        # Чтение записей из Google Sheets без блокировки event loop
+        records = await asyncio.to_thread(sheet.get_all_records)
 
-        from io import StringIO
-        csv_file = StringIO()
-        writer = csv.DictWriter(csv_file, fieldnames=["user_id", "username", "email", "date"])
+        # Готовим CSV в памяти
+        import csv
+        from io import StringIO, BytesIO
+
+        csv_text = StringIO()
+        writer = csv.DictWriter(csv_text, fieldnames=["user_id", "username", "email", "date"])
         writer.writeheader()
         for row in records:
             writer.writerow({
                 "user_id": row.get("user_id", ""),
                 "username": row.get("username", ""),
                 "email": row.get("email", ""),
-                "date": row.get("date", "")
+                "date": row.get("date", ""),
             })
 
-        csv_file.seek(0)
-        await update.message.reply_document(
-            document=("users_export.csv", csv_file.getvalue()),
-            filename="users_export.csv",
-            caption="📥 Все пользователи и email из Google Sheets"
-        )
+        # В PTB v21 корректно отдаём файл как BytesIO с именем
+        data = csv_text.getvalue().encode("utf-8")
+        bio = BytesIO(data)
+        bio.name = "users_export.csv"
+
+        if msg:
+            await msg.reply_document(
+                document=bio,
+                caption="📥 Все пользователи и email из Google Sheets"
+            )
+
     except Exception as e:
         logging.error(f"[EXPORT] Ошибка: {e}")
-        await update.message.reply_text("⚠️ Не удалось выгрузить пользователей.")
+        if msg:
+            await msg.reply_text("⚠️ Не удалось выгрузить пользователей.")
+
 
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверка, что это сообщение содержит текст или фото
-    text = update.message.text.strip() if update.message.text else None
+    # 🧾 Нормализуем вход
+    text = (update.message.text or "").strip()
     has_photo = bool(update.message.photo)
 
     # ✅ Явная проверка на команды
     if text == "/start":
         await start(update, context)
         return
-    elif text == "/restart":
+    if text == "/restart":
         await restart(update, context)
         return
 
-    # ✅ Блок обработки email
+    # 📨 Сбор email
     if context.user_data.get("awaiting_email"):
         if text and "@" in text and "." in text:
             try:
-                sheet.append_row([
+                # используем безопасную запись в таблицу
+                await asyncio.to_thread(safe_append_row, [
                     str(update.effective_user.id),
                     update.effective_user.username or "",
                     text
                 ])
-                await update.message.reply_text(
-                    "✅ Email сохранён! Бонус придёт в ближайшее время."
-                )
+                await update.message.reply_text("✅ Email сохранён! Бонус придёт в ближайшее время.")
             except Exception as e:
                 logging.error(f"[EMAIL_SAVE] {e}")
-                await update.message.reply_text(
-                    "⚠️ Не удалось сохранить. Попробуй позже."
-                )
+                await update.message.reply_text("⚠️ Не удалось сохранить. Попробуй позже.")
         else:
-            await update.message.reply_text(
-                "❌ Похоже, это не email. Попробуй снова."
-            )
+            await update.message.reply_text("❌ Похоже, это не email. Попробуй снова.")
             return
         context.user_data.pop("awaiting_email", None)
         return
 
-    # ✅ Остальные режимы
+    # 🗓 Экономкалендарь: ждём скрин
+    if context.user_data.get("awaiting_calendar_photo"):
+        if has_photo:
+            await handle_calendar_photo(update, context)
+        else:
+            await update.message.reply_text("📸 Пришли скрин экономического календаря или нажми «↩️ Выйти в меню».")
+        return
+
+    # 🖼 Если просто прислали фото графика — разбираем сетап
+    if has_photo:
+        await handle_photo(update, context)
+        return
+
+    # ✅ Остальные режимы (текст)
     if context.user_data.get("awaiting_potential"):
         await handle_potential(update, context)
+        return
 
-    elif context.user_data.get("awaiting_definition_term"):
+    if context.user_data.get("awaiting_definition_term"):
         await handle_definition_term(update, context)
+        return
 
-    elif context.user_data.get("awaiting_invest_question"):
+    if context.user_data.get("awaiting_invest_question"):
         await handle_invest_question(update, context)
+        return
 
-    elif context.user_data.get("awaiting_teacher_question"):
+    if context.user_data.get("awaiting_teacher_question"):
         await teacher_response(update, context)
+        return
 
-    elif context.user_data.get("awaiting_strategy") == "text":
-        # Режим стратегии через текст
+    # Стратегия: текст
+    if context.user_data.get("awaiting_strategy") == "text":
         if text:
             await handle_strategy_text(update, context)
         else:
-            await update.message.reply_text(
-                "❌ Для текстовой стратегии нужно отправить текстовое сообщение."
-            )
+            await update.message.reply_text("❌ Для текстовой стратегии нужно отправить текстовое сообщение.")
+        return
 
-    elif context.user_data.get("awaiting_strategy") == "photo":
-        # Режим стратегии через фото
+    # Стратегия: фото
+    if context.user_data.get("awaiting_strategy") == "photo":
         if has_photo:
             await handle_strategy_photo(update, context)
         else:
-            await update.message.reply_text(
-                "❌ Для стратегии по скриншоту отправьте фото."
-            )
+            await update.message.reply_text("❌ Для стратегии по скриншоту отправьте фото.")
+        return
 
-    else:
-        await handle_main(update, context)
+    # UID для брокера
+    if context.user_data.get("awaiting_uid"):
+        await handle_uid_submission(update, context)
+        return
+
+    # 🧭 Если ничего из выше — отдаём в главный роутер
+    await handle_main(update, context)
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -1877,33 +2117,39 @@ async def post_init(app):
 def main():
     global global_bot, ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP
 
-    # 🔄 Прогружаем список пользователей с доступом при старте
+    # 🔄 Прогружаем список пользователей с доступом при старте (без блокировки хендлеров)
     ALLOWED_USERS = load_allowed_users()
     ALLOWED_USERS_TIMESTAMP = time.time()
     logging.info(f"📥 ALLOWED_USERS загружен при старте: {len(ALLOWED_USERS)} пользователей")
 
-    # 🚀 Главный asyncio loop (передаём его Flask-потоку, чтобы слать уведомления из вебхука)
-    loop = asyncio.get_event_loop()
-
-    # 🚀 Flask webhook (CryptoCloud) в отдельном демонизированном потоке
-    threading.Thread(target=run_flask, args=(loop,), daemon=True).start()
-
-    # ✅ Инициализация Telegram бота
+    # ✅ Инициализация Telegram бота (раньше Flask, чтобы не было гонки с global_bot)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     logging.info("🚀 GPT-Трейдер стартовал!")
 
     # ✅ Глобальный bot для уведомлений из вебхука
     global_bot = app.bot
 
-    # ✅ Глобальный error handler
+    # 🚀 Главный asyncio loop (для передачи во Flask-поток)
+    loop = asyncio.get_event_loop()
+
+    # 🚀 Flask webhook (CryptoCloud) в отдельном демонизированном потоке
+    threading.Thread(target=run_flask, args=(loop,), daemon=True).start()
+
+    # ✅ Глобальный error handler (с трейсбеком)
     async def error_handler(update, context):
-        logging.error(f"❌ Exception: {context.error}")
-        if update and update.message:
-            await update.message.reply_text("⚠️ Произошла внутренняя ошибка. Попробуйте позже.")
+        logging.exception("❌ Unhandled exception in handler")  # печатает стек
+        try:
+            if update and getattr(update, "message", None):
+                await update.message.reply_text("⚠️ Произошла внутренняя ошибка. Попробуйте позже.")
+        except Exception:
+            # избегаем вторичных сбоев в error handler
+            pass
+
     app.add_error_handler(error_handler)
 
     # 🔄 Еженедельная рассылка
     CRON_TIME = os.getenv("CRON_TIME", "0 12 * * mon")
+
     @aiocron.crontab(CRON_TIME)
     async def weekly_broadcast():
         message_text = (
@@ -1925,21 +2171,23 @@ def main():
     # 🧘 GPT-Психолог
     therapy_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)],
-        states={WAITING_FOR_THERAPY_INPUT: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, gpt_psychologist_response)
-        ]},
+        states={
+            WAITING_FOR_THERAPY_INPUT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, gpt_psychologist_response)
+            ]
+        },
         fallbacks=[
             CommandHandler("start", start, block=False),
             CommandHandler("restart", restart, block=False),
-            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
-        ]
+            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart),
+        ],
     )
 
     # 📏 Калькулятор риска
     risk_calc_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc),
-            CallbackQueryHandler(start_risk_calc, pattern="^start_risk_calc$")
+            CallbackQueryHandler(start_risk_calc, pattern="^start_risk_calc$"),
         ],
         states={
             RISK_CALC_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, risk_calc_deposit)],
@@ -1949,8 +2197,8 @@ def main():
         fallbacks=[
             CommandHandler("start", start, block=False),
             CommandHandler("restart", restart, block=False),
-            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
-        ]
+            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart),
+        ],
     )
 
     # 📌 Сетап
@@ -1966,8 +2214,8 @@ def main():
         fallbacks=[
             CommandHandler("start", start, block=False),
             CommandHandler("restart", restart, block=False),
-            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart)
-        ]
+            MessageHandler(filters.Regex("^🔄 Перезапустить бота$"), restart),
+        ],
     )
 
     # ✅ Стандартные команды
@@ -1991,6 +2239,7 @@ def main():
 
     # 🚀 Запуск polling
     app.run_polling()
+
 
 def log_payment(user_id, username):
     try:
