@@ -2108,11 +2108,17 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Бот перезапущен. Выбери действие:", reply_markup=REPLY_MARKUP)
     return ConversationHandler.END
 
-async def post_init(app):
-    await app.bot.set_my_commands([
-        BotCommand("start", "Запустить бота"),
-        BotCommand("restart", "🔁 Перезапустить бота")
-    ])
+async def post_init(app: Application) -> None:
+    try:
+        info = await app.bot.get_webhook_info()
+        if info and info.url:
+            await app.bot.delete_webhook(drop_pending_updates=True)
+            logging.info(f"🔌 Webhook отключён: был установлен {info.url}")
+        else:
+            logging.info("🔌 Webhook не был установлен — переходим к polling.")
+    except Exception as e:
+        # даже если не удалось получить/снять webhook — не валим запуск
+        logging.error(f"⚠️ Не удалось проверить/снять webhook: {e}")
 
 def main():
     global global_bot, ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP
