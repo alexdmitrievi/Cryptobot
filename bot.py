@@ -21,13 +21,13 @@ from flask import Flask, request, jsonify
 
 from telegram import (
     Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, ReplyKeyboardRemove
+    ReplyKeyboardMarkup, ReplyKeyboardRemove,
 )
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ContextTypes, filters, ConversationHandler
+    ContextTypes, filters, ConversationHandler,
 )
-from telegram.ext import Application
+from telegram.ext import Application  # для аннотации в post_init
 
 from openai import AsyncOpenAI
 from PIL import Image
@@ -37,18 +37,25 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 import aiocron
 
-# ✅ Для защиты от rate limit Google Sheets
+# ✅ Для защиты от rate limit Google Sheets (если используешь ретраи)
 from tenacity import retry, wait_fixed, stop_after_attempt
 
 # 🔐 Конфиг (токены/ключи)
- from config import (
-     TELEGRAM_TOKEN, OPENAI_API_KEY, TON_API_TOKEN,
-     CRYPTOCLOUD_API_KEY, CRYPTOCLOUD_SHOP_ID, API_SECRET
- )
- 
- client = AsyncOpenAI(api_key=OPENAI_API_KEY)
- 
- global_bot = None
+from config import (
+    TELEGRAM_TOKEN,
+    OPENAI_API_KEY,
+    TON_API_TOKEN,
+    CRYPTOCLOUD_API_KEY,
+    CRYPTOCLOUD_SHOP_ID,
+    API_SECRET,
+)
+
+# Инициализация OpenAI-клиента (используется в ask_gpt_vision / handle_strategy_text и др.)
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+# Глобальный бот для уведомлений из вебхука (инициализируется в main())
+global_bot = None
+
 
 app_flask = Flask(__name__)  # <— создаём один раз глобально
 
@@ -157,9 +164,6 @@ REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 CHAT_DISCUSS_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("💬 Обсудить в чате", url="https://t.me/ai4traders_chat")]
 ])
-
-# Фоновая проверка платежей по username
-RECEIVED_MEMOS = set()
 
 INTERPRET_NEWS, ASK_EVENT, ASK_FORECAST, ASK_ACTUAL, GENERAL_QUESTION, FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3 = range(8)
 user_inputs = {}
