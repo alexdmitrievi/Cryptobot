@@ -195,15 +195,14 @@ async def setup_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SETUP_5
 
 async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Сохраняем выбранные ранее strategy и market
+    # сохраняем ранее выбранные ключи и чистим остальное
     keys_to_keep = {"selected_market", "selected_strategy"}
-    saved_data = {k: v for k, v in context.user_data.items() if k in keys_to_keep}
+    saved = {k: v for k, v in (context.user_data or {}).items() if k in keys_to_keep}
     context.user_data.clear()
-    context.user_data.update(saved_data)
+    context.user_data.update(saved)
 
-    message = update.message if update.message else update.callback_query.message
-
-    await message.reply_text(
+    msg = update.effective_message
+    await msg.reply_text(
         "📊 Введи размер депозита в $:",
         reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
     )
@@ -211,53 +210,72 @@ async def start_risk_calc(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def risk_calc_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip()
+    msg = update.effective_message
+    user_text = (msg.text or "").strip()
+
     if user_text == "↩️ Выйти в меню":
         context.user_data.clear()
-        await update.message.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
+        await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
         return ConversationHandler.END
 
     try:
-        context.user_data["deposit"] = float(user_text)
-        await update.message.reply_text("💡 Теперь введи процент риска на сделку (%):")
+        deposit = float(user_text.replace(",", "."))
+        if deposit <= 0:
+            raise ValueError("deposit must be > 0")
+        context.user_data["deposit"] = deposit
+        await msg.reply_text("💡 Теперь введи процент риска на сделку (%):")
         return RISK_CALC_2
-    except ValueError:
-        await update.message.reply_text("❗️ Введи число. Пример: 1000")
+    except Exception:
+        await msg.reply_text("❗️ Введи число. Пример: 1000")
         return RISK_CALC_1
 
 
 async def risk_calc_risk_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip()
+    msg = update.effective_message
+    user_text = (msg.text or "").strip()
+
     if user_text == "↩️ Выйти в меню":
         context.user_data.clear()
-        await update.message.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
+        await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
         return ConversationHandler.END
 
     try:
-        context.user_data["risk_percent"] = float(user_text)
-        await update.message.reply_text("⚠️ Введи стоп-лосс по сделке (%):")
+        risk_percent = float(user_text.replace(",", "."))
+        if not (0 < risk_percent < 100):
+            raise ValueError("risk % out of range")
+        context.user_data["risk_percent"] = risk_percent
+        await msg.reply_text("⚠️ Введи стоп-лосс по сделке (%):")
         return RISK_CALC_3
-    except ValueError:
-        await update.message.reply_text("❗️ Введи число. Пример: 2")
+    except Exception:
+        await msg.reply_text("❗️ Введи число. Пример: 2")
         return RISK_CALC_2
 
 
 async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip()
+    msg = update.effective_message
+    user_text = (msg.text or "").strip()
+
     if user_text == "↩️ Выйти в меню":
         context.user_data.clear()
-        await update.message.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
+        await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
         return ConversationHandler.END
 
     try:
-        stoploss_percent = float(user_text)
-        deposit = context.user_data["deposit"]
-        risk_percent = context.user_data["risk_percent"]
+        stoploss_percent = float(user_text.replace(",", "."))
+        if not (0 < stoploss_percent < 100):
+            raise ValueError("sl % out of range")
 
-        risk_amount = deposit * risk_percent / 100
-        position_size = risk_amount / (stoploss_percent / 100)
+        deposit = float(context.user_data.get("deposit", 0))
+        risk_percent = float(context.user_data.get("risk_percent", 0))
+        if deposit <= 0 or risk_percent <= 0:
+            # на случай прямого вызова без предыдущих шагов
+            await msg.reply_text("⚠️ Начни заново: /start → 🎯 Калькулятор")
+            return ConversationHandler.END
 
-        await update.message.reply_text(
+        risk_amount = deposit * risk_percent / 100.0
+        position_size = risk_amount / (stoploss_percent / 100.0)
+
+        await msg.reply_text(
             f"✅ Результат:\n"
             f"• Депозит: ${deposit:.2f}\n"
             f"• Риск на сделку: {risk_percent:.2f}% (${risk_amount:.2f})\n"
@@ -265,11 +283,16 @@ async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"📌 Рекомендуемый объём позиции: ${position_size:.2f}",
             reply_markup=REPLY_MARKUP
         )
-        return ConversationHandler.END
 
-    except ValueError:
-        await update.message.reply_text("❗️ Введи число. Пример: 1.5")
+    except Exception:
+        await msg.reply_text("❗️ Введи число. Пример: 1.5")
         return RISK_CALC_3
+
+    # финал — выходим из диалога и чистим временные поля
+    for k in ("deposit", "risk_percent"):
+        context.user_data.pop(k, None)
+    return ConversationHandler.END
+
 
 async def check_access(update: Update):
     user_id = update.effective_user.id
@@ -1369,30 +1392,33 @@ async def handle_definition_term(update: Update, context: ContextTypes.DEFAULT_T
         )
 
 async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (update.message.text or "").strip()
-    user_id = update.effective_user.id
+    msg = update.effective_message
+    text = (msg.text or "").strip()
+    user_id = update.effective_user.id if update and update.effective_user else None
 
     logging.info(f"[handle_main] Пользователь {user_id} нажал кнопку: {text}")
 
-    # 🚪 Проверка доступа (кеш из Google Sheets)
-    if user_id not in get_allowed_users() and text not in ["💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера"]:
-        await update.message.reply_text(
+    # 🚪 Проверка доступа (кеш из Google Sheets).
+    # Разрешаем без подписки: «Купить», «О боте», «Бесплатный доступ через брокера».
+    free_paths = {"💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера"}
+    if user_id not in get_allowed_users() and text not in free_paths:
+        await msg.reply_text(
             f"🔒 Доступ только после активации: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD}. Либо через брокера.",
             reply_markup=REPLY_MARKUP
         )
         return
 
-    # 💡 Инвестор (с выбором формата)
+    # 💡 Инвестор (выбор формата)
     if text == "💡 Инвестор":
         context.user_data.clear()
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✍️ Написать текст", callback_data="strategy_text")],
-            [InlineKeyboardButton("📸 Отправить скрин", callback_data="strategy_photo")]
+            [InlineKeyboardButton("📸 Отправить скрин", callback_data="strategy_photo")],
         ])
-        await update.message.reply_text("👇 Выберите формат стратегии:", reply_markup=keyboard)
+        await msg.reply_text("👇 Выберите формат стратегии:", reply_markup=keyboard)
         return
 
-    # 🎯 Калькулятор риска
+    # 🎯 Калькулятор риска (fallback-вход; основной вход — через ConversationHandler)
     if text == "🎯 Калькулятор":
         return await start_risk_calc(update, context)
 
@@ -1404,7 +1430,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text in ("🔍 Новости", "🔎 Анализ"):
         context.user_data.clear()
         context.user_data["awaiting_calendar_photo"] = True
-        await update.message.reply_text(
+        await msg.reply_text(
             "📸 Пришли скриншот из экономического календаря. Я распознаю событие и дам интерпретацию.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
@@ -1414,7 +1440,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "📖 Обучение":
         context.user_data.clear()
         context.user_data["awaiting_teacher_question"] = True
-        await update.message.reply_text(
+        await msg.reply_text(
             "✍️ Напиши свой вопрос — я отвечу как преподаватель с 20+ годами опыта в трейдинге и инвестициях.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
@@ -1424,7 +1450,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "📚 Термин":
         context.user_data.clear()
         context.user_data["awaiting_definition_term"] = True
-        await update.message.reply_text(
+        await msg.reply_text(
             "✍️ Напиши термин, который нужно объяснить.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
@@ -1434,14 +1460,14 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🚀 Трейдер":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("💎 Crypto", callback_data="market_crypto")],
-            [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
+            [InlineKeyboardButton("💱 Forex", callback_data="market_forex")],
         ])
-        await update.message.reply_text("⚡ Для какого рынка сделать анализ?", reply_markup=keyboard)
+        await msg.reply_text("⚡ Для какого рынка сделать анализ?", reply_markup=keyboard)
         return
 
     # 💸 Криптообмен
     if text == "💸 Криптообмен":
-        await update.message.reply_text(
+        await msg.reply_text(
             "💸 Криптообмен — быстро, безопасно и без лишних вопросов\n\n"
             "🔹 Работаем официально и в рамках закона\n"
             "🔹 17 регионов РФ — удобно и близко к вам\n"
@@ -1460,19 +1486,19 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 💰 Купить
     if text == "💰 Купить":
         if user_id in get_allowed_users():
-            await update.message.reply_text("✅ У тебя уже активирована подписка!", reply_markup=REPLY_MARKUP)
+            await msg.reply_text("✅ У тебя уже активирована подписка!", reply_markup=REPLY_MARKUP)
         else:
             await send_payment_link(update, context)
         return
 
     # ℹ️ О боте
     if text == "ℹ️ О боте":
-        await update.message.reply_text(
-            "🤖 GPT‑Трейдер — ИИ‑ассистент в Telegram для крипты и форекса.\n\n"
+        await msg.reply_text(
+            "🤖 GPT-Трейдер — ИИ-ассистент в Telegram для крипты и форекса.\n\n"
             "Что умеет:\n"
             "• По скрину графика за 10 сек: Entry / Stop / TakeProfit\n"
-            "• Инвест‑план: покупка, уровни усреднений (DCA), цели и риски\n"
-            "• Макро‑интерпретация новостей (календарь, CPI, ФРС и др.)\n"
+            "• Инвест-план: покупка, уровни усреднений (DCA), цели и риски\n"
+            "• Макро-интерпретация новостей (календарь, CPI, ФРС и др.)\n"
             "• Обучение простым языком и словарь терминов\n"
             "• Психолог для трейдера и калькулятор риска\n\n"
             "Как начать:\n"
@@ -1490,9 +1516,9 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🔗 Бесплатный доступ через брокера":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Bybit", callback_data="ref_bybit")],
-            [InlineKeyboardButton("Forex4You", callback_data="ref_forex4you")]
+            [InlineKeyboardButton("Forex4You", callback_data="ref_forex4you")],
         ])
-        await update.message.reply_text(
+        await msg.reply_text(
             "🚀 Выберите брокера для регистрации по моей реферальной ссылке:\n"
             "- Для Bybit минимальный депозит $150\n"
             "- Для Forex4You минимальный депозит $200\n\n"
@@ -1504,12 +1530,12 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 📌 Сетап (для админа)
     if text == "📌 Сетап":
         if user_id not in ADMIN_IDS:
-            await update.message.reply_text("⛔️ Эта функция доступна только админу.")
+            await msg.reply_text("⛔️ Эта функция доступна только админу.")
             return
-        await update.message.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
+        await msg.reply_text("✍️ Укажи торговый инструмент (например: BTC/USDT):")
         return SETUP_1
 
-    # ✅ Открытые диалоги
+    # ✅ Открытые диалоги (продолжаем, если есть ожидания)
     if context.user_data.get("awaiting_invest_question"):
         return await handle_invest_question(update, context)
     if context.user_data.get("awaiting_teacher_question"):
@@ -1522,16 +1548,16 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await handle_uid_submission(update, context)
 
     # ↩️ Универсальный выход
-    if text in ["↩️ Вернуться в меню", "↩️ Выйти в меню"]:
+    if text in ("↩️ Вернуться в меню", "↩️ Выйти в меню"):
         context.user_data.clear()
-        await update.message.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
+        await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
         return
 
     # 🔄 Если ничего не ожидаем — мягкий сброс
     saved = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
     context.user_data.clear()
     context.user_data.update(saved)
-    await update.message.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
+    await msg.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
 
 
 async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
