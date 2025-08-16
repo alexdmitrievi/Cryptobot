@@ -123,25 +123,32 @@ _ALLOWED_LOCK = threading.Lock()
 def get_allowed_users():
     """
     Возвращает кеш авторизованных пользователей.
-    Если TTL (5 мин) истёк — обновляет список в отдельном потоке,
-    чтобы не блокировать async-хендлеры длительным вызовом Google Sheets.
+    Если TTL (5 мин) истёк — триггерит фоновое обновление из Google Sheets
+    без блокировки async-хендлеров. При неуспехе сохраняет старый кеш.
     """
     global ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP, _ALLOWED_REFRESHING
-    now = time.time()
 
-    # Проверяем TTL и отсутствие уже запущенного обновления
-    if now - ALLOWED_USERS_TIMESTAMP > 300 and not _ALLOWED_REFRESHING:
-        ALLOWED_USERS_TIMESTAMP = now  # предотвращаем повторное обновление
+    now = time.time()
+    ttl_expired = (now - ALLOWED_USERS_TIMESTAMP) > 300
+
+    if ttl_expired and not _ALLOWED_REFRESHING:
+        # Ставим флаг ДО старта потока, чтобы не запустить несколько раз подряд
+        _ALLOWED_REFRESHING = True
+
         def _refresh():
-            global ALLOWED_USERS, _ALLOWED_REFRESHING
-            with _ALLOWED_LOCK:
-                try:
-                    _ALLOWED_REFRESHING = True
-                    updated = load_allowed_users()
-                    if updated:  # заменяем только при успешной загрузке
+            global ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP, _ALLOWED_REFRESHING
+            try:
+                updated = load_allowed_users()
+                # Обновляем кеш и TTL только при успешной загрузке
+                if updated:
+                    with _ALLOWED_LOCK:
                         ALLOWED_USERS = updated
-                finally:
-                    _ALLOWED_REFRESHING = False
+                        ALLOWED_USERS_TIMESTAMP = time.time()
+            except Exception:
+                logging.exception("[get_allowed_users] refresh failed")
+            finally:
+                _ALLOWED_REFRESHING = False
+
         threading.Thread(target=_refresh, daemon=True).start()
 
     return ALLOWED_USERS
@@ -213,13 +220,14 @@ async def risk_calc_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     user_text = (msg.text or "").strip()
 
-    if user_text == "↩️ Выйти в меню":
+    if user_text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
         context.user_data.clear()
         await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
         return ConversationHandler.END
 
     try:
-        deposit = float(user_text.replace(",", "."))
+        # поддерживаем "1 000,50", "1000.5", "1000"
+        deposit = float(user_text.replace(" ", "").replace("%", "").replace(",", "."))
         if deposit <= 0:
             raise ValueError("deposit must be > 0")
         context.user_data["deposit"] = deposit
@@ -234,13 +242,13 @@ async def risk_calc_risk_percent(update: Update, context: ContextTypes.DEFAULT_T
     msg = update.effective_message
     user_text = (msg.text or "").strip()
 
-    if user_text == "↩️ Выйти в меню":
+    if user_text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
         context.user_data.clear()
         await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
         return ConversationHandler.END
 
     try:
-        risk_percent = float(user_text.replace(",", "."))
+        risk_percent = float(user_text.replace(" ", "").replace("%", "").replace(",", "."))
         if not (0 < risk_percent < 100):
             raise ValueError("risk % out of range")
         context.user_data["risk_percent"] = risk_percent
@@ -255,13 +263,13 @@ async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE)
     msg = update.effective_message
     user_text = (msg.text or "").strip()
 
-    if user_text == "↩️ Выйти в меню":
+    if user_text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
         context.user_data.clear()
         await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
         return ConversationHandler.END
 
     try:
-        stoploss_percent = float(user_text.replace(",", "."))
+        stoploss_percent = float(user_text.replace(" ", "").replace("%", "").replace(",", "."))
         if not (0 < stoploss_percent < 100):
             raise ValueError("sl % out of range")
 
@@ -292,7 +300,6 @@ async def risk_calc_stoploss(update: Update, context: ContextTypes.DEFAULT_TYPE)
     for k in ("deposit", "risk_percent"):
         context.user_data.pop(k, None)
     return ConversationHandler.END
-
 
 async def check_access(update: Update):
     user_id = update.effective_user.id
@@ -349,6 +356,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = query.from_user.id
     data = query.data
+    msg = query.message
 
     logging.info(f"[button_handler] Пользователь {user_id} нажал кнопку: {data}")
 
@@ -358,12 +366,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "screenshot_help", "screenshot_help_strategy",
         "back_to_signal", "back_to_strategy",
         "get_email", "interpret_calendar",
-        "ref_bybit", "ref_forex4you", "start_risk_calc",
+        "ref_bybit", "ref_forex4you",
         "market_crypto", "market_forex",
-        "pro_access_confirm"  # можно включать PRO-подсказки, разбор будет всё равно платный
+        "pro_access_confirm",  # PRO-подсказки разрешаем, разбор платный
+        # "start_risk_calc" — обрабатывается ConversationHandler-ом, дубли здесь не нужен
     }
     if user_id not in get_allowed_users() and data not in FREE_CB:
-        await query.message.reply_text(
+        await msg.reply_text(
             f"🔒 Доступ ограничен. Подключи помощника: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.",
             reply_markup=REPLY_MARKUP
         )
@@ -372,7 +381,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Навигация в меню ---
     if data == "start_menu":
         context.user_data.clear()
-        await query.message.reply_text(
+        await msg.reply_text(
             "🚀 Возвращаемся в меню! Выбери, что сделать:",
             reply_markup=REPLY_MARKUP
         )
@@ -423,7 +432,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "pro_access_confirm":
         context.user_data["is_pro_user"] = True
-        await query.message.reply_text(
+        await msg.reply_text(
             "🔓 Включён PRO-анализ графиков.\n\n"
             "Теперь я буду учитывать:\n"
             "✅ Коррекцию/проекцию по Fibo\n"
@@ -435,7 +444,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "screenshot_help":
-        await query.message.reply_text(
+        await msg.reply_text(
             "🖼 Как сделать идеальный скрин для анализа:\n\n"
             "✅ Таймфрейм 4H или 1H\n"
             "✅ Белый фон графика\n"
@@ -458,7 +467,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📉 Crypto", callback_data="market_crypto")],
             [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
         ])
-        await query.message.reply_text(
+        await msg.reply_text(
             "📝 Сначала выбери рынок — нажми одну из кнопок ниже:",
             reply_markup=keyboard
         )
@@ -468,7 +477,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "strategy_text":
         context.user_data.clear()
         context.user_data["awaiting_strategy"] = "text"
-        await query.message.reply_text(
+        await msg.reply_text(
             "✍️ Напиши свою инвестиционную цель или вопрос. Я составлю стратегию с учётом текущего рынка.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
@@ -477,21 +486,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "strategy_photo":
         context.user_data.clear()
         context.user_data["awaiting_strategy"] = "photo"
-        await query.message.reply_text(
+        await msg.reply_text(
             "📸 Пришли скриншот позиции с Bybit или TradingView.\n"
             "Я дам стратегию: уровни покупок, усреднения (DCA) и фиксацию прибыли.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🖼 Как подготовить скрин для стратегии", callback_data="screenshot_help_strategy")]
             ])
         )
-        await query.message.reply_text(
+        await msg.reply_text(
             "Готово — загружай скрин или нажми «↩️ Выйти в меню».",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
         return
 
     if data == "screenshot_help_strategy":
-        await query.message.reply_text(
+        await msg.reply_text(
             "🖼 Как сделать идеальный скрин для инвест-стратегии:\n\n"
             "✅ Таймфрейм 4H или 1D (средне-/долгосрочно)\n"
             "✅ Белый фон графика\n"
@@ -509,7 +518,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "back_to_strategy":
         context.user_data["awaiting_strategy"] = "photo"
-        await query.message.reply_text(
+        await msg.reply_text(
             "Отлично. Пришли скрин — подготовлю план: первая покупка, усреднения (DCA) и цели фиксации прибыли.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
@@ -518,31 +527,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Прочие колбэки ---
     if data == "get_email":
         context.user_data["awaiting_email"] = True
-        await query.message.reply_text("✉️ Напиши свой email для получения секретного PDF со стратегиями:")
+        await msg.reply_text("✉️ Напиши свой email для получения секретного PDF со стратегиями:")
         return
 
     if data == "interpret_calendar":
         context.user_data.clear()
         context.user_data["awaiting_calendar_photo"] = True
-        await query.message.reply_text(
+        await msg.reply_text(
             "📸 Пришли скриншот из экономического календаря. Я распознаю событие и дам интерпретацию.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
         return
 
-    if data == "start_risk_calc":
-        keys_to_keep = {"selected_market"}
-        saved_data = {k: v for k, v in context.user_data.items() if k in keys_to_keep}
-        context.user_data.clear()
-        context.user_data.update(saved_data)
-        await start_risk_calc(update, context)
-        return
+    # ⚠️ start_risk_calc убран отсюда — это делает ConversationHandler калькулятора
 
     if data == "ref_bybit":
         context.user_data["ref_program"] = "bybit"
         context.user_data["broker"] = "Bybit"
         context.user_data["awaiting_uid"] = True
-        await query.message.reply_text(
+        await msg.reply_text(
             "📈 Отлично!\n"
             "Перейди по моей реферальной ссылке и зарегистрируйся на Bybit:\n"
             "👉 https://www.bybit.com/invite?ref=YYVME8\n\n"
@@ -554,7 +557,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["ref_program"] = "forex4you"
         context.user_data["broker"] = "Forex4You"
         context.user_data["awaiting_uid"] = True
-        await query.message.reply_text(
+        await msg.reply_text(
             "📊 Отлично!\n"
             "Перейди по моей реферальной ссылке и зарегистрируйся на Forex4You:\n"
             "👉 https://www.forex4you.org/?affid=hudpyc9\n\n"
@@ -563,7 +566,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # На случай неожиданных data — просто вернём в меню
-    await query.message.reply_text("🔙 Вернулись в меню.", reply_markup=REPLY_MARKUP)
+    await msg.reply_text("🔙 Вернулись в меню.", reply_markup=REPLY_MARKUP)
+
 
 async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Безопасно получаем message
@@ -622,20 +626,36 @@ async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    msg = update.effective_message
+    user_id = update.effective_user.id if update and update.effective_user else None
+
+    # Проверка прав
     if user_id not in ADMIN_IDS:
-        await update.message.reply_text("⛔ Эта команда доступна только админу.")
+        if msg:
+            await msg.reply_text("⛔ Эта команда доступна только админу.")
         return
 
     try:
-        global ALLOWED_USERS
-        ALLOWED_USERS = load_allowed_users()
-        await update.message.reply_text(
-            f"✅ ALLOWED_USERS обновлен. Загружено {len(ALLOWED_USERS)} пользователей из Google Sheets."
-        )
+        # Читаем Google Sheets без блокировки event loop
+        updated = await asyncio.to_thread(load_allowed_users)
+
+        # Атомарно обновляем кеш доступа
+        global ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP, _ALLOWED_REFRESHING
+        with _ALLOWED_LOCK:
+            ALLOWED_USERS = updated or set()
+            ALLOWED_USERS_TIMESTAMP = time.time()   # продлеваем TTL после ручного обновления
+            _ALLOWED_REFRESHING = False             # сброс флага на случай, если шел фоновый рефреш
+
+        if msg:
+            await msg.reply_text(
+                f"✅ ALLOWED_USERS обновлён. Загружено {len(ALLOWED_USERS)} пользователей из Google Sheets."
+            )
+
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка при обновлении пользователей: {e}")
-        logging.error(f"[reload_users] Ошибка: {e}")
+        logging.exception("[reload_users] error")
+        if msg:
+            await msg.reply_text(f"❌ Ошибка при обновлении пользователей: {e}")
+
 
 def clean_unicode(text):
     return unicodedata.normalize("NFKD", text).encode("utf-8", "ignore").decode("utf-8")
@@ -663,30 +683,62 @@ async def ask_gpt_vision(prompt_text: str, image_base64: str) -> str:
         return ""
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    photo = update.message.photo[-1]
-    file = await photo.get_file()
-    original_photo_bytes = await file.download_as_bytearray()
+    user_id = update.effective_user.id if update and update.effective_user else None
+    msg = update.effective_message
 
-    image = Image.open(BytesIO(original_photo_bytes)).convert("RGB")
+    # 1) Достаём file_id из фото или документа-изображения
+    file_id = None
+    if getattr(msg, "photo", None):
+        file_id = msg.photo[-1].file_id
+    elif getattr(msg, "document", None):
+        doc = msg.document
+        if (doc.mime_type or "").startswith("image/"):
+            file_id = doc.file_id
+        else:
+            await msg.reply_text("⚠️ Пришли график как фото или как документ-картинку (PNG/JPG). PDF не поддерживается.")
+            return
+    else:
+        await msg.reply_text("⚠️ Не вижу изображения. Пришли как фото или документ-картинку (PNG/JPG).")
+        return
+
+    # 2) Скачиваем изображение безопасно
+    try:
+        tg_file = await context.bot.get_file(file_id)
+        bio = BytesIO()
+        await tg_file.download_to_memory(bio)
+    except Exception as e:
+        logging.exception("[handle_photo] download error")
+        await msg.reply_text("⚠️ Не удалось скачать изображение. Пришли поменьше или повтори ещё раз.")
+        return
+
+    # 3) Готовим JPEG и base64 для Vision
+    try:
+        image = Image.open(BytesIO(bio.getvalue())).convert("RGB")
+    except Exception:
+        await msg.reply_text("⚠️ Не удалось прочитать изображение. Пришли скрин в формате PNG/JPG.")
+        return
+
     buffer = BytesIO()
     image.save(buffer, format="JPEG", quality=80)
     image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
+    # 4) Проверяем выбранный рынок
     selected_market = context.user_data.get("selected_market")
     if not selected_market:
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📉 Crypto", callback_data="market_crypto")],
-            [InlineKeyboardButton("💱 Forex", callback_data="market_forex")]
+            [InlineKeyboardButton("💎 Crypto", callback_data="market_crypto")],
+            [InlineKeyboardButton("💱 Forex", callback_data="market_forex")],
         ])
-        await update.message.reply_text(
+        await msg.reply_text(
             "📝 Сначала выбери рынок — нажми одну из кнопок ниже, чтобы я знал, какой анализ тебе нужен:",
             reply_markup=keyboard
         )
         return
 
+    # флаг pro (оставляем как есть; может использоваться в других ветках)
     use_pro = context.user_data.get("is_pro_user") is True and user_id == 407721399
 
+    # 5) Ваш неизменённый промпт
     prompt_text = (
         f"You are a professional SMC (Smart Money Concepts) trader with 20+ years experience in "
         f"{'crypto' if selected_market == 'crypto' else 'forex'} markets. "
@@ -705,6 +757,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚫 Rules:\n- Answer in Russian only\n- No markdown\n- No refusal\n- No apologies"
     )
 
+    # 6) Запрос к Vision (с повтором при «извиняюсь/не могу»)
     analysis = ""
     for attempt in range(2):
         try:
@@ -719,16 +772,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             analysis = await ask_gpt_vision(enhanced_prompt, image_base64)
             logging.info(f"[handle_photo attempt {attempt}] Raw GPT analysis:\n{analysis}")
 
-            if any(x in analysis.lower() for x in ["sorry", "can't assist", "i cannot", "unable to"]):
+            if not analysis:
+                await asyncio.sleep(0.5)
                 continue
-            if analysis:
-                break
-            await asyncio.sleep(0.5)
+
+            low = analysis.lower()
+            if "sorry" in low or "can't assist" in low or "cannot" in low or "unable" in low:
+                continue
+            break
         except Exception as e:
             logging.error(f"[handle_photo retry {attempt}] GPT Vision error: {e}")
 
-    if not analysis or "can't assist" in analysis.lower():
-        await update.message.reply_text(
+    if not analysis:
+        await msg.reply_text(
             "⚠️ GPT не смог проанализировать этот скрин.\n\n"
             "Попробуй следующие улучшения:\n"
             "• Сделай фон графика белым\n"
@@ -737,6 +793,24 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "После этого пришли скрин ещё раз 🔁"
         )
         return
+
+    # 7) Лёгкий пост-процессинг ответа (без изменения смысла промпта)
+    lines = [ln for ln in (analysis or "").splitlines() if ln.strip()]
+    # убираем лишние служебные строки
+    lines = [ln for ln in lines if "Краткий план не сформирован" not in ln]
+    lines = [ln for ln in lines if not ln.startswith("📈 Направление сделки")]
+    text_joined = "\n".join(lines)
+    # если тип ордера не указан — подскажем (не меняет сути)
+    if "Вход:" in text_joined and ("ордер" not in text_joined.lower()):
+        text_joined += "\n\nℹ️ Тип ордера: лимитный (Buy Limit) на уровне входа."
+    analysis = text_joined
+
+    # 8) Ответ пользователю
+    await msg.reply_text(
+        analysis,
+        reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+    )
+
 
     def parse_price(raw_text):
         try:
@@ -1399,8 +1473,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info(f"[handle_main] Пользователь {user_id} нажал кнопку: {text}")
 
     # 🚪 Проверка доступа (кеш из Google Sheets).
-    # Разрешаем без подписки: «Купить», «О боте», «Бесплатный доступ через брокера».
-    free_paths = {"💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера"}
+    # Разрешаем без подписки: «Купить», «О боте», «Бесплатный доступ через брокера», «Криптообмен».
+    free_paths = {"💰 Купить", "ℹ️ О боте", "🔗 Бесплатный доступ через брокера", "💸 Криптообмен"}
     if user_id not in get_allowed_users() and text not in free_paths:
         await msg.reply_text(
             f"🔒 Доступ только после активации: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD}. Либо через брокера.",
@@ -1465,7 +1539,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("⚡ Для какого рынка сделать анализ?", reply_markup=keyboard)
         return
 
-    # 💸 Криптообмен
+    # 💸 Криптообмен (разрешено без подписки)
     if text == "💸 Криптообмен":
         await msg.reply_text(
             "💸 Криптообмен — быстро, безопасно и без лишних вопросов\n\n"
@@ -1559,7 +1633,6 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.update(saved)
     await msg.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
 
-
 async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Устанавливаем флаг, чтобы handle_main понимал, что активен психолог
     context.user_data["awaiting_therapy_input"] = True
@@ -1625,11 +1698,25 @@ async def gpt_psychologist_response(update: Update, context: ContextTypes.DEFAUL
 
 def extract_tx_id(d: dict) -> str:
     """Пытаемся достать идентификатор транзакции из разных возможных ключей IPN."""
+    if not isinstance(d, dict):
+        return ""
+    # 1) Прямые ключи
     for k in ("tx_id", "txid", "txn_id", "tx_hash", "hash", "transaction_id", "payment_id", "id"):
         v = d.get(k)
         if v:
             return str(v)
+
+    # 2) Частые вложенные контейнеры
+    for container in ("transaction", "payment"):
+        sub = d.get(container)
+        if isinstance(sub, dict):
+            for k in ("id", "tx_id", "txid", "hash"):
+                v = sub.get(k)
+                if v:
+                    return str(v)
+
     return ""
+
 
 def parse_order_id(raw: str) -> tuple[int | None, str, str]:
     """
@@ -1639,21 +1726,23 @@ def parse_order_id(raw: str) -> tuple[int | None, str, str]:
       user_{user_id}
     Возвращаем (user_id, username, plan)
     """
-    user_id = None
-    username = ""
-    plan = "unknown"
-
-    if not raw.startswith("user_"):
+    if not isinstance(raw, str) or not raw.startswith("user_"):
         raise ValueError(f"Unexpected order_id prefix: {raw}")
 
     rest = raw[len("user_"):]
-    # сначала отделяем user_id
+    # отделяем user_id
     if "_" in rest:
         uid_str, remainder = rest.split("_", 1)
     else:
         uid_str, remainder = rest, ""
 
-    user_id = int(uid_str)
+    try:
+        user_id = int(uid_str)
+    except Exception as e:
+        raise ValueError(f"Bad user_id in order_id: {uid_str}") from e
+
+    username = ""
+    plan = "unknown"
 
     if remainder:
         # если есть и username, и plan — забираем план как последний сегмент
@@ -1662,11 +1751,13 @@ def parse_order_id(raw: str) -> tuple[int | None, str, str]:
         else:
             username, plan = "", remainder
 
-    plan = (plan or "unknown").lower()
+    username = (username or "").lstrip("@").strip()
+    plan = (plan or "unknown").strip().lower()
     if plan not in {"monthly", "lifetime"}:
         plan = "unknown"
 
     return user_id, username, plan
+
 
 def validate_payment_fields(data: dict, plan: str) -> tuple[bool, str, Decimal, str, str]:
     """
@@ -1689,7 +1780,7 @@ def validate_payment_fields(data: dict, plan: str) -> tuple[bool, str, Decimal, 
         return False, "unknown plan", Decimal(0), "", ""
 
     # 2) Сумма (может прийти числом/строкой/с запятой)
-    raw_amount = data.get("amount")
+    raw_amount = data.get("amount") if isinstance(data, dict) else None
     if raw_amount is None:
         return False, "missing amount", Decimal(0), "", ""
     try:
@@ -1703,7 +1794,12 @@ def validate_payment_fields(data: dict, plan: str) -> tuple[bool, str, Decimal, 
     network_raw = (data.get("network") or data.get("chain") or "").strip().upper()
 
     # нормализация сетей
-    aliases = {"TRC20": "TRON", "TRON": "TRON", "BEP20": "BSC", "BSC": "BSC", "ERC20": "ERC20", "TON": "TON"}
+    aliases = {
+        "TRC20": "TRON", "TRON": "TRON",
+        "BEP20": "BSC",  "BSC": "BSC",
+        "ERC20": "ERC20",
+        "TON": "TON",
+    }
     network_norm = aliases.get(network_raw, network_raw)
 
     # 4) Ожидаемые из конфигурации (могут быть пустыми/None)
@@ -1724,19 +1820,23 @@ def validate_payment_fields(data: dict, plan: str) -> tuple[bool, str, Decimal, 
 
     return True, "ok", amount, currency, network_norm
 
+
 # ✅ Webhook от CryptoCloud
 @app_flask.route("/cryptocloud_webhook", methods=["POST"])
 def cryptocloud_webhook():
-    body = request.get_data()
-    signature = request.headers.get("X-Signature-SHA256") or ""
-    calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    body = request.get_data()  # bytes
+    signature_hdr = (request.headers.get("X-Signature-SHA256") or "").strip().lower()
+    calc_sig = hmac.new(API_SECRET.encode(), body, hashlib.sha256).hexdigest().lower()
 
     # Безопасное сравнение подписи
-    if not hmac.compare_digest(signature, calc_sig):
+    if not hmac.compare_digest(signature_hdr, calc_sig):
         logging.warning("⚠ Неверная подпись IPN")
         return jsonify({"status": "invalid signature"}), 400
 
     data = request.json or {}
+    if not isinstance(data, dict):
+        logging.warning("⚠ Некорректное тело IPN (не dict)")
+        return jsonify({"status": "bad payload"}), 400
 
     status = str(data.get("status") or "").lower()
     raw_order_id = (data.get("order_id") or "").strip()
@@ -1756,6 +1856,9 @@ def cryptocloud_webhook():
     # Принимаем только успешные платежи
     if status != "paid":
         return jsonify({"status": "ignored (not paid)"}), 200
+
+    if not raw_order_id:
+        return jsonify({"status": "missing order_id"}), 400
 
     # Парсим order_id → (user_id, username, plan)
     try:
@@ -1782,29 +1885,28 @@ def cryptocloud_webhook():
         logging.error("⛔ Валидация не пройдена: %s. plan=%s, tx_id='%s'", reason, plan, tx_id)
         return jsonify({"status": "validation failed", "reason": reason}), 400
 
-    # Активируем доступ локально (в кеш) + асинхронно логируем в Google Sheets
+    # Активируем доступ локально + асинхронно логируем в Google Sheets
     try:
         ALLOWED_USERS.add(user_id)
-        # Логирование платежа/пользователя в Sheets переносим в поток через основной loop
-        # Если у вас есть функция log_payment(uid, username) — используем её:
-        fut1 = asyncio.run_coroutine_threadsafe(
+        # продлеваем TTL кеша, чтобы не перезатёрся до фонового обновления
+        global ALLOWED_USERS_TIMESTAMP
+        ALLOWED_USERS_TIMESTAMP = time.time()
+
+        # Планируем запись в Sheets на основном loop (через тред-пул)
+        loop = getattr(app_flask, "loop", None) or asyncio.get_event_loop()
+        asyncio.run_coroutine_threadsafe(
             asyncio.to_thread(log_payment, user_id, username),
-            app_flask.loop
+            loop
         )
-        # Также можно записать сам факт покупки в payment-sheet, если у вас есть helper:
-        # fut2 = asyncio.run_coroutine_threadsafe(
-        #     safe_append_row(payment_sheet, [str(user_id), username, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), plan, str(amount), currency, network]),
-        #     app_flask.loop
-        # )
-        # (Если safe_append_row асинхронная и принимает sheet — раскомментируйте и передайте ваш sheet)
     except Exception as e:
         logging.error("❌ Ошибка постановки записи в Google Sheets: %s", e)
 
     # Уведомление пользователю — асинхронно в loop бота
     try:
+        loop = getattr(app_flask, "loop", None) or asyncio.get_event_loop()
         asyncio.run_coroutine_threadsafe(
             notify_user_payment(user_id),
-            app_flask.loop
+            loop
         )
     except Exception as e:
         logging.error("❌ Не удалось запланировать уведомление %s: %s", user_id, e)
@@ -1820,7 +1922,6 @@ def cryptocloud_webhook():
     )
 
     return jsonify({"ok": True}), 200
-
 
 def sanitize_username(u: str | None) -> str:
     if not u:
@@ -2051,33 +2152,35 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🧾 Нормализуем вход
-    text = (update.message.text or "").strip()
-    has_photo = bool(update.message.photo)
+    msg = update.effective_message
+    text = (getattr(msg, "text", "") or "").strip()
 
-    # ✅ Явная проверка на команды
-    if text == "/start":
-        await start(update, context)
-        return
-    if text == "/restart":
-        await restart(update, context)
+    # Фото или документ-картинка (PNG/JPG)
+    doc = getattr(msg, "document", None)
+    is_image_doc = bool(doc and (doc.mime_type or "").startswith("image/"))
+    has_photo = bool(getattr(msg, "photo", None)) or is_image_doc
+
+    # ↩️ Универсальный выход (работает из любого состояния)
+    if text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
+        context.user_data.clear()
+        await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
         return
 
     # 📨 Сбор email
     if context.user_data.get("awaiting_email"):
         if text and "@" in text and "." in text:
             try:
-                # используем безопасную запись в таблицу
                 await asyncio.to_thread(safe_append_row, [
                     str(update.effective_user.id),
                     update.effective_user.username or "",
-                    text
+                    text,
                 ])
-                await update.message.reply_text("✅ Email сохранён! Бонус придёт в ближайшее время.")
+                await msg.reply_text("✅ Email сохранён! Бонус придёт в ближайшее время.")
             except Exception as e:
                 logging.error(f"[EMAIL_SAVE] {e}")
-                await update.message.reply_text("⚠️ Не удалось сохранить. Попробуй позже.")
+                await msg.reply_text("⚠️ Не удалось сохранить. Попробуй позже.")
         else:
-            await update.message.reply_text("❌ Похоже, это не email. Попробуй снова.")
+            await msg.reply_text("❌ Похоже, это не email. Попробуй снова.")
             return
         context.user_data.pop("awaiting_email", None)
         return
@@ -2087,10 +2190,10 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if has_photo:
             await handle_calendar_photo(update, context)
         else:
-            await update.message.reply_text("📸 Пришли скрин экономического календаря или нажми «↩️ Выйти в меню».")
+            await msg.reply_text("📸 Пришли скрин экономического календаря или нажми «↩️ Выйти в меню».")
         return
 
-    # 🖼 Если просто прислали фото графика — разбираем сетап
+    # 🖼 Если просто прислали фото/документ-картинку — разбираем сетап
     if has_photo:
         await handle_photo(update, context)
         return
@@ -2098,7 +2201,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # ✅ Остальные режимы (текст)
     if context.user_data.get("awaiting_potential"):
         context.user_data.pop("awaiting_potential", None)
-        await update.message.reply_text(
+        await msg.reply_text(
             "⚠️ Этот режим временно недоступен. Возвращаю в меню.",
             reply_markup=REPLY_MARKUP
         )
@@ -2121,7 +2224,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if text:
             await handle_strategy_text(update, context)
         else:
-            await update.message.reply_text("❌ Для текстовой стратегии нужно отправить текстовое сообщение.")
+            await msg.reply_text("❌ Для текстовой стратегии нужно отправить текстовое сообщение.")
         return
 
     # Стратегия: фото
@@ -2129,7 +2232,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if has_photo:
             await handle_strategy_photo(update, context)
         else:
-            await update.message.reply_text("❌ Для стратегии по скриншоту отправьте фото.")
+            await msg.reply_text("❌ Для стратегии по скриншоту отправьте фото.")
         return
 
     # UID для брокера
@@ -2139,6 +2242,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # 🧭 Если ничего из выше — отдаём в главный роутер
     await handle_main(update, context)
+
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
