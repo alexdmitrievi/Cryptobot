@@ -706,7 +706,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tg_file = await context.bot.get_file(file_id)
         bio = BytesIO()
         await tg_file.download_to_memory(bio)
-    except Exception as e:
+    except Exception:
         logging.exception("[handle_photo] download error")
         await msg.reply_text("⚠️ Не удалось скачать изображение. Пришли поменьше или повтори ещё раз.")
         return
@@ -738,7 +738,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # флаг pro (оставляем как есть; может использоваться в других ветках)
     use_pro = context.user_data.get("is_pro_user") is True and user_id == 407721399
 
-    # 5) Ваш неизменённый промпт
+    # 5) Промпт без изменений
     prompt_text = (
         f"You are a professional SMC (Smart Money Concepts) trader with 20+ years experience in "
         f"{'crypto' if selected_market == 'crypto' else 'forex'} markets. "
@@ -796,7 +796,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 7) Лёгкий пост-процессинг ответа (без изменения смысла промпта)
     lines = [ln for ln in (analysis or "").splitlines() if ln.strip()]
-    # убираем лишние служебные строки
+    # убираем служебные/дублирующие строки
     lines = [ln for ln in lines if "Краткий план не сформирован" not in ln]
     lines = [ln for ln in lines if not ln.startswith("📈 Направление сделки")]
     text_joined = "\n".join(lines)
@@ -805,12 +805,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_joined += "\n\nℹ️ Тип ордера: лимитный (Buy Limit) на уровне входа."
     analysis = text_joined
 
-    # 8) Ответ пользователю
+    # 8) Итоговый ответ пользователю (одно сообщение)
     await msg.reply_text(
         analysis,
         reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
     )
-
 
     def parse_price(raw_text):
         try:
