@@ -2184,7 +2184,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop("awaiting_email", None)
         return
 
-    # 🗓 Экономкалендарь: ждём скрин
+    # 🗓 Экономкалендарь — приоритетнее любых других фото
     if context.user_data.get("awaiting_calendar_photo"):
         if has_photo:
             await handle_calendar_photo(update, context)
@@ -2192,18 +2192,26 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await msg.reply_text("📸 Пришли скрин экономического календаря или нажми «↩️ Выйти в меню».")
         return
 
-    # 🖼 Если просто прислали фото/документ-картинку — разбираем сетап
-    if has_photo:
-        await handle_photo(update, context)
+    # 💡 Инвест-стратегия: ТЕКСТ
+    if context.user_data.get("awaiting_strategy") == "text":
+        if text:
+            await handle_strategy_text(update, context)
+        else:
+            await msg.reply_text("❌ Для текстовой стратегии нужно отправить текстовое сообщение.")
+        return
+
+    # 💡 Инвест-стратегия: СКРИН (важно: раньше общего трейдерского разбора)
+    if context.user_data.get("awaiting_strategy") == "photo":
+        if has_photo:
+            await handle_strategy_photo(update, context)   # <-- твой инвесторский блок
+        else:
+            await msg.reply_text("📸 Пришли скрин для инвест-стратегии или нажми «↩️ Выйти в меню».")
         return
 
     # ✅ Остальные режимы (текст)
     if context.user_data.get("awaiting_potential"):
         context.user_data.pop("awaiting_potential", None)
-        await msg.reply_text(
-            "⚠️ Этот режим временно недоступен. Возвращаю в меню.",
-            reply_markup=REPLY_MARKUP
-        )
+        await msg.reply_text("⚠️ Этот режим временно недоступен. Возвращаю в меню.", reply_markup=REPLY_MARKUP)
         return
 
     if context.user_data.get("awaiting_definition_term"):
@@ -2218,25 +2226,14 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await teacher_response(update, context)
         return
 
-    # Стратегия: текст
-    if context.user_data.get("awaiting_strategy") == "text":
-        if text:
-            await handle_strategy_text(update, context)
-        else:
-            await msg.reply_text("❌ Для текстовой стратегии нужно отправить текстовое сообщение.")
-        return
-
-    # Стратегия: фото
-    if context.user_data.get("awaiting_strategy") == "photo":
-        if has_photo:
-            await handle_strategy_photo(update, context)
-        else:
-            await msg.reply_text("❌ Для стратегии по скриншоту отправьте фото.")
-        return
-
     # UID для брокера
     if context.user_data.get("awaiting_uid"):
         await handle_uid_submission(update, context)
+        return
+
+    # 🖼 Общий случай: скрин графика → трейдерский SMC разбор
+    if has_photo:
+        await handle_photo(update, context)
         return
 
     # 🧭 Если ничего из выше — отдаём в главный роутер
