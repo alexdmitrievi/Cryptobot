@@ -760,7 +760,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # флаг pro (оставляем как есть; может использоваться в других ветках)
-    use_pro = context.user_data.get("is_pro_user") is True and user_id == 407721399
+    use_pro = context.user_data.get("is_pro_user") is True and user_id == 407721399  # noqa: F841
 
     # 5) Промпт без изменений
     prompt_text = (
@@ -820,25 +820,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 7) Лёгкий пост-процессинг ответа (без изменения смысла промпта)
     lines = [ln for ln in (analysis or "").splitlines() if ln.strip()]
-    # убираем служебные/дублирующие строки
     lines = [ln for ln in lines if "Краткий план не сформирован" not in ln]
     lines = [ln for ln in lines if not ln.startswith("📈 Направление сделки")]
     text_joined = "\n".join(lines)
-    # если тип ордера не указан — подскажем (не меняет сути)
     if "Вход:" in text_joined and ("ордер" not in text_joined.lower()):
         text_joined += "\n\nℹ️ Тип ордера: лимитный (Buy Limit) на уровне входа."
     analysis = text_joined
 
-    # 8) Итоговый ответ пользователю (одно сообщение)
-    await msg.reply_text(
-        analysis,
-        reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-    )
+    # --- Не отправляем analysis отдельным сообщением, чтобы не было дублей ---
 
-    def parse_price(raw_text):
+    def parse_price(raw_text: str | None):
+        if not raw_text:
+            return None
         try:
-            return float(raw_text.replace(" ", "").replace(",", "").replace("$", ""))
-        except:
+            cleaned = (
+                raw_text.replace(" ", "")
+                        .replace("\u00A0", "")
+                        .replace(",", "")
+                        .replace("$", "")
+                        .replace("—", "-")
+            )
+            return float(cleaned)
+        except Exception:
             return None
 
     entry_match = re.search(r'(Entry|Вход)[:\s]*\$?\s*([\d\s,.]+)', analysis, flags=re.IGNORECASE) \
@@ -849,23 +852,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         or re.search(r'💰[:\s]*\$?\s*([\d\s,.]+)', analysis)
     bias_match = re.search(r'\b(BUY|SELL|ПОКУПКА|ПРОДАЖА)\b', analysis, flags=re.IGNORECASE)
 
-    entry = parse_price(entry_match.group(2) if entry_match and entry_match.lastindex == 2 else entry_match.group(1)) if entry_match else None
-    stop = parse_price(stop_match.group(2) if stop_match and stop_match.lastindex == 2 else stop_match.group(1)) if stop_match else None
-    tp = parse_price(tp_match.group(2) if tp_match and tp_match.lastindex == 2 else tp_match.group(1)) if tp_match else None
+    entry = parse_price(entry_match.group(2) if entry_match and entry_match.lastindex == 2 else (entry_match.group(1) if entry_match else None))
+    stop = parse_price(stop_match.group(2) if stop_match and stop_match.lastindex == 2 else (stop_match.group(1) if stop_match else None))
+    tp = parse_price(tp_match.group(2) if tp_match and tp_match.lastindex == 2 else (tp_match.group(1) if tp_match else None))
 
     if entry and stop:
-        risk_abs = abs(entry - stop)
-        risk_pct = abs((entry - stop) / entry * 100)
-        risk_line = f"📌 Область риска ≈ ${risk_abs:.2f} ({risk_pct:.2f}%)"
+        if entry != 0:
+            risk_abs = abs(entry - stop)
+            risk_pct = abs((entry - stop) / entry * 100)
+            risk_line = f"📌 Область риска ≈ ${risk_abs:.2f} ({risk_pct:.2f}%)"
+        else:
+            risk_line = "📌 Область риска: деление на ноль невозможно (entry=0)."
     else:
         risk_line = "📌 Область риска не указана явно — оценивай внимательно."
 
     rr_line = ""
     if entry and stop and tp and (entry != stop):
-        rr_ratio = abs((tp - entry) / (entry - stop))
-        rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
-        if rr_ratio < 3:
-            rr_line += "\n⚠️ R:R ниже 1:3 — план рискованный, подумай дважды."
+        try:
+            rr_ratio = abs((tp - entry) / (entry - stop))
+            rr_line = f"📊 R:R ≈ {rr_ratio:.2f}"
+            if rr_ratio < 3:
+                rr_line += "\n⚠️ R:R ниже 1:3 — план рискованный, подумай дважды."
+        except Exception:
+            pass
 
     bias_line = f"📈 Направление сделки: {bias_match.group(1).upper()}" if bias_match else ""
 
@@ -887,7 +896,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         full_message += f"\n{bias_line}"
     full_message += f"\n\n{tldr}"
 
-    await update.message.reply_text(full_message, reply_markup=keyboard)
+    # Используем msg.reply_text (а не update.message) — это устойчиво для фото и документов
+    await msg.reply_text(full_message, reply_markup=keyboard)
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем фото от пользователя
@@ -974,7 +984,7 @@ def fetch_price_from_binance(symbol: str) -> float | None:
 async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
 
-    # 1) Унифицированно получаем изображение (фото ИЛИ документ-картинка)
+    # 1) Получаем изображение (поддержка фото И документ-картинки)
     file_id = None
     if getattr(msg, "photo", None):
         file_id = msg.photo[-1].file_id
@@ -990,7 +1000,7 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         await tg_file.download_to_memory(raw)
     except Exception:
         logging.exception("[handle_strategy_photo] download error")
-        await msg.reply_text("⚠️ Не удалось скачать изображение. Пришли его поменьше и повтори.")
+        await msg.reply_text("⚠️ Не удалось скачать изображение. Отправь файл поменьше и повтори.")
         return
 
     # 2) Готовим JPEG для Vision + мягкая нормализация размера
@@ -1013,60 +1023,55 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
     img.save(buf, format="JPEG", quality=82)
     image_base64 = base64.b64encode(buf.getvalue()).decode()
 
-    # 3) Улучшенный промпт
+    # 3) Промпт: простой язык + обязательное правило TP > текущей цены
     prompt_text = (
-        "You are an ELITE MULTI-ASSET STRATEGIST with 20+ years of institutional experience "
-        "in Smart Money Concepts (SMC), portfolio management and risk control.\n\n"
+        "You are an ELITE MULTI-ASSET STRATEGIST with 20+ years of institutional experience. "
+        "Your goal is to create an EASY-TO-UNDERSTAND investment plan for beginners.\n\n"
 
-        "TASK: From a TradingView/Bybit chart screenshot, produce a COMPLETE, STEP-BY-STEP "
-        "investment strategy for swing/position trading (DCA, profit-taking, tactical trades) — "
-        "NOT intraday scalping.\n\n"
+        "TASK: From a TradingView/Bybit chart screenshot, produce a FULL swing/position strategy. "
+        "Write simply, as if to a friend who just started investing.\n\n"
 
         "⚖️ Rules:\n"
-        "- Always answer STRICTLY in Russian language.\n"
+        "- Always answer STRICTLY in Russian.\n"
         "- No markdown formatting.\n"
-        "- Short impactful sentences (2–3 per block).\n"
-        "- Add 1–2 relevant emojis per block (📈📉⚠️💰) but avoid overuse.\n"
+        "- Very simple language, short sentences (до 2 в блоке). Add 1–2 emojis for clarity (📈📉⚠️💰).\n"
+        "- Explain terms simply: «резерв в кэше — это свободные деньги, пока лежат в USDT/наличных и не инвестированы».\n"
+        "- FIRST, estimate the current price X visible on the chart (по правой шкале/свечам) и используй X для проверки уровней.\n"
+        "- TakeProfits (TP1, TP2) MUST be strictly above the current price X. Also TP2 > TP1.\n"
         "- Sanity-check before output:\n"
-        "  • TP1 > Entry; TP2 > TP1.\n"
-        "  • SL < Entry for long scenarios.\n"
-        "  • Sum of all % positions ≤ 100.\n"
-        "  • No duplicate numbers unless explained.\n"
-        "- If data is missing or unclear, reconstruct using:\n"
-        "  • Candle bodies/wicks & last swing high/low.\n"
-        "  • Nearest round-number magnets (00/50).\n"
-        "  • ATR approximation for SL/TP distance.\n"
-        "  • Default risk = 5% per step if no other data visible.\n"
-        "- Explicitly mark assumptions in brackets [допущение].\n\n"
+        "  • Для лонга: TP1 > Entry; TP2 > TP1; SL < Entry; TP1 и TP2 > X.\n"
+        "  • Сумма процентов позиций ≤ 100.\n"
+        "  • Не повторяй одинаковые числа без объяснения.\n"
+        "- If data is missing, make assumptions and mark them like [допущение].\n\n"
 
-        "✅ Output structure (use EXACTLY this order):\n"
-        "0️⃣ Сводка в 3 строках:\n"
-        "• Общий контекст.\n"
+        "✅ Output structure (use exactly this order, simple Russian):\n"
+        "0️⃣ Короткая суть (3 строки):\n"
+        "• Что сейчас с рынком.\n"
         "• Главная идея стратегии.\n"
-        "• Ключевой риск.\n\n"
+        "• Главный риск.\n\n"
 
-        "1️⃣ Профиль инвестора:\n...\n\n"
+        "1️⃣ Инвесторский профиль:\n...\n\n"
 
-        "2️⃣ Состав портфеля:\n"
-        "• Основная часть (долгосрок): …%\n"
-        "• Дополнительная часть (тактические сделки): …%\n"
-        "• Резерв в кэше: …%\n\n"
+        "2️⃣ Распределение капитала:\n"
+        "• Долгосрок: …%\n"
+        "• Тактические сделки: …%\n"
+        "• Резерв в кэше (свободные деньги в USDT/наличных): …%\n\n"
 
-        "3️⃣ Защита капитала (долгосрок):\n"
-        "• Максимальная просадка портфеля: …%\n"
+        "3️⃣ Защита капитала:\n"
+        "• Максимальная просадка: …%\n"
         "• Лимит убытка за месяц: …%\n"
-        "• Пересмотр долей: раз в … месяцев\n"
+        "• Пересмотр портфеля: раз в … месяцев\n"
         "• Резерв в кэше при плохих новостях: …%\n\n"
 
-        "4️⃣ План покупок и усреднения (DCA):\n"
+        "4️⃣ План покупок (DCA):\n"
         "• Первая покупка: $… (…% от депозита)\n"
         "• Усреднение 1: $… (…% от депозита)\n"
         "• Усреднение 2: $… (…% от депозита)\n\n"
 
         "5️⃣ Тактические сделки:\n"
-        "• Риск на сделку: …% от капитала\n"
+        "• Риск на сделку: …% капитала\n"
         "• Стоп-лосс: $…\n"
-        "• Фиксация прибыли: $TP1 и $TP2\n"
+        "• Фиксация прибыли: TP1 = $… и TP2 = $…  (оба строго выше текущей цены X)\n"
         "• Минимальное соотношение прибыль/риск (R:R): x.xx\n\n"
 
         "6️⃣ План на ближайшее время:\n...\n\n"
@@ -1078,10 +1083,10 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
 
         "8️⃣ Итог:\n...\n\n"
 
-        "REMINDER: All blocks are mandatory. Even if chart data is unclear, fill every section with assumptions."
+        "REMINDER: All blocks are mandatory. Write in very clear, simple Russian for beginners."
     )
 
-    # 4) Запрос с авто-повтором
+    # 4) Запрос с авто-повтором и проверками структуры
     refusal_markers = [
         "can't assist", "cannot assist", "i cannot", "unable to",
         "insufficient data", "not enough information",
@@ -1093,7 +1098,7 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         try:
             enhanced = prompt_text
             if attempt == 1:
-                enhanced += "\n\nFINAL RULE: Никаких отказов. Сделай допущения и выдай все цифры."
+                enhanced += "\n\nFINAL RULE: Никаких отказов. Сделай допущения и выдай все цифры. TP1 и TP2 строго выше текущей цены X."
             analysis = await ask_gpt_vision(enhanced, image_base64)
             logging.info(f"[handle_strategy_photo attempt {attempt}] Raw GPT analysis:\n{analysis}")
 
@@ -1105,11 +1110,16 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
             if any(m in low for m in refusal_markers):
                 continue
 
+            # Проверка наличия ключевых заголовков
             has_headers = all(s in analysis for s in [
-                "0️⃣ Сводка", "1️⃣ Профиль инвестора", "2️⃣ Состав портфеля",
+                "0️⃣ Короткая суть", "1️⃣ Инвесторский профиль", "2️⃣ Распределение капитала",
                 "4️⃣ План покупок", "5️⃣ Тактические сделки", "7️⃣ Сценарии", "8️⃣ Итог"
             ])
             if not has_headers:
+                continue
+
+            # Минимальная проверка присутствия чисел с $ (хотя бы одно)
+            if "$" not in analysis:
                 continue
 
             break
@@ -1132,6 +1142,7 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         f"📊 Инвестиционная стратегия по твоему скрину:\n\n{analysis}",
         reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
     )
+    # На инвест-ветке обычно логично «закрывать» ввод
     context.user_data.clear()
 
 # --- INVEST QUESTION (текстовая стратегия через кнопку "💡 Инвестор") ---
@@ -1537,6 +1548,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 💡 Инвестор (выбор формата)
     if text == "💡 Инвестор":
         context.user_data.clear()
+        # 👇 включаем дефолтный «инвест-режим по фото», чтобы скрин сразу ушёл в handle_strategy_photo
+        context.user_data["awaiting_strategy"] = "photo"
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✍️ Написать текст", callback_data="strategy_text")],
             [InlineKeyboardButton("📸 Отправить скрин", callback_data="strategy_photo")],
