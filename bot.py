@@ -626,57 +626,81 @@ async def grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def reload_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.effective_message
-    user_id = update.effective_user.id if update and update.effective_user else None
-
-    # Проверка прав
+    user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
-        if msg:
-            await msg.reply_text("⛔ Эта команда доступна только админу.")
+        await update.message.reply_text("⛔ Эта команда доступна только админу.")
         return
 
     try:
-        # Читаем Google Sheets без блокировки event loop
         updated = await asyncio.to_thread(load_allowed_users)
+        if not updated:
+            await update.message.reply_text("⚠️ Sheets вернул пусто. Кеш ALLOWED_USERS оставлен без изменений.")
+            return
 
-        # Атомарно обновляем кеш доступа
-        global ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP, _ALLOWED_REFRESHING
+        global ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP
         with _ALLOWED_LOCK:
-            ALLOWED_USERS = updated or set()
-            ALLOWED_USERS_TIMESTAMP = time.time()   # продлеваем TTL после ручного обновления
-            _ALLOWED_REFRESHING = False             # сброс флага на случай, если шел фоновый рефреш
-
-        if msg:
-            await msg.reply_text(
-                f"✅ ALLOWED_USERS обновлён. Загружено {len(ALLOWED_USERS)} пользователей из Google Sheets."
-            )
-
+            ALLOWED_USERS = updated
+            ALLOWED_USERS_TIMESTAMP = time.time()
+        await update.message.reply_text(f"✅ ALLOWED_USERS обновлён: {len(ALLOWED_USERS)} пользователей.")
     except Exception as e:
-        logging.exception("[reload_users] error")
-        if msg:
-            await msg.reply_text(f"❌ Ошибка при обновлении пользователей: {e}")
+        logging.error(f"[reload_users] Ошибка: {e}")
+        await update.message.reply_text(f"❌ Ошибка при обновлении пользователей.")
 
 
 def clean_unicode(text):
     return unicodedata.normalize("NFKD", text).encode("utf-8", "ignore").decode("utf-8")
 
 async def ask_gpt_vision(prompt_text: str, image_base64: str) -> str:
+    """
+    Универсальный вызов GPT-Vision:
+    - Чёткие правила на английском (system)
+    - Основное задание (user), включая изображение
+    - Ответ всегда строго на русском
+    """
+
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt_text},
-                    {"type": "image_url", "image_url": {
-                        "url": f"data:image/jpeg;base64,{image_base64}"
-                    }}
-                ]
-            }],
-            max_tokens=1000
+            model="gpt-4o",  # можно оставить gpt-4o, он быстрее vision
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an elite multi-asset strategist with 20+ years of institutional experience "
+                        "in Smart Money Concepts (SMC), portfolio management, and risk control. "
+                        "You ALWAYS produce a complete numeric trading/investment plan, "
+                        "never refuse, never apologize. "
+                        "You must sanity-check all numbers (TP > Entry, SL < Entry for long). "
+                        "All responses must be in Russian, no markdown formatting, "
+                        "short impactful sentences, with emojis when relevant."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                prompt_text
+                                + "\n\n🚨 FINAL RULE: "
+                                + "Even if the chart is unclear, dark, cropped, or missing data, "
+                                  "you MUST provide a full strategy with numeric levels using assumptions. "
+                                  "Answer strictly in Russian, keep the required structure."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
+                        },
+                    ],
+                },
+            ],
+            max_tokens=1800,
+            temperature=0.3,
+            presence_penalty=0.1,
+            frequency_penalty=0.1,
         )
 
-        return response.choices[0].message.content.strip()
+        return (response.choices[0].message.content or "").strip()
 
     except Exception as e:
         logging.error(f"[ask_gpt_vision] Error during GPT Vision request: {e}")
@@ -948,134 +972,163 @@ def fetch_price_from_binance(symbol: str) -> float | None:
         return None
 
 async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    photo = update.message.photo[-1]
-    file = await photo.get_file()
-    original_photo_bytes = await file.download_as_bytearray()
+    msg = update.effective_message
 
-    image = Image.open(BytesIO(original_photo_bytes)).convert("RGB")
-    buffer = BytesIO()
-    image.save(buffer, format="JPEG", quality=85)
-    image_base64 = base64.b64encode(buffer.getvalue()).decode()
+    # 1) Унифицированно получаем изображение (фото ИЛИ документ-картинка)
+    file_id = None
+    if getattr(msg, "photo", None):
+        file_id = msg.photo[-1].file_id
+    elif getattr(msg, "document", None) and (msg.document.mime_type or "").startswith("image/"):
+        file_id = msg.document.file_id
+    else:
+        await msg.reply_text("⚠️ Пришли скрин как фото или как документ-картинку (PNG/JPG).")
+        return
 
-    # Base EN prompt (answer strictly in Russian, with quality control)
+    try:
+        tg_file = await context.bot.get_file(file_id)
+        raw = BytesIO()
+        await tg_file.download_to_memory(raw)
+    except Exception:
+        logging.exception("[handle_strategy_photo] download error")
+        await msg.reply_text("⚠️ Не удалось скачать изображение. Пришли его поменьше и повтори.")
+        return
+
+    # 2) Готовим JPEG для Vision + мягкая нормализация размера
+    try:
+        img = Image.open(BytesIO(raw.getvalue())).convert("RGB")
+    except Exception:
+        await msg.reply_text("⚠️ Не удалось прочитать изображение. Нужен PNG/JPG.")
+        return
+
+    try:
+        max_side = 1600
+        w, h = img.size
+        if max(w, h) > max_side:
+            scale = max_side / float(max(w, h))
+            img = img.resize((int(w * scale), int(h * scale)))
+    except Exception:
+        pass
+
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=82)
+    image_base64 = base64.b64encode(buf.getvalue()).decode()
+
+    # 3) Улучшенный промпт
     prompt_text = (
-        "You are an ELITE MULTI-ASSET STRATEGIST with over 20 years of institutional experience in Smart Money Concepts (SMC), "
-        "portfolio management, and risk control across crypto, Forex, and global stocks. "
-        "You combine the precision of a professional fund manager, the market-structure expertise of an SMC trader, "
-        "and the discipline of a senior risk manager.\n\n"
+        "You are an ELITE MULTI-ASSET STRATEGIST with 20+ years of institutional experience "
+        "in Smart Money Concepts (SMC), portfolio management and risk control.\n\n"
 
-        "You will receive a trading chart screenshot (Bybit or TradingView) and MUST produce a COMPLETE, ACTIONABLE, STEP-BY-STEP "
-        "investment strategy focused on swing and position trading (buying, averaging, profit-taking) — NOT intraday scalping.\n\n"
+        "TASK: From a TradingView/Bybit chart screenshot, produce a COMPLETE, STEP-BY-STEP "
+        "investment strategy for swing/position trading (DCA, profit-taking, tactical trades) — "
+        "NOT intraday scalping.\n\n"
 
-        "📌 Your analysis must include:\n"
-        "1. Market context (trend, support/resistance, momentum, volatility).\n"
-        "2. Exact numeric levels for Initial Buy and 1–2 Averaging levels (DCA) — two decimal places, no ranges.\n"
-        "3. Two exact numeric TakeProfit targets.\n"
-        "4. One exact numeric StopLoss (≤10% of total deposit risk) for the tactical part only.\n"
-        "5. Position size for each step as a percentage of deposit.\n"
-        "6. Key risks and protective measures.\n"
-        "7. Assumptions: if data is unclear, deduce levels from candle bodies/wicks, last swing high/low, visible S/R, round-number magnets (00/50), and recent ATR.\n"
-        "8. Confidence (0–100%) and Invalidation (when the plan is wrong).\n"
-        "9. Data that would improve accuracy (max 2 items).\n\n"
-
-        "⚖️ Style rules:\n"
-        "- ALWAYS answer strictly in Russian language.\n"
+        "⚖️ Rules:\n"
+        "- Always answer STRICTLY in Russian language.\n"
         "- No markdown formatting.\n"
-        "- Speak with absolute confidence — no vague phrases like 'maybe' or 'probably'.\n"
-        "- Use short, impactful sentences (max 2–3 per block).\n"
-        "- Add relevant emojis for clarity.\n"
-        "- Do not leave any section empty.\n"
-        "- Do not repeat the same number in different blocks without explanation.\n"
-        "- Sanity-check before answering: TP1 > Entry; SL < Entry (for long); sum of position % ≤ 100%; all numbers unique unless justified.\n\n"
+        "- Short impactful sentences (2–3 per block).\n"
+        "- Add 1–2 relevant emojis per block (📈📉⚠️💰) but avoid overuse.\n"
+        "- Sanity-check before output:\n"
+        "  • TP1 > Entry; TP2 > TP1.\n"
+        "  • SL < Entry for long scenarios.\n"
+        "  • Sum of all % positions ≤ 100.\n"
+        "  • No duplicate numbers unless explained.\n"
+        "- If data is missing or unclear, reconstruct using:\n"
+        "  • Candle bodies/wicks & last swing high/low.\n"
+        "  • Nearest round-number magnets (00/50).\n"
+        "  • ATR approximation for SL/TP distance.\n"
+        "  • Default risk = 5% per step if no other data visible.\n"
+        "- Explicitly mark assumptions in brackets [допущение].\n\n"
 
-        "✅ Output Format (simple and beginner-friendly, keep structure exactly):\n"
-        "1️⃣ Профиль инвестора:\n"
-        "…\n\n"
+        "✅ Output structure (use EXACTLY this order):\n"
+        "0️⃣ Сводка в 3 строках:\n"
+        "• Общий контекст.\n"
+        "• Главная идея стратегии.\n"
+        "• Ключевой риск.\n\n"
+
+        "1️⃣ Профиль инвестора:\n...\n\n"
+
         "2️⃣ Состав портфеля:\n"
         "• Основная часть (долгосрок): …%\n"
         "• Дополнительная часть (тактические сделки): …%\n"
         "• Резерв в кэше: …%\n\n"
+
         "3️⃣ Защита капитала (долгосрок):\n"
         "• Максимальная просадка портфеля: …%\n"
         "• Лимит убытка за месяц: …%\n"
         "• Пересмотр долей: раз в … месяцев\n"
         "• Резерв в кэше при плохих новостях: …%\n\n"
+
         "4️⃣ План покупок и усреднения (DCA):\n"
         "• Первая покупка: $… (…% от депозита)\n"
         "• Усреднение 1: $… (…% от депозита)\n"
         "• Усреднение 2: $… (…% от депозита)\n\n"
+
         "5️⃣ Тактические сделки:\n"
         "• Риск на сделку: …% от капитала\n"
         "• Стоп-лосс: $…\n"
         "• Фиксация прибыли: $TP1 и $TP2\n"
-        "• Минимальное соотношение прибыль/риск: …\n\n"
-        "6️⃣ План на ближайшее время:\n"
-        "…\n\n"
+        "• Минимальное соотношение прибыль/риск (R:R): x.xx\n\n"
+
+        "6️⃣ План на ближайшее время:\n...\n\n"
+
         "7️⃣ Сценарии:\n"
         "📈 Рынок растёт — …\n"
         "📉 Рынок падает — …\n"
         "➡️ Рынок стоит — …\n\n"
-        "8️⃣ Итог:\n"
-        "…"
+
+        "8️⃣ Итог:\n...\n\n"
+
+        "REMINDER: All blocks are mandatory. Even if chart data is unclear, fill every section with assumptions."
     )
 
-    # Retry prompt — zero tolerance to refusal, with fallback heuristics
-    retry_prompt_text = (
-        prompt_text +
-        "\n\n🚨 FINAL STRICT ORDER (NO EXCEPTIONS):\n"
-        "- Even if the chart is dark, low contrast, cropped, or contains limited data — you MUST still provide full numeric strategy levels.\n"
-        "- It is FORBIDDEN to say there is not enough information or that you cannot assist.\n"
-        "- If confidence is below 70%, still provide all levels but mark ⚠️ in the comment.\n"
-        "- Every section is MANDATORY and cannot be empty.\n"
-        "- Use fallback heuristics: candle bodies/wicks, swing structure, round-number magnets, ATR-based projections.\n"
-        "- Assume missing market details explicitly and proceed."
-    )
-
-    # Common refusal markers (EN/RU)
+    # 4) Запрос с авто-повтором
     refusal_markers = [
-        "sorry", "can't assist", "cannot assist", "i cannot", "unable to", "not enough information",
-        "insufficient data", "i don't have", "can't help",
-        "не могу", "не в состоянии", "я не могу", "недостаточно данных", "недостаточно информации",
-        "извини", "простите", "нет данных"
+        "can't assist", "cannot assist", "i cannot", "unable to",
+        "insufficient data", "not enough information",
+        "не могу", "я не могу"
     ]
 
     analysis = ""
     for attempt in range(2):
         try:
-            enhanced_prompt = prompt_text if attempt == 0 else retry_prompt_text
-            analysis = await ask_gpt_vision(enhanced_prompt, image_base64)
+            enhanced = prompt_text
+            if attempt == 1:
+                enhanced += "\n\nFINAL RULE: Никаких отказов. Сделай допущения и выдай все цифры."
+            analysis = await ask_gpt_vision(enhanced, image_base64)
             logging.info(f"[handle_strategy_photo attempt {attempt}] Raw GPT analysis:\n{analysis}")
 
             if not analysis:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.4)
                 continue
 
             low = analysis.lower()
-            if any(marker in low for marker in refusal_markers):
+            if any(m in low for m in refusal_markers):
                 continue
 
-            if len(analysis.strip()) < 200:
+            has_headers = all(s in analysis for s in [
+                "0️⃣ Сводка", "1️⃣ Профиль инвестора", "2️⃣ Состав портфеля",
+                "4️⃣ План покупок", "5️⃣ Тактические сделки", "7️⃣ Сценарии", "8️⃣ Итог"
+            ])
+            if not has_headers:
                 continue
 
             break
-
         except Exception as e:
             logging.error(f"[handle_strategy_photo retry {attempt}] GPT Vision error: {e}")
 
-    if (not analysis) or any(m in analysis.lower() for m in refusal_markers):
-        await update.message.reply_text(
+    if not analysis:
+        await msg.reply_text(
             "⚠️ GPT не смог составить стратегию по этому скрину.\n\n"
             "Попробуй улучшить:\n"
-            "• Сделай фон графика белым\n"
-            "• Удали лишние индикаторы\n"
-            "• Покажи больше истории цены (прокрути влево)\n"
-            "• Добавь вручную уровни поддержки/сопротивления\n\n"
+            "• Белый фон графика\n"
+            "• Убери лишние индикаторы\n"
+            "• Покажи больше истории (прокрутка влево)\n"
+            "• Добавь уровни S/R вручную\n\n"
             "Загрузи скрин ещё раз 🔁"
         )
         return
 
-    await update.message.reply_text(
+    await msg.reply_text(
         f"📊 Инвестиционная стратегия по твоему скрину:\n\n{analysis}",
         reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
     )
@@ -2159,7 +2212,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     is_image_doc = bool(doc and (doc.mime_type or "").startswith("image/"))
     has_photo = bool(getattr(msg, "photo", None)) or is_image_doc
 
-    # ↩️ Универсальный выход (работает из любого состояния)
+    # ↩️ Универсальный выход
     if text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
         context.user_data.clear()
         await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
@@ -2184,7 +2237,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop("awaiting_email", None)
         return
 
-    # 🗓 Экономкалендарь — приоритетнее любых других фото
+    # 🗓 Экономкалендарь — приоритетнее любых фото
     if context.user_data.get("awaiting_calendar_photo"):
         if has_photo:
             await handle_calendar_photo(update, context)
@@ -2200,12 +2253,17 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await msg.reply_text("❌ Для текстовой стратегии нужно отправить текстовое сообщение.")
         return
 
-    # 💡 Инвест-стратегия: СКРИН (важно: раньше общего трейдерского разбора)
+    # 💡 Инвест-стратегия: СКРИН — должно идти ПЕРЕД общим разбором фото!
     if context.user_data.get("awaiting_strategy") == "photo":
         if has_photo:
-            await handle_strategy_photo(update, context)   # <-- твой инвесторский блок
+            await handle_strategy_photo(update, context)   # инвесторский разбор
         else:
             await msg.reply_text("📸 Пришли скрин для инвест-стратегии или нажми «↩️ Выйти в меню».")
+        return
+
+    # 🖼 Если просто прислали фото/документ-картинку — трейдерский разбор
+    if has_photo:
+        await handle_photo(update, context)
         return
 
     # ✅ Остальные режимы (текст)
@@ -2215,30 +2273,19 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if context.user_data.get("awaiting_definition_term"):
-        await handle_definition_term(update, context)
-        return
+        await handle_definition_term(update, context); return
 
     if context.user_data.get("awaiting_invest_question"):
-        await handle_invest_question(update, context)
-        return
+        await handle_invest_question(update, context); return
 
     if context.user_data.get("awaiting_teacher_question"):
-        await teacher_response(update, context)
-        return
+        await teacher_response(update, context); return
 
-    # UID для брокера
     if context.user_data.get("awaiting_uid"):
-        await handle_uid_submission(update, context)
-        return
+        await handle_uid_submission(update, context); return
 
-    # 🖼 Общий случай: скрин графика → трейдерский SMC разбор
-    if has_photo:
-        await handle_photo(update, context)
-        return
-
-    # 🧭 Если ничего из выше — отдаём в главный роутер
+    # Ничего не ожидаем — отдаём в главный роутер
     await handle_main(update, context)
-
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -2260,37 +2307,36 @@ async def post_init(app: Application) -> None:
 def main():
     global global_bot, ALLOWED_USERS, ALLOWED_USERS_TIMESTAMP
 
-    # 🔄 Прогружаем список пользователей с доступом при старте (без блокировки хендлеров)
+    # 🔄 Кеш допуска при старте (не блокирует хендлеры)
     ALLOWED_USERS = load_allowed_users()
     ALLOWED_USERS_TIMESTAMP = time.time()
     logging.info(f"📥 ALLOWED_USERS загружен при старте: {len(ALLOWED_USERS)} пользователей")
 
-    # ✅ Инициализация Telegram бота (раньше Flask, чтобы не было гонки с global_bot)
+    # ✅ Telegram-приложение (post_init снимет webhook, чтобы не было 409)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     logging.info("🚀 GPT-Трейдер стартовал!")
 
     # ✅ Глобальный bot для уведомлений из вебхука
     global_bot = app.bot
 
-    # 🚀 Главный asyncio loop (для передачи во Flask-поток)
+    # 🚀 Общий asyncio-loop (его передаём во Flask-поток для run_coroutine_threadsafe)
     loop = asyncio.get_event_loop()
 
-    # 🚀 Flask webhook (CryptoCloud) в отдельном демонизированном потоке
+    # 🌐 Flask (CryptoCloud webhook) в отдельном демонизированном потоке
     threading.Thread(target=run_flask, args=(loop,), daemon=True).start()
 
-    # ✅ Глобальный error handler (с трейсбеком)
+    # ✅ Глобальный error handler
     async def error_handler(update, context):
-        logging.exception("❌ Unhandled exception in handler")  # печатает стек
+        logging.exception("❌ Unhandled exception in handler")
         try:
-            if update and getattr(update, "message", None):
-                await update.message.reply_text("⚠️ Произошла внутренняя ошибка. Попробуйте позже.")
+            msg = getattr(update, "message", None)
+            if msg:
+                await msg.reply_text("⚠️ Произошла внутренняя ошибка. Попробуйте позже.")
         except Exception:
-            # избегаем вторичных сбоев в error handler
             pass
-
     app.add_error_handler(error_handler)
 
-    # 🔄 Еженедельная рассылка
+    # 🔄 Еженедельная рассылка (по умолчанию: пн 12:00)
     CRON_TIME = os.getenv("CRON_TIME", "0 12 * * mon")
 
     @aiocron.crontab(CRON_TIME)
@@ -2311,7 +2357,7 @@ def main():
                 fails.append(vip_id)
         logging.info(f"✅ Рассылка завершена: {success} успехов, {len(fails)} ошибок.")
 
-    # 🧘 GPT-Психолог
+    # 🧘 GPT-Психолог (опциональный отдельный диалог)
     therapy_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)],
         states={
@@ -2326,10 +2372,10 @@ def main():
         ],
     )
 
-    # 📏 Калькулятор риска
+    # 📏 Калькулятор риска (вход и по кнопке, и по inline-колбэку)
     risk_calc_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^📏 Калькулятор риска$"), start_risk_calc),
+            MessageHandler(filters.Regex(r"^📏 Калькулятор риска$|^🎯 Калькулятор$"), start_risk_calc),
             CallbackQueryHandler(start_risk_calc, pattern="^start_risk_calc$"),
         ],
         states={
@@ -2344,7 +2390,7 @@ def main():
         ],
     )
 
-    # 📌 Сетап
+    # 📌 Сетап (многошаговый ввод)
     setup_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📌 Сетап$"), handle_main)],
         states={
@@ -2361,7 +2407,7 @@ def main():
         ],
     )
 
-    # ✅ Стандартные команды
+    # ✅ Команды
     app.add_handler(CommandHandler("start", start, block=False))
     app.add_handler(CommandHandler("restart", restart, block=False))
     app.add_handler(CommandHandler("publish", publish_post, block=False))
@@ -2371,18 +2417,22 @@ def main():
     app.add_handler(CommandHandler("stats", stats, block=False))
     app.add_handler(CommandHandler("export", export, block=False))
 
-    # ✅ ConversationHandlers
+    # ✅ Диалоги
     app.add_handler(therapy_handler)
     app.add_handler(risk_calc_handler)
     app.add_handler(setup_handler)
 
-    # ✅ CallbackQuery и универсальный обработчик текста/фото
+    # ✅ CallbackQuery и универсальный обработчик текста/фото/док-картинок
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, unified_text_handler))
+    app.add_handler(
+        MessageHandler(
+            (filters.TEXT | filters.PHOTO | filters.Document.IMAGE) & ~filters.COMMAND,
+            unified_text_handler
+        )
+    )
 
-    # 🚀 Запуск polling
+    # 🚀 Запуск polling (post_init уже снял webhook с drop_pending_updates=True)
     app.run_polling()
-
 
 def log_payment(user_id, username):
     try:
