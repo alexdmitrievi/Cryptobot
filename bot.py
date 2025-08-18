@@ -56,6 +56,9 @@ client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 # Глобальный бот для уведомлений из вебхука (инициализируется в main())
 global_bot = None
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PHOTO_PATH = os.path.join(BASE_DIR, "media", "banner.jpg")
+VIDEO_PATH = os.path.join(BASE_DIR, "media", "Video_TBX.mp4")
 
 app_flask = Flask(__name__)  # <— создаём один раз глобально
 
@@ -317,39 +320,46 @@ async def check_access(update: Update):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
+    chat_id = update.effective_chat.id
 
-    # Инлайн‑кнопки для мгновенного старта
-    inline_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📉 Crypto", callback_data="market_crypto")],
-        [InlineKeyboardButton("💱 Forex", callback_data="market_forex")],
-        [InlineKeyboardButton("🖼 Как сделать идеальный скрин", callback_data="screenshot_help")]
-    ])
-
-    # Экран 1 — приветствие + главный оффер + мгновенный CTA
-    await update.message.reply_text(
-        "👋 Привет! Я GPT‑Трейдер — делаю торговый план по твоему скрину за 30 секунд.\n\n"
-        "Что получишь:\n"
-        "• Entry / Stop / Take Profit с R:R ≥ 1:3\n"
-        "• Разбор по SMC: BOS, CHoCH, ликвидность, FVG\n"
-        "• Короткий риск‑план и сценарии\n\n"
-        "Готов? Пришли скрин с TradingView или Bybit.\n"
-        "Или выбери рынок ниже:",
-        reply_markup=inline_keyboard
+    caption = (
+        "👋 Привет! Это *ТВХ — твоя точка входа*.\n\n"
+        "Что получишь за 30 сек по скрину:\n"
+        "• Entry / Stop / Take Profit (R:R ≥ 1:3)\n"
+        "• Разбор по структуре/ликвидности (SMC) и короткий риск-план\n"
+        "• Поддержка инвест-стратегии: вход + уровни усреднений (DCA) + цели\n"
+        "• Фильтр новостей: проверенные источники без шума и «инфоцыган»\n"
+        "• Рынки: Crypto, Forex и MOEX; есть GPT-психолог для дисциплины 😅\n\n"
+        "Как начать сейчас:\n"
+        "1) Нажми «🚀 Трейдер» — пришли скрин из TradingView/Bybit\n"
+        "2) Или «💡 Инвестор» — получишь план покупок, DCA и цели\n"
+        "3) «🎯 Калькулятор» — посчитай размер позиции\n\n"
+        "Активация доступа:\n"
+        "• «💰 Купить» — USDT TRC20, доступ включится автоматически за 1–2 минуты\n"
+        "• «🔗 Бесплатный доступ через брокера» — Bybit/Forex4You (активация 5–10 минут)\n\n"
+        "Готов? Выбирай действие на клавиатуре ниже ⤵️"
     )
 
-    # Экран 2 — быстрые пути + платёжная подсказка (клавиатура с основными разделами)
-    await update.message.reply_text(
-        "Или начни отсюда:\n"
-        "• 🎯 Калькулятор — за 20 секунд узнаешь размер позиции\n"
-        "• 💡 Инвест‑стратегия — напиши цель, соберу план\n"
-        "• 🔍 Новости — пришли скрин календаря, дам интерпретацию\n\n"
-        "Как активировать полный доступ:\n"
-        "• Нажми «💰 Купить» (USDT TRC20) — доступ включится автоматически за 1–2 минуты\n"
-        "• Или «🔗 Бесплатный доступ через брокера» — Bybit/Forex4You, активация за 5–10 минут",
-        reply_markup=REPLY_MARKUP
-    )
+    # Пытаемся отправить видео с подписью и сразу показать главное меню (reply-клавиатура)
+    try:
+        with open(VIDEO_PATH, "rb") as anim:
+            await context.bot.send_animation(
+                chat_id=chat_id,
+                animation=anim,
+                caption=caption,
+                parse_mode="Markdown",
+                reply_markup=REPLY_MARKUP
+            )
+    except Exception as e:
+        logging.warning(f"[start] send_animation failed, fallback to text. err={e}")
+        await update.message.reply_text(
+            caption,
+            parse_mode="Markdown",
+            reply_markup=REPLY_MARKUP
+        )
 
     return ConversationHandler.END
+
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -2041,56 +2051,73 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔️ У тебя нет прав на публикацию.")
         return
 
+    # используем общую ссылку на бота из константы, если есть
+    bot_url = globals().get("BOT_URL", "https://t.me/CtyptorobBot")
+
     caption = (
-        "🚀 *GPT-Трейдер* — твой Telegram-ассистент для рынка крипты и форекса.\n\n"
-        "📊 Что делает бот?\n"
-        "• Находит входы, стопы и цели по твоим скринам за 10 секунд\n"
-        "• Анализирует BOS, ликвидность, пробои, OTE (по Smart Money)\n"
-        "• Строит сценарии на 1-2 дня, на неделю и на месяц\n"
-        "• Делает макро-анализ после новостей (ФРС, ETF, хардфорки)\n"
-        "• Учит money-management и помогает пережить минусы через GPT-психолога 😅\n\n"
-        "🎯 Плюс:\n"
-        "• VIP-сетапы с уровнями, которые публикуем в канал\n"
-        "• Курс по скальпингу и позиционке (10+ уроков и PDF)\n\n"
-        f"🚀 *Подключи GPT-Трейдера — ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.*\n\n"
-        "💰 Выбирай: подписка или разовый платёж на бессрочный доступ.\n\n"
-        "💬 Задай вопрос 👉 [@zhbankov_alex](https://t.me/zhbankov_alex)\n"
-        "👥 Чат для трейдеров 👉 [ai4traders_chat](https://t.me/ai4traders_chat)"
+        "🚀 *ТВХ (Твоя точка входа)* — экосистема трейдинга: 🤖 GPT-бот, 📢 публичный канал, 💬 чат с топиками и 🔒 VIP-сигналы.\n\n"
+        "📊 Что даёт бот ТВХ:\n"
+        "• Прогноз по скрину за 10 секунд\n"
+        "• Чёткие уровни: вход, стоп, тейки\n"
+        "• Рынки: Crypto, Forex и MOEX\n"
+        "• Анализ новостей (ФРС, ETF, хардфорки, макро)\n"
+        "• Поддержка GPT-психолога 😅\n\n"
+        "📰 Плюс: ссылки на проверенные источники — без шума, лудоманов и инфоцыган\n"
+        "⚡️ Премиум: авторские скальперские сетапы + «люксовые» сигналы ИИ (с PRO TradingView)\n\n"
+        f"🔥 Подключи ТВХ — всего ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.\n\n"
+        "👥 Чат трейдеров 👉 [TBX Chat](https://t.me/+yUYqG8JuwuZiZmUy)\n"
+        "💬 Вопросы 👉 [@zhbankov_alex](https://t.me/zhbankov_alex)\n\n"
+        "✨ И это только начало. Мы с ботом будем каждый день становиться лучше, чтобы ты рос вместе с комьюнити. "
+        "ТВХ — это твоя точка входа и твоя поддержка. 🚀"
     )
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Получить доступ", url="https://t.me/Cripto_inter_bot")]
+        [InlineKeyboardButton("💰 Получить доступ", url=bot_url)]
     ])
 
     try:
-        chat_id = '@ai4traders'
-        # Убираем старый закреп, если есть
-        old_pins = await context.bot.get_chat(chat_id)
-        if old_pins.pinned_message:
-            await context.bot.unpin_chat_message(chat_id=chat_id, message_id=old_pins.pinned_message.message_id)
+        chat_id = "@TBXtrade"
 
-        # Публикуем новый пост
-        with open(PHOTO_PATH, "rb") as photo:
-            message = await context.bot.send_photo(
+        # убираем старый закреп, если есть
+        chat_obj = await context.bot.get_chat(chat_id)
+        if getattr(chat_obj, "pinned_message", None):
+            await context.bot.unpin_chat_message(
                 chat_id=chat_id,
-                photo=photo,
-                caption=caption,
-                parse_mode="Markdown",
-                reply_markup=keyboard
+                message_id=chat_obj.pinned_message.message_id
             )
 
-        # Закрепляем
+        # публикуем одну и ту же анимацию, что и в /start; при ошибке — фото
+        try:
+            with open(VIDEO_PATH, "rb") as anim:
+                message = await context.bot.send_animation(
+                    chat_id=chat_id,
+                    animation=anim,
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+        except Exception as e_anim:
+            logging.warning(f"[publish_post] send_animation failed, fallback to photo. err={e_anim}")
+            with open(PHOTO_PATH, "rb") as photo:
+                message = await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+
+        # закрепляем пост
         await context.bot.pin_chat_message(
             chat_id=chat_id,
             message_id=message.message_id,
             disable_notification=True
         )
 
-        await update.message.reply_text("✅ Пост опубликован и закреплён в канале с кнопкой для перехода в твоего бота.")
+        await update.message.reply_text("✅ Пост опубликован и закреплён в канале.")
     except Exception as e:
         logging.error(f"[PUBLISH] Ошибка публикации: {e}")
         await update.message.reply_text("⚠️ Не удалось опубликовать или закрепить пост. Проверь файл, права и логи.")
-
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -2478,7 +2505,7 @@ async def notify_user_payment(user_id):
                 "2) Или загрузи скрин для инвест‑плана: покупка, усреднения (DCA) и цели.\n"
                 "3) Проверь размер позиции через калькулятор риска.\n\n"
                 "📢 Доступ к закрытому каналу с VIP‑сетапами уже открыт:\n"
-                "👉 [Перейти в VIP‑канал](https://t.me/+your_invite_hash)\n\n"
+                "👉 [Перейти в VIP‑канал](https://t.me/+TAbYnYSzHYI0YzVi)\n\n"
                 "🎁 Бонус: курс по скальпингу и позиционке\n"
                 "👉 [Открыть курс в Google Drive](https://drive.google.com/drive/folders/1EEryIr4RDtqM4WyiMTjVP1XiGYJVxktA?clckid=3f56c187)"
             ),
