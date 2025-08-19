@@ -57,8 +57,8 @@ client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 global_bot = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PHOTO_PATH = os.path.join(BASE_DIR, "media", "banner.jpg")
-VIDEO_PATH = os.path.join(BASE_DIR, "media", "Video_TBX.mp4")
+PHOTO_PATH = os.path.join(BASE_DIR, "banner.jpg")
+VIDEO_PATH = os.path.join(BASE_DIR, "Video_TBX.mp4")  # файл в корне!
 
 app_flask = Flask(__name__)  # <— создаём один раз глобально
 
@@ -2518,7 +2518,6 @@ async def notify_user_payment(user_id):
 
 if __name__ == '__main__':
     main()
-
 
 
 
