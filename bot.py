@@ -326,7 +326,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚀 *ТВХ — твоя точка входа*\n\n"
         "Точка входа в прибыльный трейдинг: Крипта, Forex и акции.\n"
         "Подключи и зарабатывай 💰\n\n"
-        "👉 Жми кнопку ниже ⤵️"
+        "👇 Посмотреть точку входа прямо сейчас"
     )
 
     try:
@@ -347,6 +347,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     return ConversationHandler.END
+
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
