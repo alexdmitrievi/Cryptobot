@@ -1033,26 +1033,64 @@ refusal_markers = [
 
 async def handle_strategy_photo(update, context, image_bytes: BytesIO):
     """
-    СПОТ, DCA, LONG-only. Первая строка — валидный JSON одной строкой по схеме:
-    {"direction":"LONG","entry":number|null,"avg_entry":number|null,"stop":number|null,
-     "tp":[numbers],"dca":[{"price":number,"alloc_pct":number}],"notes":["text"]}
-    Затем — полный ответ на русском. R:R считаем к TP1.
+    Инвест-стратегия по скрину (СПОТ, LONG-only, DCA).
+    Требования:
+    - Первая строка: валидный JSON одной строкой по схеме:
+      {"direction":"LONG","entry":number|null,"avg_entry":number|null,"stop":number|null,
+       "tp":[numbers],"dca":[{"price":number,"alloc_pct":number}],"notes":["text"]}
+    - Далее: полный ответ на русском для новичка.
+    - Валидация/починка: LONG-only; если entry отсутствует — считаем среднюю по DCA;
+      стоп ≈8% ниже средней; TP > entry; R:R по TP1.
     """
+    # Локальные хелперы, чтобы не ловить NameError
+    def _sfloat(x):
+        try:
+            if x is None:
+                return None
+            return float(str(x).replace(" ", "").replace(",", "."))
+        except Exception:
+            return None
+
+    def _r2(x):
+        return None if x is None else round(float(x), 2)
+
+    def _rr(entry, stop, tp1):
+        try:
+            if entry is None or stop is None or tp1 is None:
+                return None
+            risk = abs(entry - stop)
+            if risk <= 0:
+                return None
+            return round(abs(tp1 - entry) / risk, 2)
+        except Exception:
+            return None
+
     msg = update.effective_message if update else None
     if not msg:
         return
 
     try:
-        # Байты картинки
+        # 1) Байты изображения (если забыли передать — вытащим сами)
         if not isinstance(image_bytes, BytesIO):
             image_bytes = await _extract_image_bytes(update, context)
             if not image_bytes:
-                await msg.reply_text("Не вижу изображения. Пришли скрин как фото или документ‑картинку (PNG/JPG/WEBP).")
+                await msg.reply_text("Не вижу изображения. Пришли скрин как фото или документ-картинку (PNG/JPG/WEBP).")
                 return
 
-        img_b64 = _bytes_to_jpeg_b64(image_bytes)
+        # 2) JPEG → base64
+        try:
+            image_bytes.seek(0)
+            im = Image.open(image_bytes).convert("RGB")
+            buf = BytesIO()
+            im.save(buf, format="JPEG", quality=90, optimize=True)
+            buf.seek(0)
+            import base64 as _b64
+            img_b64 = _b64.b64encode(buf.read()).decode("ascii")
+        except Exception:
+            await msg.reply_text("Не удалось прочитать изображение. Пришли скрин в формате PNG/JPG.")
+            return
 
-        # Промпты по стандарту: EN для модели, RU в ответах
+        # 3) Промпты (EN для модели)
         system_prompt = (
             "You are an institutional investor creating a SPOT DCA plan (LONG only). "
             "Always respond with a VALID ONE-LINE JSON as the FIRST line using the schema: "
@@ -1063,18 +1101,19 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         user_prompt = (
             "TASK:\n"
             "1) Read the chart image and propose a SPOT DCA plan (LONG-only).\n"
-            "2) FIRST LINE: output exactly ONE line JSON (no code fences) per schema.\n"
+            "2) FIRST LINE: exactly ONE line JSON (no code fences) per schema.\n"
             "3) Then explain in Russian for a beginner (plain text, no markdown).\n"
             "4) DCA list must have 2-4 steps with valid prices and alloc_pct (sum ≈100%).\n"
             "5) If unsure, still provide best estimates. Do NOT refuse.\n"
         )
 
-        def _needs_retry(txt: str) -> bool:
-            if not txt:
+        def _needs_retry(t: str) -> bool:
+            if not t:
                 return True
-            low = txt.lower()
+            low = t.lower()
             return any(s in low for s in ("i can't", "cannot", "i won’t", "sorry", "as an ai"))
 
+        # 4) Вызов модели (2 попытки, анти-отказ)
         content_text = None
         for attempt in range(2):
             try:
@@ -1096,7 +1135,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             except Exception:
                 logging.exception("Vision call failed (strategy)")
 
-        # Если пусто — фолбэк
+        # 5) Парсинг 1-й строки как JSON (фолбэк — регексы)
         if not content_text:
             data = {
                 "direction": "LONG",
@@ -1109,7 +1148,6 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
                 "notes": ["Нет уверенных уровней на скрине, используйте плавный DCA и контролируйте риск."]
             }
         else:
-            # 1-я строка — JSON
             lines = content_text.splitlines()
             first = (lines[0] if lines else "").strip()
             try:
@@ -1117,39 +1155,47 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
                 if not isinstance(data, dict):
                     raise ValueError("not object")
             except Exception:
-                # Грубый парсинг из текста
                 txt = content_text
                 dca = []
-                for m in re.finditer(r'(?:DCA|Buy|Покупка)[^$]*\$?\s*([0-9]+(?:\.[0-9]+)?)\s*[,; ]+\s*(?:alloc|доля|процент|alloc_pct)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)\s*%?', txt, re.I):
-                    price = _safe_float(m.group(1)); alloc = _safe_float(m.group(2))
+                # Паттерн 1: "Купить 25% по $123" / "Buy 25% at $123"
+                for m in re.finditer(r'(?:Купить|Buy)\s*([0-9]+(?:\.[0-9]+)?)\s*%\D+\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I):
+                    alloc = _sfloat(m.group(1)); price = _sfloat(m.group(2))
                     if price is not None and alloc is not None:
                         dca.append({"price": price, "alloc_pct": alloc})
+                # Паттерн 2: "price: 123, alloc: 25%"
+                for m in re.finditer(r'price\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)\D+alloc(?:_pct)?\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)\s*%', txt, re.I):
+                    price = _sfloat(m.group(1)); alloc = _sfloat(m.group(2))
+                    if price is not None and alloc is not None:
+                        dca.append({"price": price, "alloc_pct": alloc})
+
                 entry = None
-                m = re.search(r'(Entry|Вход)\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
-                if m: entry = _safe_float(m.group(2))
+                m = re.search(r'(?:Entry|Вход)\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
+                if m: entry = _sfloat(m.group(1))
                 stop = None
-                m = re.search(r'(Stop|Стоп)\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
-                if m: stop = _safe_float(m.group(2))
+                m = re.search(r'(?:Stop|Стоп)\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
+                if m: stop = _sfloat(m.group(1))
                 tps = []
                 for label in ("TP1","TP2","TP3","Цель1","Цель2","Цель3"):
-                    m = re.search(rf'{label}\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
+                    m = re.search(rf'(?:{label})\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
                     if m:
-                        v = _safe_float(m.group(1))
-                        if v is not None: tps.append(v)
+                        v = _sfloat(m.group(1))
+                        if v is not None:
+                            tps.append(v)
+
                 data = {"direction": "LONG", "entry": entry, "avg_entry": None, "stop": stop, "tp": tps, "dca": dca, "notes": ["Эвристический парсинг текста."]}
 
-        # Нормализация
+        # 6) Нормализация / валидация
         data["direction"] = "LONG"
-        entry = _safe_float(data.get("entry"))
-        stop  = _safe_float(data.get("stop"))
-        tps   = [_safe_float(x) for x in (data.get("tp") or []) if _safe_float(x) is not None]
+        entry = _sfloat(data.get("entry"))
+        stop  = _sfloat(data.get("stop"))
+        tps   = [_sfloat(x) for x in (data.get("tp") or []) if _sfloat(x) is not None]
         dca   = data.get("dca") or []
 
-        avg_entry = _safe_float(data.get("avg_entry"))
+        avg_entry = _sfloat(data.get("avg_entry"))
         if entry is None:
             wsum = psum = 0.0
-            for step in dca:
-                p = _safe_float(step.get("price")); w = _safe_float(step.get("alloc_pct"))
+            for s in dca:
+                p = _sfloat(s.get("price")); w = _sfloat(s.get("alloc_pct"))
                 if p is not None and w is not None and w > 0:
                     wsum += w; psum += p * w
             if wsum > 0:
@@ -1167,26 +1213,27 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
                 tps = [base_entry * 1.05, base_entry * 1.10, base_entry * 1.20]
 
         tp1 = tps[0] if tps else None
-        rr = _calc_rr(base_entry, stop, tp1)
+        rr = _rr(base_entry, stop, tp1)
 
         data_norm = {
             "direction": "LONG",
-            "entry": _round2(entry),
-            "avg_entry": _round2(avg_entry),
-            "stop": _round2(stop),
-            "tp": [_round2(x) for x in tps[:3]],
+            "entry": _r2(entry),
+            "avg_entry": _r2(avg_entry),
+            "stop": _r2(stop),
+            "tp": [_r2(x) for x in tps[:3]],
             "dca": [
-                {"price": _round2(_safe_float(s.get("price"))), "alloc_pct": _round2(_safe_float(s.get("alloc_pct")))}
-                for s in dca if (_safe_float(s.get("price")) is not None and _safe_float(s.get("alloc_pct")) is not None)
+                {"price": _r2(_sfloat(s.get("price"))), "alloc_pct": _r2(_sfloat(s.get("alloc_pct")))}
+                for s in dca if (_sfloat(s.get("price")) is not None and _sfloat(s.get("alloc_pct")) is not None)
             ],
-            "notes": list(dict.fromkeys((data.get("notes") or []) + []))
+            "notes": list(dict.fromkeys((data.get("notes") or [])))
         }
 
-        # Сообщение пользователю
+        # 7) Ответ пользователю (RU, без markdown) + JSON в тройных кавычках
         parts = []
         parts.append("0️⃣ Суть")
         parts.append("• Долгосрок, СПОТ, только покупка. План через DCA, чтобы не заходить всей суммой сразу.")
 
+        # 1) План покупок
         if data_norm["dca"]:
             parts.append("1️⃣ План покупок")
             parts.append("• " + "; ".join(f"Купить {s['alloc_pct']}% по ${s['price']}" for s in data_norm["dca"]))
@@ -1194,12 +1241,20 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             parts.append("1️⃣ План покупок")
             parts.append("• Разбей сумму на 3–4 части и покупай по мере снижения цены.")
 
+        # 2) Средняя цена входа
         if data_norm["avg_entry"] is not None:
             parts.append(f"2️⃣ Средняя цена входа: ${data_norm['avg_entry']}")
+
+        # 3) Уровень отмены (стоп)
         if data_norm["stop"] is not None:
             parts.append(f"3️⃣ Уровень отмены (стоп): ${data_norm['stop']}")
+
+        # 4) Цели (TP1..TP3)
         if data_norm["tp"]:
-            parts.append(f"4️⃣ Цели (TP1..TP{len(data_norm['tp'])}): " + ", ".join(f\"${x}\" for x in data_norm["tp"]))
+            tps_str = ", ".join(f"${x}" for x in data_norm["tp"])
+            parts.append(f"4️⃣ Цели (TP1..TP{len(data_norm['tp'])}): {tps_str}")
+
+        # 5) Прибыль/риск (R:R)
         if rr is not None:
             parts.append(f"5️⃣ Прибыль/риск (R:R к TP1): {rr}")
             if rr < 1.5:
@@ -1207,17 +1262,19 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         else:
             parts.append("5️⃣ Прибыль/риск (R:R): невозможно оценить без точных уровней входа и стопа.")
 
+        # Комментарии
         notes = data_norm.get("notes") or []
         if notes:
             parts.append("⚠️ Комментарии")
             parts.extend(f"• {n}" for n in notes)
 
         parts.append(f'"""{json.dumps(data_norm, ensure_ascii=False)}"""')
+
         await msg.reply_text("\n".join(parts))
 
     except Exception:
         logging.exception("handle_strategy_photo failed")
-        await msg.reply_text("Не удалось построить инвест‑стратегию по скрину. Пришлите другой скрин или попробуйте позже.")
+        await msg.reply_text("Не удалось построить инвест-стратегию по скрину. Пришлите другой скрин или попробуйте позже.")
 
 
 # --- UID SUBMISSION (реферал через брокера) ---
@@ -2076,6 +2133,15 @@ async def _extract_image_bytes(update: Update, context: ContextTypes.DEFAULT_TYP
     await tg_file.download_to_memory(out=bio)  # PTB 21.x требует keyword-аргумент out=
     bio.seek(0)
     return bio
+
+def _to_jpeg_base64(bio: BytesIO) -> str:
+    bio.seek(0)
+    im = Image.open(bio).convert("RGB")
+    out = BytesIO()
+    im.save(out, format="JPEG", quality=90, optimize=True)
+    out.seek(0)
+    return base64.b64encode(out.read()).decode("ascii")
+
 
 # Безопасный вызов необязательных хендлеров (если их нет — не падаем)
 async def _call_if_exists(fn_name: str, update: Update, context: ContextTypes.DEFAULT_TYPE, fallback_text: str | None = None):
