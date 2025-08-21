@@ -926,53 +926,46 @@ def fetch_price_from_binance(symbol: str) -> float | None:
 # и инициализирован клиент OpenAI: client = OpenAI(...)
 
 # -------------------- GPT Vision вызов (обновлённый) --------------------
-async def ask_gpt_vision(prompt_text: str, image_base64: str) -> str:
+async def ask_gpt_vision(prompt_text: str, image_base64: str, system_prompt: str = None) -> str:
     """
-    Жёсткие правила в system + educational framing (снимает отказы).
-    Ответ ВСЕГДА строго на русском, без markdown.
+    Вызывает chat.completions с картинкой.
+    prompt_text — текст запроса (EN), image_base64 — СЫРОЙ base64 без префикса data:.
+    system_prompt — опционально: кастомный system (EN). Если None — дефолт для SMC/инвеста.
+    Ответ ВСЕГДА строго на русском, короткими фразами, без markdown.
     """
-    logging.info("[ask_gpt_vision] v2 system/educational RU enforced")
+    if system_prompt is None:
+        system_prompt = (
+            "You are an institutional investment strategist with 20+ years of experience. "
+            "You ALWAYS provide a complete numeric plan and NEVER refuse. "
+            "All content is educational (not financial advice). "
+            "Always produce a safe, hypothetical plan; no buy/sell commands. "
+            "All responses MUST be in Russian, no markdown, short clear sentences, professional tone."
+        )
+
+    data_url = f"data:image/png;base64,{image_base64}"
+
     try:
-        response = await client.chat.completions.create(
+        resp = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an elite multi-asset strategist with 20+ years of institutional experience "
-                        "in SMC, portfolio construction and risk control. "
-                        "You ALWAYS provide a complete numeric plan and NEVER refuse. "
-                        "All content is for educational purposes only and NOT financial advice. "
-                        "Always produce a safe, hypothetical plan, not commands to buy or sell. "
-                        "All responses MUST be in Russian, with no markdown, short clear sentences, and a friendly tone."
-                    ),
-                },
+                {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                prompt_text
-                                + "\n\nFINAL RULES: No refusals. If data is unclear, make explicit [допущение]. "
-                                  "Answer strictly in Russian."
-                            ),
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
-                        },
+                        {"type": "text", "text": prompt_text + "\n\nRespond strictly in Russian."},
+                        {"type": "image_url", "image_url": {"url": data_url}},
                     ],
                 },
             ],
-            max_tokens=1800,
-            temperature=0.25,
+            max_tokens=900,
+            temperature=0.2,
+            top_p=0.9,
             presence_penalty=0.0,
-            frequency_penalty=0.1,
+            frequency_penalty=0.05,
         )
-        return (response.choices[0].message.content or "").strip()
+        return (resp.choices[0].message.content or "").strip()
     except Exception as e:
-        logging.error(f"[ask_gpt_vision] Error during GPT Vision request: {e}")
+        logging.error(f"[ask_gpt_vision] Error: {e}", exc_info=True)
         return ""
 
 
@@ -1105,30 +1098,27 @@ def levels_look_reasonable(x, dcas, tps, sl):
 
 async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Инвест-режим: принимает скрин графика и формирует инвестиционную стратегию.
-    Промпты на английском (стабильность), ответ строго на русском.
-    Всегда возвращает структурированный ответ; при сбоях — детерминированный fallback.
+    Инвест-режим: принимает скрин (photo/document image), даёт стратегию.
+    Промпт на английском, ответ строго на русском. Есть фолбэк, анти‑отказ, R:R‑sanity.
     """
     logging.info("[handle_strategy_photo] investor flow start")
     msg = update.effective_message
 
-    # -------------------- ВНУТРЕННИЕ ХЕЛПЕРЫ --------------------
+    # ---------- локальные хелперы ----------
     def _is_russian(text: str) -> bool:
         if not text:
             return False
         cyr = sum('а' <= ch.lower() <= 'я' or ch == 'ё' for ch in text)
-        return (cyr / max(len(text), 1)) >= 0.2
+        return cyr >= max(20, len(text) // 5)
 
     def _looks_like_refusal(text: str) -> bool:
         if not text:
             return True
-        t = text.lower()
+        t = text.lower().replace("’", "'")
         needles = [
-            "i can’t assist", "i can't assist", "cannot help", "can't help",
-            "as an ai", "i am an ai", "i'm an ai", "unable to", "i cannot", "i can’t",
-            "sorry, but", "apologize", "apologies",
-            "не могу помочь", "не могу обработать", "не могу проанализировать",
-            "как модель искусственного интеллекта"
+            "i can't", "i can’t", "cannot help", "cannot assist", "unable to",
+            "as an ai", "i am an ai", "i'm an ai", "apolog", "sorry",
+            "не могу", "я не могу", "не буду", "как модель искусственного интеллекта"
         ]
         return any(n in t for n in needles)
 
@@ -1144,9 +1134,8 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
             return None
         return abs((tp1 - entry) / (entry - stop))
 
-    # [fallback] детерминированный план на случай полного провала анализа
-    def _fallback_strategy():
-        X = 100.00  # допущение о «текущей цене», если извлечь не удалось
+    def _fallback_strategy() -> str:
+        X = 100.00
         entry = round(X * 0.97, 2)
         sl    = round(X * 0.86, 2)
         tp1   = round(X * 1.03, 2)
@@ -1155,9 +1144,9 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
 
         text = (
             "0️⃣ Короткая суть (оценочно):\n"
-            "• Локально умеренно бычий сценарий. DCA и частичная фиксация.\n"
-            "• Акцент на управлении риском и контроле просадки.\n"
-            "• Учитывай новости/волатильность и зоны дисбаланса (FVG).\n\n"
+            "• Умеренно бычий контекст. Плавное DCA, частичная фиксация.\n"
+            "• Контроль просадки и риск ≤ 1.5% на сделку.\n"
+            "• Учитывай новости, волатильность и FVG-зоны.\n\n"
             "1️⃣ Точка входа\n"
             f"• Entry: ${entry:.2f}\n\n"
             "2️⃣ Stop‑Loss\n"
@@ -1168,24 +1157,15 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
             "4️⃣ R:R\n"
             f"• По TP1: {rr_val:.2f}\n\n"
             "5️⃣ Комментарии/предупреждения\n"
-            "• План DCA: докупать по сигналам слабости, риск на сделку ≤ 1.5%.\n"
-            "• Не финансовый совет. Сверь уровни на своём графике.\n"
-            f"• Текущая цена X ~ ${X:.2f} (оценочно для шаблона)\n"
+            "• Проверяй уровни на своём графике. Не финансовый совет.\n"
+            f"• Текущая цена X ~ ${X:.2f} (оценочно)\n"
         )
-
-        summary = {
-            "entry": entry,
-            "stop": sl,
-            "tp": [tp1, tp2],
-            "direction": "LONG",
-            "rr": round(rr_val, 2),
-            "confidence": 0.4
-        }
+        summary = {"entry": entry, "stop": sl, "tp": [tp1, tp2], "direction": "LONG", "rr": round(rr_val, 2)}
         text += '\n\n' + '"""' + json.dumps(summary, ensure_ascii=False) + '"""'
         return text
 
-    async def _download_image_as_b64() -> str | None:
-        """Достаём картинку из photo/document и возвращаем data:URL base64 для multimodal вызова."""
+    async def _download_image_as_base64_raw() -> str | None:
+        """Скачиваем фото/документ-изображение и возвращаем СЫРОЙ base64 без префикса."""
         file_id = None
         if getattr(msg, "photo", None):
             file_id = msg.photo[-1].file_id
@@ -1208,18 +1188,18 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
             bio = io.BytesIO()
             await tg_file.download_to_memory(out=bio)
             bio.seek(0)
-            b64 = base64.b64encode(bio.read()).decode("utf-8")
-            return f"data:image/png;base64,{b64}"
+            return base64.b64encode(bio.read()).decode("utf-8")
         except Exception as e:
             logging.error(f"[handle_strategy_photo] download error: {e}", exc_info=True)
             await msg.reply_text("⚠️ Не удалось скачать изображение. Пришли скрин ещё раз.")
             return None
 
-    # -------------------- СКАЧИВАНИЕ И ПРОМПТЫ (EN) --------------------
-    image_b64_url = await _download_image_as_b64()
-    if not image_b64_url:
-        return  # пользователю уже отправили пояснение
+    # ---------- скачать картинку ----------
+    b64_raw = await _download_image_as_base64_raw()
+    if not b64_raw:
+        return
 
+    # ---------- англ. промпты (строгая структура, ответ RU) ----------
     system_role = (
         "You are an institutional investment strategist with 20+ years of experience, "
         "specializing in cryptocurrency markets, mid- and long-term investments without leverage. "
@@ -1246,67 +1226,45 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         "Determine the overall market bias, identify nearby key levels, and provide:\n"
         "- Entry point (USD)\n- Stop-Loss (USD)\n- At least two Take-Profit levels (USD)\n"
         "- Risk-to-Reward ratio (R:R)\n- Short comments/warnings on risks (volatility spikes, FVG, news)\n\n"
-        "⚠️ Respond strictly in Russian, following the required structure."
+        "Respond strictly in Russian, following the required structure."
     )
 
-    messages = [
-        {"role": "system", "content": system_role},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": user_prompt},
-                {"type": "input_image", "image_url": image_b64_url},
-            ],
-        },
-    ]
+    # ---------- вызов модели через универсальный vision-хелпер ----------
+    analysis = await ask_gpt_vision(
+        prompt_text=user_prompt,
+        image_base64=b64_raw,
+        system_prompt=system_role
+    )
 
-    # -------------------- ВЫЗОВ МОДЕЛИ --------------------
-    analysis = None
-    try:
-        resp = await client.chat.completions.create(
-            model="gpt-4o",
-            temperature=0.2,
-            top_p=0.9,
-            max_tokens=900,
-            messages=messages,
-        )
-        analysis = (resp.choices[0].message.content or "").strip() if resp.choices else ""
-    except Exception as e:
-        logging.error(f"[handle_strategy_photo] LLM error: {e}", exc_info=True)
-        analysis = None
-
-    # -------------------- ПОСТ-ВАЛИДАЦИЯ И ФОЛБЭКИ --------------------
-    if not analysis:
-        logging.warning("[handle_strategy_photo] empty analysis — using fallback")
+    # ---------- фолбэк/санити ----------
+    if not analysis or _looks_like_refusal(analysis) or not _is_russian(analysis):
+        logging.warning("[handle_strategy_photo] using fallback (empty/refusal/non-RU)")
         analysis = _fallback_strategy()
 
-    if _looks_like_refusal(analysis) or not _is_russian(analysis):
-        logging.warning("[handle_strategy_photo] refusal or non-RU — using fallback")
-        analysis = _fallback_strategy()
-
-    # Простая sanity‑проверка R:R: попытаемся извлечь уровни из ответа
+    # Попробуем прицепить предупреждение, если R:R подозрительно низкий
     def _find_money(label: str) -> float | None:
         pat = re.compile(rf"{label}[^$]*\$\s*([0-9]+(?:\.[0-9]{{1,2}})?)", re.IGNORECASE)
         m = pat.search(analysis)
         return _safe_float(m.group(1)) if m else None
 
-    entry = _find_money("Entry") or _find_money("вход") or None
-    stop  = _find_money("SL") or _find_money("Stop") or _find_money("стоп") or None
-    tp1   = _find_money("TP1") or _find_money("тейк") or None
+    entry = _find_money("Entry") or _find_money("вход")
+    stop  = _find_money("SL") or _find_money("Stop") or _find_money("стоп")
+    tp1   = _find_money("TP1") or _find_money("тейк")
+    rrval = _rr(entry, stop, tp1)
 
-    rr_val = _rr(entry, stop, tp1)
-    if rr_val is not None and rr_val < 1.5:
+    if rrval is not None and rrval < 1.5:
         analysis += (
             "\n\n⚠️ Предупреждение: вычисленный R:R по TP1 ниже 1.5. "
             "Рассмотри более консервативный SL или более дальний TP для улучшения соотношения."
         )
 
-    # -------------------- ОТВЕТ ПОЛЬЗОВАТЕЛЮ --------------------
+    # ---------- ответ пользователю ----------
     await msg.reply_text(
-        f"📊 Инвестиционная стратегия по твоему скрину:\n\n{analysis}",
+        "📊 Инвестиционная стратегия по твоему скрину:\n\n" + analysis,
         reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
     )
     context.user_data.clear()
+
 
 
 # --- INVEST QUESTION (текстовая стратегия через кнопку "💡 Инвестор") ---
