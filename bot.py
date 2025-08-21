@@ -1034,15 +1034,13 @@ refusal_markers = [
 async def handle_strategy_photo(update, context, image_bytes: BytesIO):
     """
     Инвест-стратегия по скрину (СПОТ, LONG-only, DCA).
-    Требования:
-    - Первая строка: валидный JSON одной строкой по схеме:
+    Первая строка — валидный JSON одной строкой по схеме:
       {"direction":"LONG","entry":number|null,"avg_entry":number|null,"stop":number|null,
        "tp":[numbers],"dca":[{"price":number,"alloc_pct":number}],"notes":["text"]}
-    - Далее: полный ответ на русском для новичка.
-    - Валидация/починка: LONG-only; если entry отсутствует — считаем среднюю по DCA;
-      стоп ≈8% ниже средней; TP > entry; R:R по TP1.
+    Затем — полный ответ на русском. Валидации: LONG-only; если entry нет — считаем среднюю по DCA;
+    стоп ≈8% ниже средней; TP > entry; R:R к TP1; аккуратные «Комментарии» и «Что дальше».
     """
-    # Локальные хелперы, чтобы не ловить NameError
+    # Локальные хелперы (без внешних зависимостей)
     def _sfloat(x):
         try:
             if x is None:
@@ -1074,7 +1072,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         if not isinstance(image_bytes, BytesIO):
             image_bytes = await _extract_image_bytes(update, context)
             if not image_bytes:
-                await msg.reply_text("Не вижу изображения. Пришли скрин как фото или документ-картинку (PNG/JPG/WEBP).")
+                await msg.reply_text("Не вижу изображения. Пришлите скрин как фото или документ-картинку (PNG/JPG/WEBP).")
                 return
 
         # 2) JPEG → base64
@@ -1087,7 +1085,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             import base64 as _b64
             img_b64 = _b64.b64encode(buf.read()).decode("ascii")
         except Exception:
-            await msg.reply_text("Не удалось прочитать изображение. Пришли скрин в формате PNG/JPG.")
+            await msg.reply_text("Не удалось прочитать изображение. Пришлите скрин в формате PNG/JPG.")
             return
 
         # 3) Промпты (EN для модели)
@@ -1114,10 +1112,16 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             return any(s in low for s in ("i can't", "cannot", "i won’t", "sorry", "as an ai"))
 
         # 4) Вызов модели (2 попытки, анти-отказ)
+        client_obj = globals().get("client")
+        if client_obj is None:
+            from openai import AsyncOpenAI
+            import os
+            client_obj = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
         content_text = None
-        for attempt in range(2):
+        for _ in range(2):
             try:
-                resp = await client.chat.completions.create(
+                resp = await client_obj.chat.completions.create(
                     model="gpt-4o",
                     temperature=0.1,
                     messages=[
@@ -1157,12 +1161,12 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             except Exception:
                 txt = content_text
                 dca = []
-                # Паттерн 1: "Купить 25% по $123" / "Buy 25% at $123"
+                # «Купить 25% по $123» / «Buy 25% at $123»
                 for m in re.finditer(r'(?:Купить|Buy)\s*([0-9]+(?:\.[0-9]+)?)\s*%\D+\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I):
                     alloc = _sfloat(m.group(1)); price = _sfloat(m.group(2))
                     if price is not None and alloc is not None:
                         dca.append({"price": price, "alloc_pct": alloc})
-                # Паттерн 2: "price: 123, alloc: 25%"
+                # «price: 123, alloc: 25%»
                 for m in re.finditer(r'price\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)\D+alloc(?:_pct)?\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)\s*%', txt, re.I):
                     price = _sfloat(m.group(1)); alloc = _sfloat(m.group(2))
                     if price is not None and alloc is not None:
@@ -1249,7 +1253,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         if data_norm["stop"] is not None:
             parts.append(f"3️⃣ Уровень отмены (стоп): ${data_norm['stop']}")
 
-        # 4) Цели (TP1..TP3)
+        # 4) Цели (TP1..TPn)
         if data_norm["tp"]:
             tps_str = ", ".join(f"${x}" for x in data_norm["tp"])
             parts.append(f"4️⃣ Цели (TP1..TP{len(data_norm['tp'])}): {tps_str}")
@@ -1262,12 +1266,20 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         else:
             parts.append("5️⃣ Прибыль/риск (R:R): невозможно оценить без точных уровней входа и стопа.")
 
-        # Комментарии
-        notes = data_norm.get("notes") or []
+        # Комментарии и «что дальше» — аккуратно
+        notes = [str(n).strip() for n in (data_norm.get("notes") or []) if str(n).strip()]
+        parts.append("⚠️ Комментарии")
         if notes:
-            parts.append("⚠️ Комментарии")
-            parts.extend(f"• {n}" for n in notes)
+            for n in notes[:5]:
+                parts.append(f"• {n}")
+        else:
+            parts.append("• Нет особых замечаний. Действуйте по плану DCA и контролируйте риск.")
 
+        parts.append("✅ Что дальше")
+        parts.append("• Покупайте по плану DCA, не превышайте 1–2% риска на сделку.")
+        parts.append("• Проверьте уровни на своём графике и актуальные новости перед покупкой.")
+
+        # Технический JSON для логов — в тройных кавычках
         parts.append(f'"""{json.dumps(data_norm, ensure_ascii=False)}"""')
 
         await msg.reply_text("\n".join(parts))
@@ -1275,7 +1287,6 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
     except Exception:
         logging.exception("handle_strategy_photo failed")
         await msg.reply_text("Не удалось построить инвест-стратегию по скрину. Пришлите другой скрин или попробуйте позже.")
-
 
 # --- UID SUBMISSION (реферал через брокера) ---
 async def handle_uid_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2165,15 +2176,15 @@ def _fallback_strategy() -> str:
 
 async def unified_text_handler(update, context):
     """
-    Единый роутер сообщений.
+    Единый роутер сообщений (PTB 21.x, async).
 
     Приоритет:
     1) awaiting_calendar_photo  -> обработка календаря (заглушка)
     2) awaiting_strategy == 'photo' -> вытащить байты и вызвать handle_strategy_photo
-    3) если фото/док‑картинка — handle_photo
+    3) если фото/док-картинка — handle_photo
     4) иначе — handle_main
 
-    Везде: устойчивость к None, короткие RU‑ответы при ошибках.
+    Во всех ветках: устойчивость к None, короткие RU-сообщения при ошибках.
     """
     try:
         msg = update.effective_message if update else None
@@ -2185,39 +2196,61 @@ async def unified_text_handler(update, context):
         is_image_doc = bool(doc and (doc.mime_type or "").startswith("image/"))
         has_photo = bool(getattr(msg, "photo", None)) or is_image_doc
 
-        # ↩️ Выход в меню — сбрасываем все «ожидалки»
+        # ↩️ Выход в меню — сбрасываем все «ожидалки», показываем меню и выходим
         if text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
-            context.user_data.pop("awaiting_calendar_photo", None)
-            context.user_data.pop("awaiting_strategy", None)
-            context.user_data.pop("awaiting_strategy_mode", None)
-            await msg.reply_text("Вернулись в главное меню.")
+            for k in (
+                "awaiting_calendar_photo",
+                "awaiting_strategy",
+                "awaiting_strategy_mode",
+                "awaiting_potential",
+                "awaiting_definition_term",
+                "awaiting_invest_question",
+                "awaiting_uid",
+            ):
+                try:
+                    context.user_data.pop(k, None)
+                except Exception:
+                    pass
+
+            # вернуть клавиатуру
+            try:
+                await msg.reply_text("Вернулись в главное меню.", reply_markup=_get_main_markup())
+            except Exception:
+                await msg.reply_text("Вернулись в главное меню.")
+
+            # вывести само меню (если есть handle_main) и не падать дальше
+            await _call_if_exists(
+                "handle_main",
+                update, context,
+                fallback_text="🧭 Главное меню."
+            )
             return
 
-        # 1) Экономкалендарь (фото/док‑картинка)
+        # 1) Экономкалендарь (фото/док-картинка)
         if context.user_data.get("awaiting_calendar_photo"):
             bio = await _extract_image_bytes(update, context)
             context.user_data.pop("awaiting_calendar_photo", None)
             if not bio:
-                await msg.reply_text("Не вижу изображения календаря. Пришлите фото или документ‑картинку.")
+                await msg.reply_text("Не вижу изображения календаря. Пришлите фото или документ-картинку.")
                 return
-            # TODO: здесь подключи свой handle_calendar_photo(...)
+            # здесь может быть твой handle_calendar_photo(...)
             await msg.reply_text("Календарь получен. Анализ будет доступен в отдельном модуле.")
             return
 
-        # 2) Инвест‑стратегия (скрин) -> handle_strategy_photo
+        # 2) Инвест-стратегия по фото
         if context.user_data.get("awaiting_strategy") == "photo":
             bio = await _extract_image_bytes(update, context)
             context.user_data.pop("awaiting_strategy", None)
             if not bio:
-                await msg.reply_text("Не вижу изображения. Пришлите скрин как фото или документ‑картинку.")
+                await msg.reply_text("Не вижу изображения. Пришлите скрин как фото или документ-картинку.")
                 return
             await handle_strategy_photo(update, context, image_bytes=bio)
-            return  # важно: чтобы не падать дальше в handle_main
+            return  # важно: не сваливаться потом в handle_main
 
-        # 3) Обычное фото/док‑картинка -> трейдерский разбор
+        # 3) Обычное фото/док-картинка -> трейдерский разбор
         if has_photo:
             await handle_photo(update, context)
-            return  # важно: чтобы не дублировать меню после ответа
+            return  # важно: не дублировать меню после ответа
 
         # 4) Иначе — главное меню
         await _call_if_exists(
