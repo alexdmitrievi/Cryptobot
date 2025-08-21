@@ -2395,7 +2395,7 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if context.user_data.get("awaiting_invest_question"):
         await handle_invest_question(update, context); return
-if context.user_data.get("awaiting_uid"):
+    if context.user_data.get("awaiting_uid"):
         await handle_uid_submission(update, context); return
 
     # Ничего не ожидаем — отдаём в главный роутер
