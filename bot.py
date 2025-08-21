@@ -17,6 +17,8 @@ from urllib.parse import urlencode
 from decimal import Decimal, InvalidOperation
 from typing import Tuple, Optional, Dict, Any, List
 from io import BytesIO  # для работы с изображениями в памяти
+from dataclasses import dataclass, asdict
+
 
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
