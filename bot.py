@@ -1916,6 +1916,11 @@ ADMIN_IDS = {407721399}  # замени на свой user_id
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PHOTO_PATH = os.path.join(BASE_DIR, "GPT-Трейдер помощник.png")
 
+# Health-check для Render
+@app_flask.route("/", methods=["GET", "HEAD"])
+def render_health_ok():
+    return "OK", 200
+
 async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
