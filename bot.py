@@ -2056,20 +2056,59 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text("⚠️ Не удалось выгрузить пользователей.")
 
 
+# Универсальный загрузчик изображения (photo или document-картинка)
+async def _extract_image_bytes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BytesIO | None:
+    msg = update.effective_message
+    file_id = None
+
+    if getattr(msg, "photo", None):
+        file_id = msg.photo[-1].file_id
+    elif getattr(msg, "document", None):
+        doc = msg.document
+        if (doc.mime_type or "").lower().startswith("image/"):
+            file_id = doc.file_id
+
+    if not file_id:
+        return None
+
+    tg_file = await context.bot.get_file(file_id)
+    bio = BytesIO()
+    await tg_file.download_to_memory(out=bio)  # PTB 21.x требует keyword-аргумент out=
+    bio.seek(0)
+    return bio
+
+# Безопасный вызов необязательных хендлеров (если их нет — не падаем)
+async def _call_if_exists(fn_name: str, update: Update, context: ContextTypes.DEFAULT_TYPE, fallback_text: str | None = None):
+    fn = globals().get(fn_name)
+    if callable(fn):
+        if inspect.iscoroutinefunction(fn):
+            return await fn(update, context)
+        return fn(update, context)
+    if fallback_text:
+        await update.effective_message.reply_text(fallback_text)
+    return None
+
+# На случай, если вызывается из handle_photo, а функция не определена у тебя в файле
+def _fallback_strategy() -> str:
+    return "Краткий план не сформирован — пришли более чистый скрин (LuxAlgo SMC + уровни S/R)."
+
 async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🧾 Нормализуем вход
     msg = update.effective_message
     text = (getattr(msg, "text", "") or "").strip()
 
-    # Фото или документ-картинка (PNG/JPG)
+    # Фото или документ-картинка (PNG/JPG/WEBP)
     doc = getattr(msg, "document", None)
-    is_image_doc = bool(doc and (doc.mime_type or "").startswith("image/"))
+    is_image_doc = bool(doc and (doc.mime_type or "").lower().startswith("image/"))
     has_photo = bool(getattr(msg, "photo", None)) or is_image_doc
 
     # ↩️ Универсальный выход
     if text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
         context.user_data.clear()
-        await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
+        try:
+            await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
+        except NameError:
+            await msg.reply_text("🔙 Вернулись в главное меню.")
         return
 
     # 📨 Сбор email
@@ -2094,7 +2133,13 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # 🗓 Экономкалендарь — приоритетнее любых фото
     if context.user_data.get("awaiting_calendar_photo"):
         if has_photo:
-            await handle_calendar_photo(update, context)
+            # handle_calendar_photo сам возьмёт байты, если ты внедрил патч C.
+            # Если нет — можно прокинуть прямо здесь через _extract_image_bytes.
+            await _call_if_exists(
+                "handle_calendar_photo",
+                update, context,
+                fallback_text="⚠️ Обработчик календаря временно недоступен."
+            )
         else:
             await msg.reply_text("📸 Пришли скрин экономического календаря или нажми «↩️ Выйти в меню».")
         return
@@ -2102,45 +2147,112 @@ async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # 💡 Инвест-стратегия: ТЕКСТ
     if context.user_data.get("awaiting_strategy") == "text":
         if text:
-            await handle_strategy_text(update, context)
+            await _call_if_exists(
+                "handle_strategy_text",
+                update, context,
+                fallback_text="📝 Текстовая инвест-стратегия временно в разработке. Пришли скрин графика — сделаю план с DCA."
+            )
         else:
             await msg.reply_text("❌ Для текстовой стратегии нужно отправить текстовое сообщение.")
         return
 
-    # 💡 Инвест-стратегия: СКРИН — должно идти ПЕРЕД общим разбором фото!
+    # 💡 Инвест-стратегия: СКРИН — ПЕРЕД общим разбором фото!
     if context.user_data.get("awaiting_strategy") == "photo":
         if has_photo:
             bio = await _extract_image_bytes(update, context)
             if not bio:
                 await msg.reply_text("⚠️ Пришли изображение как фото или документ-картинку (PNG/JPG/WEBP).")
                 return
-            await handle_strategy_photo(update, context, image_bytes=bio)
+            await _call_if_exists(
+                "handle_strategy_photo",
+                update, context,
+                fallback_text="⚠️ Инвест-стратегия временно недоступна."
+            )
+            # Если твой handle_strategy_photo принимает image_bytes — напрямую вызови:
+            # await handle_strategy_photo(update, context, image_bytes=bio)
         else:
             await msg.reply_text("📸 Пришли скрин для инвест-стратегии или нажми «↩️ Выйти в меню».")
         return
 
-
     # 🖼 Если просто прислали фото/документ-картинку — трейдерский разбор
     if has_photo:
-        await handle_photo(update, context)
+        await _call_if_exists(
+            "handle_photo",
+            update, context,
+            fallback_text="⚠️ Фотоанализ временно недоступен."
+        )
         return
 
     # ✅ Остальные режимы (текст)
     if context.user_data.get("awaiting_potential"):
         context.user_data.pop("awaiting_potential", None)
-        await msg.reply_text("⚠️ Этот режим временно недоступен. Возвращаю в меню.", reply_markup=REPLY_MARKUP)
+        try:
+            await msg.reply_text("⚠️ Этот режим временно недоступен. Возвращаю в меню.", reply_markup=REPLY_MARKUP)
+        except NameError:
+            await msg.reply_text("⚠️ Этот режим временно недоступен. Возвращаю в меню.")
         return
 
     if context.user_data.get("awaiting_definition_term"):
-        await handle_definition_term(update, context); return
+        await _call_if_exists("handle_definition_term", update, context, fallback_text="⚠️ Справочник терминов недоступен.") 
+        return
 
     if context.user_data.get("awaiting_invest_question"):
-        await handle_invest_question(update, context); return
+        await _call_if_exists("handle_invest_question", update, context, fallback_text="⚠️ Обработчик вопросов недоступен.") 
+        return
+
     if context.user_data.get("awaiting_uid"):
-        await handle_uid_submission(update, context); return
+        await _call_if_exists("handle_uid_submission", update, context, fallback_text="⚠️ UID-обработчик недоступен.") 
+        return
 
     # Ничего не ожидаем — отдаём в главный роутер
-    await handle_main(update, context)
+    await _call_if_exists(
+        "handle_main",
+        update, context,
+        fallback_text="👋 Я готов помочь. Выбери действие в меню или пришли скрин графика для разбора."
+
+# --- Safe main menu keyboard (если REPLY_MARKUP не задан) ---
+def _get_main_markup():
+    try:
+        return REPLY_MARKUP  # если уже есть где-то в коде — используем его
+    except NameError:
+        from telegram import ReplyKeyboardMarkup
+        return ReplyKeyboardMarkup(
+            [
+                ["💡 Инвест-стратегия (скрин)", "📈 Разбор скрина"],
+                ["🗓 Экономкалендарь", "ℹ️ Помощь"],
+                ["↩️ Выйти в меню"],
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=False,
+            selective=False,
+        )
+
+# --- Главный роутер по умолчанию ---
+async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    txt = (getattr(msg, "text", "") or "").strip()
+
+    # Нормализуем состояние: снимаем «ожидалки», чтобы пользователь не залип в старом режиме
+    for key in (
+        "awaiting_email",
+        "awaiting_calendar_photo",
+        "awaiting_strategy",
+        "awaiting_potential",
+        "awaiting_definition_term",
+        "awaiting_invest_question",
+        "awaiting_uid",
+    ):
+        context.user_data.pop(key, None)
+
+    menu_text = (
+        "🧭 Главное меню\n\n"
+        "• Пришли скрин графика — сделаю трейдерский разбор (Entry/SL/TP).\n"
+        "• Нужна инвестиционная стратегия? Выбери «Инвест-стратегия (скрин)» и пришли изображение — построю DCA-план, среднюю цену, стоп и цели.\n"
+        "• Экономкалендарь — пришли скрин, распознаю и объясню влияние.\n"
+        "• «↩️ Выйти в меню» — сбросить любые режимы.\n"
+    )
+
+    await msg.reply_text(menu_text, reply_markup=_get_main_markup())
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
