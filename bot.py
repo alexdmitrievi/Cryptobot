@@ -16,6 +16,7 @@ from datetime import datetime
 from urllib.parse import urlencode
 from decimal import Decimal, InvalidOperation
 from typing import Tuple, Optional, Dict, Any, List
+from io import BytesIO  # для работы с изображениями в памяти
 
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
@@ -31,14 +32,14 @@ from telegram.ext import (
 from telegram.ext import Application  # для аннотации в post_init
 
 from openai import AsyncOpenAI
-from PIL import Image
+from PIL import Image  # для проверки/конвертации картинок
 
+# Google Sheets
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
+# Cron и ретраи
 import aiocron
-
-# ✅ Для защиты от rate limit Google Sheets (если используешь ретраи)
 from tenacity import retry, wait_fixed, stop_after_attempt
 
 # 🔐 Конфиг (токены/ключи)
@@ -51,38 +52,48 @@ from config import (
     API_SECRET,
 )
 
+# =====================[ CONSTANTS / GLOBALS ]=====================
+# Scopes для Google Sheets
+SCOPES = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# Инициализация OpenAI-клиента (используется в ask_gpt_vision / handle_strategy_text и др.)
+# Инициализация OpenAI-клиента (используется в ask_gpt_vision / handle_strategy_* и т.п.)
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-# Глобальный бот для уведомлений из вебхука (инициализируется в main())
+# Глобальный bot для уведомлений из вебхуков (инициализируй в main())
 global_bot = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PHOTO_PATH = os.path.join(BASE_DIR, "banner.jpg")
 VIDEO_PATH = os.path.join(BASE_DIR, "Video_TBX.mp4")  # файл в корне!
 
-app_flask = Flask(__name__)  # <— создаём один раз глобально
+app_flask = Flask(__name__)  # создаём один раз глобально
 
-# --- анти‑дубликаты (idempotency) ---
-PROCESSED_PAYMENTS: dict[str, float] = {} # хранит уникальные payment_id/tx_id/комбинации
+# анти‑дубликаты (idempotency)
+PROCESSED_PAYMENTS: Dict[str, float] = {}  # хранит уникальные payment_id/tx_id/комбинации
 PROCESSED_TTL_SEC = 3600  # 1 час
 
-# 🚨 Проверка критичных ENV переменных
-required_env = ["GOOGLE_CREDS", "TELEGRAM_TOKEN", "OPENAI_API_KEY"]
-for var in required_env:
-    if not os.getenv(var):
-        raise EnvironmentError(f"🚨 Переменная окружения {var} не установлена!")
+# =====================[ ENV CHECKS ]=====================
+# Для Google Sheets обязателен GOOGLE_CREDS (JSON сервисного аккаунта в переменной окружения)
+if not os.getenv("GOOGLE_CREDS"):
+    raise EnvironmentError("🚨 Переменная окружения GOOGLE_CREDS не установлена!")
 
-# ✅ Подключение к Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds_dict = json.loads(os.getenv("GOOGLE_CREDS"))
-creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-gc = gspread.authorize(creds)
+# =====================[ GOOGLE SHEETS INIT ]=====================
+try:
+    creds_dict = json.loads(os.getenv("GOOGLE_CREDS"))
+    # Чиним переносы в private_key
+    if "private_key" in creds_dict:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
-SPREADSHEET_ID = "1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs"
-sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPES)
+    gc = gspread.authorize(creds)
+
+    # Если у тебя фиксированный ID — оставь его здесь
+    SPREADSHEET_ID = "1s_KQLyekb-lQjt3fMlBO39CTBuq0ayOIeKkXEhDjhbs"
+    sheet = gc.open_by_key(SPREADSHEET_ID).sheet1  # или .worksheet("Лист1")
+    logging.info("✅ Google Sheets connected")
+except Exception as e:
+    logging.exception("❌ Google Sheets init failed")
+    raise
 
 def save_referral_data(user_id, username, ref_program, broker, uid):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
