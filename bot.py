@@ -1116,23 +1116,36 @@ from telegram.ext import ContextTypes
 # async def ask_gpt_vision(prompt_text: str, image_base64: str, system_prompt: str, mime: str) -> str: ...
 
 
-async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Инвест-режим (СПОТ, без шортов): принимает скрин (photo/document image) и выдаёт стратегию.
-    Усилено: англ. промпты и RU‑ответ, двойной анти‑отказ (retry), JSON‑парсинг, валидатор R:R.
-    Инвест‑специфика: поддержка DCA‑лестницы (усреднение), расчёт avg_entry и мягкая invalidation.
-    """
 
+
+async def handle_strategy_photo(update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Инвест-режим (СПОТ, LONG-only): принимает скрин (photo/document image) и выдаёт стратегию.
+    Особенности:
+      • Англ. промпты, ответ строго на русском (кириллица)
+      • DCA-лестница, avg_entry, мягкая invalidation (без короткого SL)
+      • Валидация R:R = |TP1-avg_entry| / |avg_entry-invalidation| (>= 1.5)
+      • Диагностические логи + принудительный фолбэк при отсутствии чисел
+      • Без выбора рынка: анализируем любой график
+    """
     logging.info("[handle_strategy_photo] investor flow start")
     msg = update.effective_message
 
     # ---------- локальные хелперы ----------
     def _is_russian(text: str) -> bool:
+        """
+        Мягкая проверка RU:
+        - ≥ 10 кириллических символов ИЛИ доля ≥ 8%
+        - ИЛИ встречаются ключевые русские маркеры
+        """
         if not text:
             return False
-        cyr = sum('а' <= ch.lower() <= 'я' or ch == 'ё' for ch in text)
-        # Требуем хотя бы 20 кириллических символов и долю ≥ 15%
-        return cyr >= 20 and cyr / max(1, len(text)) >= 0.15
+        t = text.lower()
+        cyr = sum('а' <= ch <= 'я' or ch == 'ё' for ch in t)
+        if cyr >= 10 or (cyr / max(1, len(t)) >= 0.08):
+            return True
+        markers = ("вход", "стоп", "тейк", "комментарии", "предупреждения", "инвести", "волатиль")
+        return any(m in t for m in markers)
 
     def _looks_like_refusal(text: str) -> bool:
         if not text:
@@ -1173,10 +1186,7 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         return s
 
     def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
-        """
-        Ищем JSON-словарь в ответе модели: сначала по fenced-кодам, затем по фигурным скобкам.
-        Возвращаем dict или None.
-        """
+        """Ищем JSON-словарь в ответе модели: fenced-блоки или первые {...}."""
         if not text:
             return None
         code_blocks = re.findall(r"(```[\s\S]*?```|\"\"\"[\s\S]*?\"\"\")", text)
@@ -1298,7 +1308,11 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         mime=mime
     )
 
-    # ---------- анти‑отказ: retry с усилением требований ----------
+    # превью для диагностики
+    if analysis:
+        logging.info("[handle_strategy_photo] first pass preview: %s", analysis[:240].replace("\n", " "))
+
+    # ---------- анти‑отказ: если пусто/отказ/не-RU — повтор с усилением ----------
     if not analysis or _looks_like_refusal(analysis) or not _is_russian(analysis):
         logging.warning("[handle_strategy_photo] retry with hardened prompt")
         hardened_user = user_prompt + (
@@ -1308,6 +1322,7 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
             "- Provide a DCA ladder (3–6 levels) with allocation %, avg_entry, invalidation, TP1/TP2.\n"
             f"- Ensure R:R (TP1 vs avg_entry vs invalidation) ≥ {MIN_RR}; if not — add a clear warning and propose a fix.\n"
             "- Include JSON with keys: dca[], avg_entry, invalidation, tp[], rr, volatility_class, ladder_spacing_pct, position_risk_pct_total, direction='LONG'.\n"
+            "- IMPORTANT: Use Cyrillic characters only in narrative text."
         )
         analysis = await ask_gpt_vision(
             prompt_text=hardened_user,
@@ -1316,7 +1331,11 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
             mime=mime
         )
 
-    # ---------- фолбэк (SPOT/DCA/INVALIDATION) ----------
+    # превью второй попытки
+    if analysis:
+        logging.info("[handle_strategy_photo] second pass preview: %s", analysis[:240].replace("\n", " "))
+
+    # ---------- фолбэк/санити ----------
     def _fallback_strategy() -> str:
         X = 100.00
         dca = [
@@ -1370,7 +1389,8 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         logging.warning("[handle_strategy_photo] fallback after retry")
         analysis = _fallback_strategy()
 
-    # ---------- пост‑обработка: JSON, DCA, R:R, LONG‑only ----------
+    # ---------- нормализация пробелов, парсинг JSON/чисел ----------
+    analysis = analysis.replace("\u00a0", " ").replace(" ", " ")
     parsed = _extract_json_block(analysis)
 
     def _find_money(label: str) -> Optional[float]:
@@ -1405,6 +1425,18 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
 
     rrval = _rr(avg_entry, invalidation, tp1)
 
+    # Если после двух попыток нет цифр — принудительный фолбэк
+    if (avg_entry is None or invalidation is None or tp1 is None) and "DCA" not in analysis and "avg_entry" not in analysis:
+        logging.warning("[handle_strategy_photo] force fallback: missing numeric levels")
+        analysis = _fallback_strategy()
+        parsed_fb = _extract_json_block(analysis)
+        if isinstance(parsed_fb, dict):
+            avg_entry = _safe_float(parsed_fb.get("avg_entry"))
+            invalidation = _safe_float(parsed_fb.get("invalidation"))
+            tp_list = parsed_fb.get("tp") or []
+            tp1 = _safe_float(tp_list[0]) if tp_list else None
+            rrval = _rr(avg_entry, invalidation, tp1)
+
     # Жёстко запрещаем шорт: если модель вдруг вернула SHORT — допишем предупреждение
     if isinstance(direction, str) and direction == "SHORT":
         analysis += (
@@ -1413,7 +1445,6 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
     # Предупреждение о низком R:R относительно avg_entry/invalidation
-    MIN_RR = 1.5
     if rrval is not None and rrval < MIN_RR:
         analysis += (
             f"\n\n⚠️ Предупреждение: вычисленный R:R по TP1 (с учётом avg_entry и invalidation) ниже {MIN_RR:.2f}. "
@@ -1428,7 +1459,7 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         disable_web_page_preview=True
     )
 
-    # Чистим только временные ключи, если ты их используешь — при необходимости замени на точечную очистку
+    # Очистка временных данных (при необходимости замени на точечную)
     context.user_data.clear()
 
 
