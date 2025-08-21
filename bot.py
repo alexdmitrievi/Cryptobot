@@ -1102,224 +1102,205 @@ def levels_look_reasonable(x, dcas, tps, sl):
     return True
 
 
-# -------------------- Основной обработчик: handle_strategy_photo --------------------
 async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.info("[handle_strategy_photo] started investor flow (new validator build)")
+    """
+    Инвест-режим: принимает скрин графика и формирует инвестиционную стратегию.
+    Промпты на английском (стабильность), ответ строго на русском.
+    Всегда возвращает структурированный ответ; при сбоях — детерминированный fallback.
+    """
+    logging.info("[handle_strategy_photo] investor flow start")
     msg = update.effective_message
-    # [fallback] генератор на случай полного провала Vision
+
+    # -------------------- ВНУТРЕННИЕ ХЕЛПЕРЫ --------------------
+    def _is_russian(text: str) -> bool:
+        if not text:
+            return False
+        cyr = sum('а' <= ch.lower() <= 'я' or ch == 'ё' for ch in text)
+        return (cyr / max(len(text), 1)) >= 0.2
+
+    def _looks_like_refusal(text: str) -> bool:
+        if not text:
+            return True
+        t = text.lower()
+        needles = [
+            "i can’t assist", "i can't assist", "cannot help", "can't help",
+            "as an ai", "i am an ai", "i'm an ai", "unable to", "i cannot", "i can’t",
+            "sorry, but", "apologize", "apologies",
+            "не могу помочь", "не могу обработать", "не могу проанализировать",
+            "как модель искусственного интеллекта"
+        ]
+        return any(n in t for n in needles)
+
+    def _safe_float(x, default=None):
+        try:
+            return float(x)
+        except Exception:
+            return default
+
+    def _rr(entry, stop, tp1):
+        entry, stop, tp1 = _safe_float(entry), _safe_float(stop), _safe_float(tp1)
+        if entry is None or stop is None or tp1 is None or entry == stop:
+            return None
+        return abs((tp1 - entry) / (entry - stop))
+
+    # [fallback] детерминированный план на случай полного провала анализа
     def _fallback_strategy():
-        X = 100.00
+        X = 100.00  # допущение о «текущей цене», если извлечь не удалось
         entry = round(X * 0.97, 2)
-        dca1  = round(X * 0.94, 2)
-        dca2  = round(X * 0.90, 2)
         sl    = round(X * 0.86, 2)
         tp1   = round(X * 1.03, 2)
         tp2   = round(X * 1.06, 2)
-        rr = abs((tp1 - entry) / (entry - sl)) if entry != sl else 1.5
+        rr_val = _rr(entry, sl, tp1) or 1.5
+
         text = (
             "0️⃣ Короткая суть (оценочно):\n"
-            "• Рынок нейтральный/умеренно бычий по локальной структуре.\n"
-            "• Идея: аккуратный лонг с усреднениями по ходу снижения.\n"
-            "• Риск: ложные пробои и расширение спредов на новостях.\n\n"
-            "1️⃣ Инвесторский профиль:\n"
-            "Новичок/умеренный риск, горизонт 3–6 месяцев.\n\n"
-            "2️⃣ Распределение капитала:\n"
-            "• Долгосрок: 60%\n"
-            "• Тактические сделки: 25%\n"
-            "• Резерв в кэше (USDT/наличные): 15%\n\n"
-            "3️⃣ Защита капитала:\n"
-            "• Максимальная просадка: 15%\n"
-            "• Лимит убытка за месяц: 6%\n"
-            "• Пересмотр портфеля: раз в 1–2 месяца\n"
-            "• Резерв в кэше при плохих новостях: 25%\n\n"
-            "4️⃣ План покупок (DCA):\n"
-            f"• Первая покупка: ${entry:.2f} (35% от депозита)\n"
-            f"• Усреднение 1: ${dca1:.2f} (25% от депозита)\n"
-            f"• Усреднение 2: ${dca2:.2f} (20% от депозита)\n\n"
-            "5️⃣ Тактические сделки:\n"
-            "• Риск на сделку: 1.5% капитала\n"
-            f"• Стоп-лосс: ${sl:.2f}\n"
-            f"• Фиксация прибыли: TP1 = ${tp1:.2f} (зафиксируй 50% по касанию; стоп в безубыток), "
-            f"TP2 = ${tp2:.2f} (остальное; включи трейлинг)\n"
-            f"• Минимальное соотношение прибыль/риск (R:R): {rr:.2f}\n\n"
-            "6️⃣ План на ближайшее время:\n"
-            "Следи за импульсами и зонами дисбаланса; на сильных свечах фиксируй частями.\n\n"
-            "7️⃣ Сценарии:\n"
-            "📈 Рынок растёт — частичная фиксация, стоп подтягивать.\n"
-            "📉 Рынок падает — дозакуп по DCA, риск не повышать.\n"
-            "➡️ Рынок стоит — держать позицию, ждать выхода из диапазона.\n\n"
-            "8️⃣ Итог:\n"
-            "План прост и управляем по риску. Всё образовательное, не финсовет.\n\n"
-            f"Текущая цена X = ${X:.2f} [допущение]\n"
+            "• Локально умеренно бычий сценарий. DCA и частичная фиксация.\n"
+            "• Акцент на управлении риском и контроле просадки.\n"
+            "• Учитывай новости/волатильность и зоны дисбаланса (FVG).\n\n"
+            "1️⃣ Точка входа\n"
+            f"• Entry: ${entry:.2f}\n\n"
+            "2️⃣ Stop‑Loss\n"
+            f"• SL: ${sl:.2f}\n\n"
+            "3️⃣ Take‑Profit(ы)\n"
+            f"• TP1: ${tp1:.2f}\n"
+            f"• TP2: ${tp2:.2f}\n\n"
+            "4️⃣ R:R\n"
+            f"• По TP1: {rr_val:.2f}\n\n"
+            "5️⃣ Комментарии/предупреждения\n"
+            "• План DCA: докупать по сигналам слабости, риск на сделку ≤ 1.5%.\n"
+            "• Не финансовый совет. Сверь уровни на своём графике.\n"
+            f"• Текущая цена X ~ ${X:.2f} (оценочно для шаблона)\n"
         )
-        summary = {"entry": entry, "dca": [entry, dca1, dca2], "stop": sl, "tp": [tp1, tp2], "direction": "LONG", "rr": round(rr, 2), "confidence": 0.4}
-        text += \'"""\' + json.dumps(summary, ensure_ascii=False) + \'"""\'
+
+        summary = {
+            "entry": entry,
+            "stop": sl,
+            "tp": [tp1, tp2],
+            "direction": "LONG",
+            "rr": round(rr_val, 2),
+            "confidence": 0.4
+        }
+        text += '\n\n' + '"""' + json.dumps(summary, ensure_ascii=False) + '"""'
         return text
 
-    # 1) Получаем изображение (фото ИЛИ документ-картинка)
-    file_id = None
-    if getattr(msg, "photo", None):
-        file_id = msg.photo[-1].file_id
-    elif getattr(msg, "document", None) and (msg.document.mime_type or "").startswith("image/"):
-        file_id = msg.document.file_id
-    else:
-        await msg.reply_text("⚠️ Пришли скрин как фото или как документ-картинку (PNG/JPG).")
-        return
+    async def _download_image_as_b64() -> str | None:
+        """Достаём картинку из photo/document и возвращаем data:URL base64 для multimodal вызова."""
+        file_id = None
+        if getattr(msg, "photo", None):
+            file_id = msg.photo[-1].file_id
+        elif getattr(msg, "document", None):
+            doc = msg.document
+            if (doc.mime_type or "").startswith("image/"):
+                file_id = doc.file_id
+            elif (doc.mime_type or "").lower().endswith("/pdf"):
+                await msg.reply_text("⚠️ PDF не подходит. Пришли график как фото (PNG/JPG).")
+                return None
+            else:
+                await msg.reply_text("⚠️ Пришли график как фото или документ‑картинку (PNG/JPG).")
+                return None
+        else:
+            await msg.reply_text("⚠️ Не вижу изображения. Пришли график как фото или документ (PNG/JPG).")
+            return None
 
-    try:
-        tg_file = await context.bot.get_file(file_id)
-        raw = BytesIO()
-        await tg_file.download_to_memory(raw)
-    except Exception:
-        logging.exception("[handle_strategy_photo] download error")
-        await msg.reply_text("⚠️ Не удалось скачать изображение. Отправь файл поменьше и повтори.")
-        return
+        try:
+            tg_file = await context.bot.get_file(file_id)
+            bio = io.BytesIO()
+            await tg_file.download_to_memory(out=bio)
+            bio.seek(0)
+            b64 = base64.b64encode(bio.read()).decode("utf-8")
+            return f"data:image/png;base64,{b64}"
+        except Exception as e:
+            logging.error(f"[handle_strategy_photo] download error: {e}", exc_info=True)
+            await msg.reply_text("⚠️ Не удалось скачать изображение. Пришли скрин ещё раз.")
+            return None
 
-    # 2) JPEG для Vision + нормализация размера
-    try:
-        img = Image.open(BytesIO(raw.getvalue())).convert("RGB")
-    except Exception:
-        await msg.reply_text("⚠️ Не удалось прочитать изображение. Нужен PNG/JPG.")
-        return
+    # -------------------- СКАЧИВАНИЕ И ПРОМПТЫ (EN) --------------------
+    image_b64_url = await _download_image_as_b64()
+    if not image_b64_url:
+        return  # пользователю уже отправили пояснение
 
-    try:
-        max_side = 1600
-        w, h = img.size
-        if max(w, h) > max_side:
-            scale = max_side / float(max(w, h))
-            img = img.resize((int(w * scale), int(h * scale)))
-    except Exception:
-        pass
-
-    buf = BytesIO()
-    img.save(buf, format="JPEG", quality=82)
-    image_base64 = base64.b64encode(buf.getvalue()).decode()
-
-    # 3) Промпт: простой язык + TP выше текущей цены X
-    prompt_text = (
-        "You are an ELITE MULTI-ASSET STRATEGIST with 20+ years of institutional experience. "
-        "Your goal is to create an EASY-TO-UNDERSTAND investment plan for beginners.\n\n"
-        "TASK: From a TradingView/Bybit chart screenshot, produce a FULL swing/position strategy. "
-        "Write simply, as if to a friend who just started investing.\n\n"
-        "⚖️ Rules:\n"
-        "- Always answer STRICTLY in Russian. No markdown.\n"
-        "- Very simple language, short sentences (до 2 в блоке). Use 1–2 emojis.\n"
-        "- Explain terms simply: «резерв в кэше — это свободные деньги, пока лежат в USDT/наличных и не инвестированы».\n"
-        "- FIRST, estimate the current price X visible on the chart (по правой шкале) и напиши: «Текущая цена X = $…».\n"
-        "- DCA уровни — это ИМЕННО ЦЕНОВЫЕ УРОВНИ из шкалы графика (в долларах), а НЕ суммы покупки. "
-        "Пиши так: «$ЦЕНА (…% от депозита)». Всегда 2 знака после запятой.\n"
-        "- TakeProfits (TP1, TP2) MUST be strictly above current price X and above Entry; TP2 > TP1. "
-        "Обязательно укажи КОГДА фиксировать (по касанию/по закрытию), какой % позиции, и что делать со стопом (безубыток/трейлинг).\n"
-        "- Sanity-check before output:\n"
-        "  • Для лонга: TP1 > Entry; TP2 > TP1; SL < Entry; TP1 и TP2 > X.\n"
-        "  • В DCA у каждой строки есть и $цена, и % от депозита. Сумма % ≤ 100. "
-        "Цены DCA разумно близки к X (не микросуммы типа $100 при X≈$4000).\n"
-        "  • Не повторяй одинаковые числа без объяснения. Допущения помечай [допущение].\n\n"
-        "✅ Output structure (exact order):\n"
-        "0️⃣ Короткая суть (3 строки):\n"
-        "• Что сейчас с рынком.\n"
-        "• Главная идея стратегии.\n"
-        "• Главный риск.\n\n"
-        "1️⃣ Инвесторский профиль:\n...\n\n"
-        "2️⃣ Распределение капитала:\n"
-        "• Долгосрок: …%\n"
-        "• Тактические сделки: …%\n"
-        "• Резерв в кэше (свободные деньги в USDT/наличных): …%\n\n"
-        "3️⃣ Защита капитала:\n"
-        "• Максимальная просадка: …%\n"
-        "• Лимит убытка за месяц: …%\n"
-        "• Пересмотр портфеля: раз в … месяцев\n"
-        "• Резерв в кэше при плохих новостях: …%\n\n"
-        "4️⃣ План покупок (DCA):\n"
-        "• Первая покупка: $… (…% от депозита)\n"
-        "• Усреднение 1: $… (…% от депозита)\n"
-        "• Усреднение 2: $… (…% от депозита)\n\n"
-        "5️⃣ Тактические сделки:\n"
-        "• Риск на сделку: …% капитала\n"
-        "• Стоп-лосс: $…\n"
-        "• Фиксация прибыли: TP1 = $… (зафиксируй …% по касанию/закрытию; передвинь SL в безубыток), "
-        "TP2 = $… (зафиксируй остаток; включи трейлинг по минимумам/ATR).\n"
-        "• Минимальное соотношение прибыль/риск (R:R): x.xx\n\n"
-        "6️⃣ План на ближайшее время:\n...\n\n"
-        "7️⃣ Сценарии:\n"
-        "📈 Рынок растёт — …\n"
-        "📉 Рынок падает — …\n"
-        "➡️ Рынок стоит — …\n\n"
-        "8️⃣ Итог:\n...\n\n"
-        "REMINDER: All blocks are mandatory. Write in very clear, simple Russian for beginners."
+    system_role = (
+        "You are an institutional investment strategist with 20+ years of experience, "
+        "specializing in cryptocurrency markets, mid- and long-term investments without leverage. "
+        "Provide structured, professional, and executable analysis.\n\n"
+        "IMPORTANT:\n"
+        "- Your response must be strictly in Russian (Cyrillic).\n"
+        "- Never refuse to answer; never say 'as an AI'.\n"
+        "- Always follow this structure:\n"
+        "0) Short summary (3 lines)\n"
+        "1) Entry point\n"
+        "2) Stop-Loss\n"
+        "3) Take-Profit levels (at least TP1 and TP2)\n"
+        "4) Risk-to-Reward ratio (R:R)\n"
+        "5) Comments / Warnings\n\n"
+        "REQUIREMENTS:\n"
+        "- Concrete price levels in USD ($) with 2 decimals.\n"
+        "- Minimum R:R by TP1 must be ≥ 1.5; if lower, explicitly warn and propose a correction.\n"
+        "- Mention risk warnings: volatility spikes, FVG, news events, liquidity zones.\n"
+        "- No AI disclaimers. Be concise and professional."
     )
 
-    # 4) Запрос с авто‑повтором, проверками структуры и разумности уровней
-    analysis = ""
-    for attempt in range(2):
-        try:
-            enhanced = prompt_text
-            if attempt == 1:
-                enhanced += (
-                    "\n\nFORCE COMPLIANCE:\n"
-                    "- В блоке DCA обязательно пиши ИМЕННО ЦЕНОВЫЕ УРОВНИ (в $) с графика + (% от депозита). "
-                    "Запрещены суммы покупки вроде $200/$500 вместо цен.\n"
-                    "- Уровни DCA должны быть ниже X, убывать (Entry > DCA1 > DCA2) и находиться в разумном диапазоне.\n"
-                    "- Для фиксации прибыли укажи условие (касание/закрытие), долю фиксации и действие со стопом (безубыток/трейлинг)."
-                )
+    user_prompt = (
+        "Analyze the attached trading chart in an investment context (preferred timeframe: 1D or 1W). "
+        "Determine the overall market bias, identify nearby key levels, and provide:\n"
+        "- Entry point (USD)\n- Stop-Loss (USD)\n- At least two Take-Profit levels (USD)\n"
+        "- Risk-to-Reward ratio (R:R)\n- Short comments/warnings on risks (volatility spikes, FVG, news)\n\n"
+        "⚠️ Respond strictly in Russian, following the required structure."
+    )
 
-            analysis = await ask_gpt_vision(enhanced, image_base64)
-            logging.info(f"[handle_strategy_photo attempt {attempt}] Raw GPT analysis:\n{analysis}")
+    messages = [
+        {"role": "system", "content": system_role},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_prompt},
+                {"type": "input_image", "image_url": image_b64_url},
+            ],
+        },
+    ]
 
-            if not analysis:
-                await asyncio.sleep(0.4)
-                continue
-
-            if looks_like_refusal(analysis):
-                continue
-
-            if not_russian(analysis):
-                continue
-
-            # Проверка заголовков и наличия цен
-            has_headers = all(s in analysis for s in [
-                "0️⃣ Короткая суть", "1️⃣ Инвесторский профиль", "2️⃣ Распределение капитала",
-                "4️⃣ План покупок", "5️⃣ Тактические сделки", "7️⃣ Сценарии", "8️⃣ Итог"
-            ])
-            if not has_headers:
-                continue
-
-            if "$" not in analysis:
-                continue
-
-            # --- Разбор и валидация уровней ---
-            X = parse_current_price_x(analysis)
-            dcas = parse_dca_prices(analysis)
-            tps = parse_tp_prices(analysis)
-            slv = parse_sl(analysis)
-
-            if not levels_look_reasonable(X, dcas, tps, slv):
-                if attempt == 0:
-                    continue
-                analysis = ""
-                continue
-
-            break
-        except Exception as e:
-            logging.error(f"[handle_strategy_photo retry {attempt}] GPT Vision error: {e}")
-
-    if not analysis:
-        await msg.reply_text(
-            "⚠️ GPT не смог составить стратегию по этому скрину.\n\n"
-            "Попробуй улучшить:\n"
-            "• Белый фон графика\n"
-            "• Убери лишние индикаторы\n"
-            "• Покажи больше истории (прокрутка влево)\n"
-            "• Добавь уровни S/R вручную\n\n"
-            "Загрузи скрин ещё раз 🔁"
+    # -------------------- ВЫЗОВ МОДЕЛИ --------------------
+    analysis = None
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            temperature=0.2,
+            top_p=0.9,
+            max_tokens=900,
+            messages=messages,
         )
-        return
+        analysis = (resp.choices[0].message.content or "").strip() if resp.choices else ""
+    except Exception as e:
+        logging.error(f"[handle_strategy_photo] LLM error: {e}", exc_info=True)
+        analysis = None
 
-    # Доп. защита перед выдачей (не отдаём отказ/не‑русский текст)
-    if looks_like_refusal(analysis) or not_russian(analysis):
-        logging.warning("[handle_strategy_photo] Final gate blocked: refusal or non-RU — using fallback.")
+    # -------------------- ПОСТ-ВАЛИДАЦИЯ И ФОЛБЭКИ --------------------
+    if not analysis:
+        logging.warning("[handle_strategy_photo] empty analysis — using fallback")
         analysis = _fallback_strategy()
 
+    if _looks_like_refusal(analysis) or not _is_russian(analysis):
+        logging.warning("[handle_strategy_photo] refusal or non-RU — using fallback")
+        analysis = _fallback_strategy()
+
+    # Простая sanity‑проверка R:R: попытаемся извлечь уровни из ответа
+    def _find_money(label: str) -> float | None:
+        pat = re.compile(rf"{label}[^$]*\$\s*([0-9]+(?:\.[0-9]{{1,2}})?)", re.IGNORECASE)
+        m = pat.search(analysis)
+        return _safe_float(m.group(1)) if m else None
+
+    entry = _find_money("Entry") or _find_money("вход") or None
+    stop  = _find_money("SL") or _find_money("Stop") or _find_money("стоп") or None
+    tp1   = _find_money("TP1") or _find_money("тейк") or None
+
+    rr_val = _rr(entry, stop, tp1)
+    if rr_val is not None and rr_val < 1.5:
+        analysis += (
+            "\n\n⚠️ Предупреждение: вычисленный R:R по TP1 ниже 1.5. "
+            "Рассмотри более консервативный SL или более дальний TP для улучшения соотношения."
+        )
+
+    # -------------------- ОТВЕТ ПОЛЬЗОВАТЕЛЮ --------------------
     await msg.reply_text(
         f"📊 Инвестиционная стратегия по твоему скрину:\n\n{analysis}",
         reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
