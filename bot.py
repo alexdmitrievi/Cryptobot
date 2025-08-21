@@ -1766,7 +1766,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ✅ Открытые диалоги (продолжаем, если есть ожидания)
     if context.user_data.get("awaiting_invest_question"):
         return await handle_invest_question(update, context)
-if context.user_data.get("awaiting_definition_term"):
+    if context.user_data.get("awaiting_definition_term"):
         return await handle_definition_term(update, context)
     if context.user_data.get("awaiting_therapy_input"):
         return await gpt_psychologist_response(update, context)
