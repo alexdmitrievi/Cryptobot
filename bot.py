@@ -5,6 +5,7 @@ import threading
 import time
 import re
 import json
+import io
 import requests
 import hmac
 import hashlib
