@@ -12,6 +12,7 @@ import hashlib
 import base64
 import csv
 import unicodedata
+import inspect
 from datetime import datetime
 from urllib.parse import urlencode
 from decimal import Decimal, InvalidOperation
@@ -995,230 +996,220 @@ refusal_markers = [
     "не могу", "я не могу", "не буду", "я не буду", "не могу помочь", "не могу с этим помочь",
 ]
 
-NUM = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 
-def _safe_float(x) -> Optional[float]:
-    if x is None:
-        return None
-    if isinstance(x, (int, float)):
-        return float(x)
-    m = NUM.search(str(x))
-    return float(m.group(0).replace(",", ".")) if m else None
-
-def _sanitize(s: str, limit: int = 3500) -> str:
-    if not s:
-        return ""
-    s = s.encode("utf-8", "ignore").decode("utf-8", "ignore")
-    return s.strip()[:limit]
-
-def _parse_from_text(text: str) -> Dict[str, Any]:
-    """Страховка: вытащить entry/stop/tp из свободного текста, если JSON не распарсился."""
-    t = (text or "").replace("–", "-")
-
-    def find_one(keys: List[str]) -> Optional[float]:
-        pat = r"(?:{}).*?(?:\$?\s*)([-+]?\d+(?:[.,]\d+)?)".format("|".join(re.escape(k) for k in keys))
-        m = re.search(pat, t, flags=re.I)
-        return _safe_float(m.group(1)) if m else None
-
-    entry = find_one(["Entry", "Вход", "Entry price"])
-    stop  = find_one(["Stop", "StopLoss", "SL", "Стоп", "Стоп-лосс", "Invalidation", "Инвалидация"])
-
-    # Собираем TP из разных вариантов записи
-    tp_vals: List[float] = []
-    for key in ["TP1", "TP 1", "TP2", "TP 2", "TP3", "TP 3", "TP", "Тейк", "TakeProfit", "Тейк-профит"]:
-        for m in re.finditer(rf"{key}\s*[:=]?\s*(?:\$?\s*)([-+]?\d+(?:[.,]\d+)?)", t, flags=re.I):
-            v = _safe_float(m.group(1))
-            if v is not None:
-                tp_vals.append(v)
-
-    # Если перечислены через запятую после TP:
-    if not tp_vals:
-        m = re.search(r"(TP|Тейк)[^\n:]*:\s*([^\n]+)", t, flags=re.I)
-        if m:
-            for chunk in re.split(r"[,\s/]+", m.group(2)):
-                v = _safe_float(chunk)
-                if v is not None:
-                    tp_vals.append(v)
-
-    return {"direction": "LONG", "entry": entry, "stop": stop, "tp": tp_vals[:3], "dca": [], "notes": []}
-
-# -------------------- Модель стратегии + валидация/формат --------------------
-@dataclass
-class Strategy:
-    direction: str
-    avg_entry: Optional[float]
-    entry: Optional[float]
-    stop: Optional[float]
-    tp: List[float]
-    rr: Optional[float]
-    notes: List[str]
-    dca: List[Dict[str, float]]
-
-    def as_json(self) -> str:
-        return json.dumps(asdict(self), ensure_ascii=False)
-
-def _validate(strategy: Strategy) -> Strategy:
-    notes = list(strategy.notes or [])
-
-    # Спот: только LONG
-    strategy.direction = "LONG"
-
-    # Entry = средняя по DCA при отсутствии
-    if not strategy.entry and strategy.dca:
-        w = sum(leg["alloc_pct"] for leg in strategy.dca)
-        if w > 0:
-            strategy.entry = round(sum(leg["price"] * leg["alloc_pct"] for leg in strategy.dca) / w, 2)
-            notes.append("Автоматически рассчитана средняя цена входа.")
-    if not strategy.avg_entry:
-        strategy.avg_entry = strategy.entry
-
-    # Stop ниже entry
-    if strategy.entry and (not strategy.stop or strategy.stop >= strategy.entry):
-        strategy.stop = round(strategy.entry * 0.92, 2)  # ~-8%
-        notes.append("Стоп выставлен автоматически на ~8% ниже средней цены входа.")
-
-    # TP > entry, без дублей, максимум 3
-    if strategy.entry and strategy.tp:
-        fixed = []
-        for t in strategy.tp:
-            if t <= strategy.entry * 1.01:
-                t = round(strategy.entry * 1.02, 2)
-            fixed.append(round(t, 2))
-        strategy.tp = sorted(set(fixed))[:3]
-    else:
-        strategy.tp = strategy.tp[:3] if strategy.tp else []
-
-    # R:R по TP1
-    strategy.rr = None
-    if strategy.entry and strategy.stop and strategy.tp:
-        risk = strategy.entry - strategy.stop
-        reward = strategy.tp[0] - strategy.entry
-        if risk > 0 and reward > 0:
-            strategy.rr = round(reward / risk, 2)
-            if strategy.rr < 0.8:
-                notes.append(f"⚠️ Низкий R:R ({strategy.rr}). Прибыль/риск может быть невыгодным.")
-
-    strategy.notes = notes
-    return strategy
-
-def _format(strategy: Strategy) -> str:
-    """Понятный формат, похожий на handle_photo, но под спот/инвестиции."""
-    parts = []
-    parts.append("📊 Инвестиционная стратегия (СПОТ, долгосрок):\n")
-
-    parts.append("0️⃣ Суть:\n")
-    parts.append("• Покупка частями (усреднение цены).\n")
-    parts.append("• Работаем только в LONG, без шортов и плеча.\n")
-    parts.append("• Мягкая отмена сценария при падении ниже стопа.\n")
-
-    if strategy.dca:
-        parts.append("\n1️⃣ План покупок (по уровням):")
-        for leg in strategy.dca:
-            parts.append(f"\n• Купить {leg['alloc_pct']:.0f}% позиции по цене ${leg['price']:.2f}")
-
-    if strategy.avg_entry:
-        parts.append(f"\n\n2️⃣ Средняя цена входа\n• ${strategy.avg_entry:.2f}")
-
-    if strategy.stop:
-        parts.append(f"\n\n3️⃣ Уровень отмены (стоп)\n• ${strategy.stop:.2f}")
-
-    if strategy.tp:
-        parts.append("\n\n4️⃣ Цели (Take-Profit):")
-        for i, t in enumerate(strategy.tp, 1):
-            parts.append(f"\n• TP{i}: ${t:.2f}")
-
-    if strategy.rr is not None:
-        parts.append(f"\n\n5️⃣ Прибыль/риск (R:R)\n• По TP1: {strategy.rr:.2f}")
-
-    if strategy.notes:
-        parts.append("\n\n⚠️ Комментарии:")
-        for n in strategy.notes:
-            parts.append(f"\n• {n}")
-
-    parts.append(f"\n\n```{strategy.as_json()}```\n")
-    return _sanitize("".join(parts))
-
-# -------------------- Главный хендлер: HANDLE STRATEGY PHOTO --------------------
-async def handle_strategy_photo(update, context, image_bytes: Optional[BytesIO] = None):
+async def handle_strategy_photo(update, context, image_bytes: BytesIO):
     """
-    Принимает изображение (BytesIO), запрашивает модель (промпт на EN, ответ RU),
-    парсит/валидирует уровни и отдаёт понятный ответ + JSON.
+    Инвест-стратегия по скрину (СПОТ, LONG-only, DCA).
+    Требования:
+    - Первая строка: валидный JSON одной строкой по схеме:
+      {"direction":"LONG","entry":number|null,"avg_entry":number|null,"stop":number|null,
+       "tp":[numbers],"dca":[{"price":number,"alloc_pct":number}],"notes":["text"]}
+    - Далее: полный ответ на русском (мы сформируем свой, понятный новичку)
+    - Валидация/починка: LONG-only; если entry отсутствует — считаем среднюю по DCA (по весам alloc_pct и только с ценами);
+      стоп ниже entry (~8% ниже, если не задан), TP > entry, R:R по TP1.
     """
-    msg = update.effective_message
-
-    # 0) Готовим base64
-    try:
-        image_bytes.seek(0)
-        img = Image.open(image_bytes).convert("RGB")
-        buf = BytesIO(); img.save(buf, format="JPEG", quality=80)
-        image_base64 = base64.b64encode(buf.getvalue()).decode()
-    except Exception:
-        await msg.reply_text("⚠️ Ошибка подготовки изображения. Пришли PNG/JPG/WEBP.")
+    msg = update.effective_message if update else None
+    if not msg:
         return
 
-    # 1) Промпт строго на английском; JSON на первой строке; далее — понятный русский ответ
-    prompt = (
-        "You are a professional institutional trader with 20+ years of experience.\n"
-        "Task: analyze this chart and create a SPOT investment plan with step-by-step DCA (Dollar Cost Averaging).\n\n"
-        "Rules:\n"
-        "- Use only LONG direction (no shorts, no leverage).\n"
-        "- Provide 2–5 buy levels with allocation percentages (DCA plan).\n"
-        "- Calculate the average entry price.\n"
-        "- Provide a soft invalidation (stop) below entry.\n"
-        "- Provide up to 3 take-profit levels.\n"
-        "- Estimate risk/reward ratio based on TP1.\n"
-        "- Add notes if something looks risky.\n\n"
-        "⚠️ Output requirement:\n"
-        "- First line: valid JSON, one line, following this schema:\n"
-        "{\"direction\":\"LONG\",\"entry\":number|null,\"avg_entry\":number|null,"
-        "\"stop\":number|null,\"tp\":[numbers],"
-        "\"dca\":[{\"price\":number,\"alloc_pct\":number}],"
-        "\"notes\":[\"text\"]}\n"
-        "- After the JSON, provide a clear formatted answer STRICTLY in Russian language, "
-        "easy to understand even for a beginner investor."
-    )
-
-    # 2) Запрос к модели с 1 ретраем и анти-отказом
-    raw = ""
-    for attempt in range(2):
-        txt = await ask_gpt_vision(
-            prompt if attempt == 0 else prompt + "\n\nReturn a valid JSON on the FIRST LINE. No markdown. Then Russian text.",
-            image_base64,
-            force_ru=True,
-        ) or ""
-        low = txt.lower()
-        if any(m in low for m in refusal_markers):
-            continue
-        raw = txt.strip()
-        if raw:
-            break
-
-    # 3) Берём JSON с первой непустой строки; иначе — фолбэк-парсер
-    first_line = next((ln.strip() for ln in (raw.splitlines() if raw else []) if ln.strip()), "{}")
     try:
-        data = json.loads(first_line)
-        if not isinstance(data, dict):
-            data = {}
+        if not isinstance(image_bytes, io.BytesIO):
+            # На случай, если забыли передать image_bytes
+            image_bytes = await _extract_image_bytes(update, context)
+            if not image_bytes:
+                await msg.reply_text("Не вижу изображения. Пришлите скрин как фото или как документ-картинку (PNG/JPG/WEBP).")
+                return
+
+        img_b64 = _to_jpeg_base64(image_bytes)
+
+        client = _get_openai_client()
+        system_prompt = (
+            "You are an institutional investor creating a SPOT DCA plan (LONG only). "
+            "Always respond with a VALID ONE-LINE JSON as the FIRST line using the schema: "
+            "{\"direction\":\"LONG\",\"entry\":number|null,\"avg_entry\":number|null,\"stop\":number|null,"
+            "\"tp\":[numbers],\"dca\":[{\"price\":number,\"alloc_pct\":number}],\"notes\":[\"text\"]}. "
+            "Then provide a Russian explanation for a beginner. Never refuse; provide best-effort values."
+        )
+        user_prompt = (
+            "TASK:\n"
+            "1) Read the chart image and propose a SPOT DCA plan (LONG-only).\n"
+            "2) FIRST LINE: output exactly ONE line JSON (no code fences) per schema. "
+            "3) Then explain in Russian for a beginner (plain text, no markdown).\n"
+            "4) DCA list must have 2-4 steps with valid prices and alloc_pct (sum ≈100%).\n"
+            "5) If unsure, still provide best estimates. Do NOT refuse.\n"
+        )
+
+        def _needs_retry_text(txt: str) -> bool:
+            if not txt:
+                return True
+            low = txt.lower()
+            return ("i can't" in low) or ("cannot" in low) or ("i won’t" in low) or ("sorry" in low) or ("as an ai" in low)
+
+        content_text = None
+        for attempt in range(2):
+            try:
+                resp = await client.chat.completions.create(
+                    model="gpt-4o",
+                    temperature=0.1,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": [
+                            {"type": "text", "text": user_prompt},
+                            {"type": "input_image", "image_url": f"data:image/jpeg;base64,{img_b64}"}
+                        ]}
+                    ]
+                )
+                content_text = (resp.choices[0].message.content or "").strip()
+                if not _needs_retry_text(content_text):
+                    break
+                system_prompt += " You must comply. Provide your best estimate. Do not refuse."
+            except Exception:
+                logging.exception("Vision call failed (strategy attempt %s)", attempt + 1)
+
+        if not content_text:
+            data = _fallback_strategy()
+        else:
+            # 1-я строка — JSON
+            lines = content_text.splitlines()
+            first = (lines[0] if lines else "").strip()
+            try:
+                data = json.loads(first)
+                if not isinstance(data, dict):
+                    raise ValueError("First line is not an object")
+            except Exception:
+                # Фолбэк парсер из текста
+                txt = content_text
+                # DCA парсим грубо: пары (price, alloc_pct)
+                dca = []
+                for m in re.finditer(r'(?:DCA|Buy|Покупка)[^$]*\$?\s*([0-9]+(?:\.[0-9]+)?)\s*[,; ]+\s*(?:alloc|доля|процент|alloc_pct)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)\s*%?', txt, re.I):
+                    price = _safe_float(m.group(1))
+                    alloc = _safe_float(m.group(2))
+                    if price is not None and alloc is not None:
+                        dca.append({"price": price, "alloc_pct": alloc})
+                entry = _safe_float(re.search(r'Entry|Вход\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I) and re.search(r'Entry|Вход\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I).group(1))
+                stop  = _safe_float(re.search(r'(Stop|Стоп)\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I) and re.search(r'(Stop|Стоп)\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I).group(2))
+                tps   = []
+                for label in ("TP1","TP2","TP3","Цель1","Цель2","Цель3"):
+                    m = re.search(rf'{label}\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
+                    if m:
+                        val = _safe_float(m.group(1))
+                        if val is not None:
+                            tps.append(val)
+                data = {
+                    "direction": "LONG",
+                    "entry": entry,
+                    "avg_entry": None,
+                    "stop": stop,
+                    "tp": tps,
+                    "dca": dca,
+                    "notes": ["Данные извлечены эвристически из текста ответа."]
+                }
+
+        # Нормализация/валидация
+        data["direction"] = "LONG"  # только LONG
+        entry = _safe_float(data.get("entry"))
+        stop  = _safe_float(data.get("stop"))
+        tps   = [ _safe_float(x) for x in (data.get("tp") or []) if _safe_float(x) is not None ]
+        dca   = data.get("dca") or []
+
+        # avg_entry: если нет entry — считаем по DCA
+        avg_entry = _safe_float(data.get("avg_entry"))
+        if entry is None:
+            wsum = 0.0
+            psum = 0.0
+            for step in dca:
+                p = _safe_float(step.get("price"))
+                w = _safe_float(step.get("alloc_pct"))
+                if p is not None and w is not None and w > 0:
+                    wsum += w
+                    psum += p * w
+            if wsum > 0:
+                avg_entry = psum / wsum
+        if avg_entry is None and entry is not None:
+            avg_entry = entry
+
+        # Стоп: если отсутствует — ставим ≈8% ниже средней цены входа
+        if stop is None and avg_entry is not None:
+            stop = avg_entry * 0.92  # ~8% ниже
+
+        # TP: фильтруем > entry/avg_entry
+        base_entry = entry if entry is not None else avg_entry
+        if base_entry is not None:
+            tps = [x for x in tps if x > base_entry]
+            if not tps:
+                # задай минимально реалистичные цели, если пусто
+                tps = [base_entry * 1.05, base_entry * 1.1, base_entry * 1.2]
+
+        # R:R по TP1
+        tp1 = tps[0] if tps else None
+        rr = _calc_rr(base_entry, stop, tp1)
+
+        # Округление и сбор финала
+        data_norm = {
+            "direction": "LONG",
+            "entry": _round2(entry),
+            "avg_entry": _round2(avg_entry),
+            "stop": _round2(stop),
+            "tp": [_round2(x) for x in tps[:3]],
+            "dca": [
+                {"price": _round2(_safe_float(step.get("price"))), "alloc_pct": _round2(_safe_float(step.get("alloc_pct")))}
+                for step in dca if (_safe_float(step.get("price")) is not None and _safe_float(step.get("alloc_pct")) is not None)
+            ],
+            "notes": list(dict.fromkeys((data.get("notes") or []) + []))
+        }
+
+        # Текст для пользователя (РУС, без markdown)
+        parts = []
+        parts.append("0️⃣ Суть")
+        parts.append("• Долгосрок, СПОТ, только покупка. План через DCA, чтобы не заходить всей суммой сразу.")
+
+        # 1) План покупок
+        if data_norm["dca"]:
+            lines = []
+            for step in data_norm["dca"]:
+                lines.append(f"Купить {step['alloc_pct']}% по ${step['price']}")
+            parts.append("1️⃣ План покупок")
+            parts.append("• " + "; ".join(lines))
+        else:
+            parts.append("1️⃣ План покупок")
+            parts.append("• Разбей сумму на 3–4 части и покупай по мере снижения цены.")
+
+        # 2) Средняя цена входа
+        if data_norm["avg_entry"] is not None:
+            parts.append(f"2️⃣ Средняя цена входа: ${data_norm['avg_entry']}")
+
+        # 3) Уровень отмены (стоп)
+        if data_norm["stop"] is not None:
+            parts.append(f"3️⃣ Уровень отмены (стоп): ${data_norm['stop']}")
+
+        # 4) Цели (TP1..TP3)
+        if data_norm["tp"]:
+            tps_str = ", ".join(f"${x}" for x in data_norm["tp"])
+            parts.append(f"4️⃣ Цели (TP1..TP{len(data_norm['tp'])}): {tps_str}")
+
+        # 5) Прибыль/риск (R:R)
+        if rr is not None:
+            parts.append(f"5️⃣ Прибыль/риск (R:R к TP1): {rr}")
+            if rr < 1.5:
+                parts.append("⚠️ Соотношение риск/прибыль низкое. Уменьшите долю покупки или дождитесь лучших уровней.")
+        else:
+            parts.append("5️⃣ Прибыль/риск (R:R): невозможно оценить без точных уровней входа и стопа.")
+
+        # Комментарии
+        notes = data_norm.get("notes") or []
+        if notes:
+            parts.append("⚠️ Комментарии")
+            parts.extend([f"• {n}" for n in notes])
+
+        # JSON для логов в тройных кавычках
+        json_block = json.dumps(data_norm, ensure_ascii=False)
+        parts.append(f'"""{json_block}"""')
+
+        await msg.reply_text("\n".join(parts))
+
     except Exception:
-        data = _parse_from_text(raw)
-
-    # 4) Собираем модель стратегии
-    strat = Strategy(
-        direction="LONG",
-        avg_entry=_safe_float(data.get("avg_entry")),
-        entry=_safe_float(data.get("entry")),
-        stop=_safe_float(data.get("stop")),
-        tp=[_safe_float(x) for x in (data.get("tp") or []) if _safe_float(x)],
-        rr=None,
-        notes=data.get("notes") or [],
-        dca=[{"price": _safe_float(leg.get("price")), "alloc_pct": _safe_float(leg.get("alloc_pct"))}
-             for leg in (data.get("dca") or []) if _safe_float(leg.get("price")) and _safe_float(leg.get("alloc_pct"))]
-    )
-
-    # 5) Валидация/авто-починка и вывод
-    strat = _validate(strat)
-    text = _format(strat)
-    await msg.reply_text(text, disable_web_page_preview=True)
+        logging.exception("handle_strategy_photo failed")
+        await msg.reply_text("Не удалось построить инвест‑стратегию по скрину. Пришлите другой скрин или попробуйте позже.")
 
 # --- UID SUBMISSION (реферал через брокера) ---
 async def handle_uid_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2092,123 +2083,74 @@ async def _call_if_exists(fn_name: str, update: Update, context: ContextTypes.DE
 def _fallback_strategy() -> str:
     return "Краткий план не сформирован — пришли более чистый скрин (LuxAlgo SMC + уровни S/R)."
 
-async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 🧾 Нормализуем вход
-    msg = update.effective_message
-    text = (getattr(msg, "text", "") or "").strip()
-
-    # Фото или документ-картинка (PNG/JPG/WEBP)
-    doc = getattr(msg, "document", None)
-    is_image_doc = bool(doc and (doc.mime_type or "").lower().startswith("image/"))
-    has_photo = bool(getattr(msg, "photo", None)) or is_image_doc
-
-    # ↩️ Универсальный выход
-    if text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
-        context.user_data.clear()
-        try:
-            await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
-        except NameError:
-            await msg.reply_text("🔙 Вернулись в главное меню.")
-        return
-
-    # 📨 Сбор email
-    if context.user_data.get("awaiting_email"):
-        if text and "@" in text and "." in text:
-            try:
-                await asyncio.to_thread(safe_append_row, [
-                    str(update.effective_user.id),
-                    update.effective_user.username or "",
-                    text,
-                ])
-                await msg.reply_text("✅ Email сохранён! Бонус придёт в ближайшее время.")
-            except Exception as e:
-                logging.error(f"[EMAIL_SAVE] {e}")
-                await msg.reply_text("⚠️ Не удалось сохранить. Попробуй позже.")
-        else:
-            await msg.reply_text("❌ Похоже, это не email. Попробуй снова.")
+async def unified_text_handler(update, context):
+    """
+    Приоритет:
+    1) awaiting_calendar_photo  -> обрабатываем календарь (здесь заглушка)
+    2) awaiting_strategy == 'photo' -> вытаскиваем байты и вызываем handle_strategy_photo
+    3) если фото/док‑картинка — handle_photo
+    4) иначе — handle_main
+    Все «ожидалки» корректно сбрасываем при выходе в меню.
+    """
+    try:
+        msg = update.effective_message if update else None
+        if not msg:
             return
-        context.user_data.pop("awaiting_email", None)
-        return
 
-    # 🗓 Экономкалендарь — приоритетнее любых фото
-    if context.user_data.get("awaiting_calendar_photo"):
-        if has_photo:
-            # handle_calendar_photo сам возьмёт байты, если ты внедрил патч C.
-            # Если нет — можно прокинуть прямо здесь через _extract_image_bytes.
-            await _call_if_exists(
-                "handle_calendar_photo",
-                update, context,
-                fallback_text="⚠️ Обработчик календаря временно недоступен."
-            )
-        else:
-            await msg.reply_text("📸 Пришли скрин экономического календаря или нажми «↩️ Выйти в меню».")
-        return
+        text = (getattr(msg, "text", "") or "").strip()
+        doc = getattr(msg, "document", None)
+        is_image_doc = bool(doc and (doc.mime_type or "").startswith("image/"))
+        has_photo = bool(getattr(msg, "photo", None)) or is_image_doc
 
-    # 💡 Инвест-стратегия: ТЕКСТ
-    if context.user_data.get("awaiting_strategy") == "text":
-        if text:
-            await _call_if_exists(
-                "handle_strategy_text",
-                update, context,
-                fallback_text="📝 Текстовая инвест-стратегия временно в разработке. Пришли скрин графика — сделаю план с DCA."
-            )
-        else:
-            await msg.reply_text("❌ Для текстовой стратегии нужно отправить текстовое сообщение.")
-        return
+        # Универсальный выход в меню
+        if text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
+            context.user_data.pop("awaiting_calendar_photo", None)
+            context.user_data.pop("awaiting_strategy", None)
+            context.user_data.pop("awaiting_strategy_mode", None)
+            await msg.reply_text("Вернулись в главное меню.")
+            return
 
-    # 💡 Инвест-стратегия: СКРИН — ПЕРЕД общим разбором фото!
-    if context.user_data.get("awaiting_strategy") == "photo":
-        if has_photo:
+        # 1) Экономический календарь (заглушка обработки фото календаря)
+        if context.user_data.get("awaiting_calendar_photo"):
             bio = await _extract_image_bytes(update, context)
+            context.user_data.pop("awaiting_calendar_photo", None)
             if not bio:
-                await msg.reply_text("⚠️ Пришли изображение как фото или документ-картинку (PNG/JPG/WEBP).")
+                await msg.reply_text("Не вижу изображения календаря. Пришлите фото или документ‑картинку.")
                 return
-            await _call_if_exists(
-                "handle_strategy_photo",
-                update, context,
-                fallback_text="⚠️ Инвест-стратегия временно недоступна."
-            )
-            # Если твой handle_strategy_photo принимает image_bytes — напрямую вызови:
-            # await handle_strategy_photo(update, context, image_bytes=bio)
-        else:
-            await msg.reply_text("📸 Пришли скрин для инвест-стратегии или нажми «↩️ Выйти в меню».")
-        return
+            # Здесь может быть твой handle_calendar_photo(...)
+            await msg.reply_text("Календарь получен. Анализ скоро будет доступен в отдельном модуле.")
+            return
 
-    # 🖼 Если просто прислали фото/документ-картинку — трейдерский разбор
-    if has_photo:
+        # 2) Инвест‑стратегия по фото
+        if context.user_data.get("awaiting_strategy") == "photo":
+            bio = await _extract_image_bytes(update, context)
+            context.user_data.pop("awaiting_strategy", None)
+            if not bio:
+                await msg.reply_text("Не вижу изображения. Пришлите скрин как фото или документ‑картинку.")
+                return
+            await handle_strategy_photo(update, context, image_bytes=bio)
+            return
+
+        # 3) Обычное фото/док‑картинка -> трейдерский разбор
+        if has_photo:
+            await handle_photo(update, context)
+            return
+
+        # 4) Иначе — главное меню
         await _call_if_exists(
-            "handle_photo",
+            "handle_main",
             update, context,
-            fallback_text="⚠️ Фотоанализ временно недоступен."
+            fallback_text="Я готов помочь. Выберите действие в меню или пришлите скрин графика для разбора."
         )
         return
 
-    # ✅ Остальные режимы (текст)
-    if context.user_data.get("awaiting_potential"):
-        context.user_data.pop("awaiting_potential", None)
+    except Exception:
+        logging.exception("unified_text_handler failed")
         try:
-            await msg.reply_text("⚠️ Этот режим временно недоступен. Возвращаю в меню.", reply_markup=REPLY_MARKUP)
-        except NameError:
-            await msg.reply_text("⚠️ Этот режим временно недоступен. Возвращаю в меню.")
-        return
+            await update.effective_message.reply_text("Произошла ошибка обработки сообщения. Попробуйте ещё раз.")
+        except Exception:
+            pass
 
-    if context.user_data.get("awaiting_definition_term"):
-        await _call_if_exists("handle_definition_term", update, context, fallback_text="⚠️ Справочник терминов недоступен.") 
-        return
-
-    if context.user_data.get("awaiting_invest_question"):
-        await _call_if_exists("handle_invest_question", update, context, fallback_text="⚠️ Обработчик вопросов недоступен.") 
-        return
-
-    if context.user_data.get("awaiting_uid"):
-        await _call_if_exists("handle_uid_submission", update, context, fallback_text="⚠️ UID-обработчик недоступен.") 
-        return
-
-    # Ничего не ожидаем — отдаём в главный роутер
-    await _call_if_exists(
-        "handle_main",
-        update, context,
-        fallback_text="👋 Я готов помочь. Выбери действие в меню или пришли скрин графика для разбора."
 
 # --- Safe main menu keyboard (если REPLY_MARKUP не задан) ---
 def _get_main_markup():
