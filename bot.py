@@ -2085,12 +2085,15 @@ def _fallback_strategy() -> str:
 
 async def unified_text_handler(update, context):
     """
+    Единый роутер сообщений.
+
     Приоритет:
-    1) awaiting_calendar_photo  -> обрабатываем календарь (здесь заглушка)
-    2) awaiting_strategy == 'photo' -> вытаскиваем байты и вызываем handle_strategy_photo
+    1) awaiting_calendar_photo  -> обработка календаря (заглушка)
+    2) awaiting_strategy == 'photo' -> вытащить байты и вызвать handle_strategy_photo
     3) если фото/док‑картинка — handle_photo
     4) иначе — handle_main
-    Все «ожидалки» корректно сбрасываем при выходе в меню.
+
+    Везде: устойчивость к None, короткие RU‑ответы при ошибках.
     """
     try:
         msg = update.effective_message if update else None
@@ -2102,7 +2105,7 @@ async def unified_text_handler(update, context):
         is_image_doc = bool(doc and (doc.mime_type or "").startswith("image/"))
         has_photo = bool(getattr(msg, "photo", None)) or is_image_doc
 
-        # Универсальный выход в меню
+        # ↩️ Выход в меню — сбрасываем все «ожидалки»
         if text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
             context.user_data.pop("awaiting_calendar_photo", None)
             context.user_data.pop("awaiting_strategy", None)
@@ -2110,18 +2113,18 @@ async def unified_text_handler(update, context):
             await msg.reply_text("Вернулись в главное меню.")
             return
 
-        # 1) Экономический календарь (заглушка обработки фото календаря)
+        # 1) Экономкалендарь (фото/док‑картинка)
         if context.user_data.get("awaiting_calendar_photo"):
             bio = await _extract_image_bytes(update, context)
             context.user_data.pop("awaiting_calendar_photo", None)
             if not bio:
                 await msg.reply_text("Не вижу изображения календаря. Пришлите фото или документ‑картинку.")
                 return
-            # Здесь может быть твой handle_calendar_photo(...)
-            await msg.reply_text("Календарь получен. Анализ скоро будет доступен в отдельном модуле.")
+            # TODO: здесь подключи свой handle_calendar_photo(...)
+            await msg.reply_text("Календарь получен. Анализ будет доступен в отдельном модуле.")
             return
 
-        # 2) Инвест‑стратегия по фото
+        # 2) Инвест‑стратегия (скрин) -> handle_strategy_photo
         if context.user_data.get("awaiting_strategy") == "photo":
             bio = await _extract_image_bytes(update, context)
             context.user_data.pop("awaiting_strategy", None)
@@ -2129,12 +2132,12 @@ async def unified_text_handler(update, context):
                 await msg.reply_text("Не вижу изображения. Пришлите скрин как фото или документ‑картинку.")
                 return
             await handle_strategy_photo(update, context, image_bytes=bio)
-            return
+            return  # важно: чтобы не падать дальше в handle_main
 
         # 3) Обычное фото/док‑картинка -> трейдерский разбор
         if has_photo:
             await handle_photo(update, context)
-            return
+            return  # важно: чтобы не дублировать меню после ответа
 
         # 4) Иначе — главное меню
         await _call_if_exists(
@@ -2150,7 +2153,6 @@ async def unified_text_handler(update, context):
             await update.effective_message.reply_text("Произошла ошибка обработки сообщения. Попробуйте ещё раз.")
         except Exception:
             pass
-
 
 # --- Safe main menu keyboard (если REPLY_MARKUP не задан) ---
 def _get_main_markup():
