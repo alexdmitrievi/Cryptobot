@@ -1033,14 +1033,13 @@ refusal_markers = [
 
 async def handle_strategy_photo(update, context, image_bytes: BytesIO):
     """
-    Инвест-стратегия по скрину (СПОТ, LONG-only, DCA).
-    Первая строка — валидный JSON одной строкой по схеме:
+    СПОТ, LONG-only, DCA. Первая строка ответа модели — валидный JSON одной строкой
+    по схеме:
       {"direction":"LONG","entry":number|null,"avg_entry":number|null,"stop":number|null,
        "tp":[numbers],"dca":[{"price":number,"alloc_pct":number}],"notes":["text"]}
-    Затем — полный ответ на русском. Валидации: LONG-only; если entry нет — считаем среднюю по DCA;
-    стоп ≈8% ниже средней; TP > entry; R:R к TP1; аккуратные «Комментарии» и «Что дальше».
+    Затем — понятный ответ на русском (без markdown).
     """
-    # Локальные хелперы (без внешних зависимостей)
+    # --- локальные хелперы (без внешних зависимостей) ---
     def _sfloat(x):
         try:
             if x is None:
@@ -1048,6 +1047,21 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             return float(str(x).replace(" ", "").replace(",", "."))
         except Exception:
             return None
+
+    def _fmt_price(x: float | None) -> str:
+        if x is None:
+            return "—"
+        d = 2 if abs(x) >= 1 else 4
+        s = f"{x:,.{d}f}".replace(",", " ")  # узкий неразрывный пробел как разделитель тысяч
+        return f"${s}"
+
+    def _fmt_pct(x: float | None, max_dec=2) -> str:
+        if x is None:
+            return "—"
+        xi = float(x)
+        if abs(xi - round(xi)) < 1e-9:
+            return f"{int(round(xi))}%"
+        return f"{round(xi, max_dec)}%"
 
     def _r2(x):
         return None if x is None else round(float(x), 2)
@@ -1193,7 +1207,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         entry = _sfloat(data.get("entry"))
         stop  = _sfloat(data.get("stop"))
         tps   = [_sfloat(x) for x in (data.get("tp") or []) if _sfloat(x) is not None]
-        dca   = data.get("dca") or []
+        dca   = data.get("dca") | []
 
         avg_entry = _sfloat(data.get("avg_entry"))
         if entry is None:
@@ -1219,6 +1233,14 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         tp1 = tps[0] if tps else None
         rr = _rr(base_entry, stop, tp1)
 
+        # Сумма долей DCA для контроля (может быть не ровно 100%)
+        alloc_sum = None
+        try:
+            alloc_sum = sum(_sfloat(s.get("alloc_pct")) or 0.0 for s in dca)
+        except Exception:
+            alloc_sum = None
+
+        # 7) Финальные данные (округления только для вывода)
         data_norm = {
             "direction": "LONG",
             "entry": _r2(entry),
@@ -1227,46 +1249,52 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             "tp": [_r2(x) for x in tps[:3]],
             "dca": [
                 {"price": _r2(_sfloat(s.get("price"))), "alloc_pct": _r2(_sfloat(s.get("alloc_pct")))}
-                for s in dca if (_sfloat(s.get("price")) is not None and _sfloat(s.get("alloc_pct")) is not None)
+                for s in (dca or [])
+                if (_sfloat(s.get("price")) is not None and _sfloat(s.get("alloc_pct")) is not None)
             ],
             "notes": list(dict.fromkeys((data.get("notes") or [])))
         }
 
-        # 7) Ответ пользователю (RU, без markdown) + JSON в тройных кавычках
+        # --- красивый и чёткий ответ ---
         parts = []
         parts.append("0️⃣ Суть")
         parts.append("• Долгосрок, СПОТ, только покупка. План через DCA, чтобы не заходить всей суммой сразу.")
 
-        # 1) План покупок
-        if data_norm["dca"]:
-            parts.append("1️⃣ План покупок")
-            parts.append("• " + "; ".join(f"Купить {s['alloc_pct']}% по ${s['price']}" for s in data_norm["dca"]))
-        else:
-            parts.append("1️⃣ План покупок")
-            parts.append("• Разбей сумму на 3–4 части и покупай по мере снижения цены.")
+        # 1) План покупок — в одну строку, без «грязных» десятичных
+        dca_line = " ; ".join(
+            f"Купить {_fmt_pct(s['alloc_pct'])} по {_fmt_price(s['price'])}"
+            for s in data_norm["dca"]
+        ) if data_norm["dca"] else ""
+        parts.append("1️⃣ План покупок")
+        parts.append("• " + (dca_line if dca_line else "Разбей сумму на 3–4 части и покупай по мере снижения цены."))
 
         # 2) Средняя цена входа
         if data_norm["avg_entry"] is not None:
-            parts.append(f"2️⃣ Средняя цена входа: ${data_norm['avg_entry']}")
+            parts.append(f"2️⃣ Средняя цена входа: {_fmt_price(data_norm['avg_entry'])}")
 
-        # 3) Уровень отмены (стоп)
-        if data_norm["stop"] is not None:
-            parts.append(f"3️⃣ Уровень отмены (стоп): ${data_norm['stop']}")
+        # 3) Стоп с указанием просадки
+        if data_norm["stop"] is not None and data_norm["avg_entry"] is not None:
+            dd = (data_norm["avg_entry"] - data_norm["stop"]) / max(1e-9, data_norm["avg_entry"]) * 100.0
+            parts.append(f"3️⃣ Уровень отмены (стоп): {_fmt_price(data_norm['stop'])} (≈ {_fmt_pct(dd)[:-1]}%)")
+        elif data_norm["stop"] is not None:
+            parts.append(f"3️⃣ Уровень отмены (стоп): {_fmt_price(data_norm['stop'])}")
 
-        # 4) Цели (TP1..TPn)
+        # 4) Цели
         if data_norm["tp"]:
-            tps_str = ", ".join(f"${x}" for x in data_norm["tp"])
+            tps_str = ", ".join(_fmt_price(x) for x in data_norm["tp"])
             parts.append(f"4️⃣ Цели (TP1..TP{len(data_norm['tp'])}): {tps_str}")
 
-        # 5) Прибыль/риск (R:R)
+        # 5) R:R с оценкой качества
         if rr is not None:
             parts.append(f"5️⃣ Прибыль/риск (R:R к TP1): {rr}")
             if rr < 1.5:
                 parts.append("⚠️ Соотношение риск/прибыль низкое. Уменьшите долю покупки или дождитесь лучших уровней.")
+            elif rr < 3.0:
+                parts.append("⚠️ Соотношение риск/прибыль среднее. Следите за подтверждением на графике.")
         else:
             parts.append("5️⃣ Прибыль/риск (R:R): невозможно оценить без точных уровней входа и стопа.")
 
-        # Комментарии и «что дальше» — аккуратно
+        # Комментарии
         notes = [str(n).strip() for n in (data_norm.get("notes") or []) if str(n).strip()]
         parts.append("⚠️ Комментарии")
         if notes:
@@ -1275,11 +1303,14 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         else:
             parts.append("• Нет особых замечаний. Действуйте по плану DCA и контролируйте риск.")
 
+        # Небольшой «что дальше»
         parts.append("✅ Что дальше")
         parts.append("• Покупайте по плану DCA, не превышайте 1–2% риска на сделку.")
         parts.append("• Проверьте уровни на своём графике и актуальные новости перед покупкой.")
+        if alloc_sum is not None and abs(alloc_sum - 100.0) > 0.5 and data_norm["dca"]:
+            parts.append(f"• Сумма долей DCA сейчас ≈ {round(alloc_sum,1)}%. Скорректируйте до 100% для удобства.")
 
-        # Технический JSON для логов — в тройных кавычках
+        # Технический JSON для логов — в тройных кавычках (одной строкой)
         parts.append(f'"""{json.dumps(data_norm, ensure_ascii=False)}"""')
 
         await msg.reply_text("\n".join(parts))
