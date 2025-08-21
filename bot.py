@@ -13,9 +13,9 @@ import base64
 import csv
 import unicodedata
 from datetime import datetime
-from io import BytesIO
 from urllib.parse import urlencode
 from decimal import Decimal, InvalidOperation
+from typing import Tuple, Optional, Dict, Any, List
 
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
@@ -50,6 +50,7 @@ from config import (
     CRYPTOCLOUD_SHOP_ID,
     API_SECRET,
 )
+
 
 # Инициализация OpenAI-клиента (используется в ask_gpt_vision / handle_strategy_text и др.)
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -926,23 +927,33 @@ def fetch_price_from_binance(symbol: str) -> float | None:
 # и инициализирован клиент OpenAI: client = OpenAI(...)
 
 # -------------------- GPT Vision вызов (обновлённый) --------------------
-async def ask_gpt_vision(prompt_text: str, image_base64: str, system_prompt: str = None) -> str:
+async def ask_gpt_vision(
+    prompt_text: str,
+    image_base64: str,
+    system_prompt: str | None = None,
+    mime: str | None = "image/jpeg",
+) -> str:
     """
-    Вызывает chat.completions с картинкой.
-    prompt_text — текст запроса (EN), image_base64 — СЫРОЙ base64 без префикса data:.
-    system_prompt — опционально: кастомный system (EN). Если None — дефолт для SMC/инвеста.
-    Ответ ВСЕГДА строго на русском, короткими фразами, без markdown.
+    Вызов GPT‑Vision (chat.completions) с изображением.
+    - prompt_text: англоязычный запрос для модели.
+    - image_base64: СЫРОЙ base64 без префикса 'data:'.
+    - system_prompt: опциональный кастомный SYSTEM (EN). Если None — безопасный дефолт.
+    - mime: MIME типа изображения ('image/jpeg' | 'image/png' | и т.п.).
+    Требование к ответу: строго РУССКИЙ язык (кириллица), кратко, без markdown.
     """
+    if not image_base64:
+        return ""
+
     if system_prompt is None:
         system_prompt = (
-            "You are an institutional investment strategist with 20+ years of experience. "
-            "You ALWAYS provide a complete numeric plan and NEVER refuse. "
-            "All content is educational (not financial advice). "
-            "Always produce a safe, hypothetical plan; no buy/sell commands. "
-            "All responses MUST be in Russian, no markdown, short clear sentences, professional tone."
+            "You are a senior vision-enabled investment analyst. "
+            "Always return concise, professional Russian output (Cyrillic only), "
+            "no markdown, short clear sentences. Never refuse. No apologies."
         )
 
-    data_url = f"data:image/png;base64,{image_base64}"
+    # Корректный data: URL с учётом MIME
+    _mime = (mime or "image/jpeg").strip().lower()
+    data_url = f"data:{_mime};base64,{image_base64}"
 
     try:
         resp = await client.chat.completions.create(
@@ -952,12 +963,12 @@ async def ask_gpt_vision(prompt_text: str, image_base64: str, system_prompt: str
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": prompt_text + "\n\nRespond strictly in Russian."},
+                        {"type": "text", "text": f"{prompt_text}\n\nRespond strictly in Russian (Cyrillic). No markdown."},
                         {"type": "image_url", "image_url": {"url": data_url}},
                     ],
                 },
             ],
-            max_tokens=900,
+            max_tokens=1100,
             temperature=0.2,
             top_p=0.9,
             presence_penalty=0.0,
@@ -1096,11 +1107,22 @@ def levels_look_reasonable(x, dcas, tps, sl):
     return True
 
 
-async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+from typing import Tuple, Optional, Dict, Any, List
+import logging, io, base64, json, re
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ContextTypes
+
+# Ожидается внешняя функция вызова модели:
+# async def ask_gpt_vision(prompt_text: str, image_base64: str, system_prompt: str, mime: str) -> str: ...
+
+
+async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Инвест-режим: принимает скрин (photo/document image), даёт стратегию.
-    Промпт на английском, ответ строго на русском. Есть фолбэк, анти‑отказ, R:R‑sanity.
+    Инвест-режим (СПОТ, без шортов): принимает скрин (photo/document image) и выдаёт стратегию.
+    Усилено: англ. промпты и RU‑ответ, двойной анти‑отказ (retry), JSON‑парсинг, валидатор R:R.
+    Инвест‑специфика: поддержка DCA‑лестницы (усреднение), расчёт avg_entry и мягкая invalidation.
     """
+
     logging.info("[handle_strategy_photo] investor flow start")
     msg = update.effective_message
 
@@ -1109,7 +1131,8 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
         if not text:
             return False
         cyr = sum('а' <= ch.lower() <= 'я' or ch == 'ё' for ch in text)
-        return cyr >= max(20, len(text) // 5)
+        # Требуем хотя бы 20 кириллических символов и долю ≥ 15%
+        return cyr >= 20 and cyr / max(1, len(text)) >= 0.15
 
     def _looks_like_refusal(text: str) -> bool:
         if not text:
@@ -1124,147 +1147,289 @@ async def handle_strategy_photo(update: Update, context: ContextTypes.DEFAULT_TY
 
     def _safe_float(x, default=None):
         try:
+            if isinstance(x, str):
+                x = x.replace(",", ".")
             return float(x)
         except Exception:
             return default
 
-    def _rr(entry, stop, tp1):
-        entry, stop, tp1 = _safe_float(entry), _safe_float(stop), _safe_float(tp1)
-        if entry is None or stop is None or tp1 is None or entry == stop:
+    def _rr(entry_avg, invalidation, tp1):
+        entry_avg, invalidation, tp1 = _safe_float(entry_avg), _safe_float(invalidation), _safe_float(tp1)
+        if entry_avg is None or invalidation is None or tp1 is None or entry_avg == invalidation:
             return None
-        return abs((tp1 - entry) / (entry - stop))
+        return abs((tp1 - entry_avg) / (entry_avg - invalidation))
 
-    def _fallback_strategy() -> str:
-        X = 100.00
-        entry = round(X * 0.97, 2)
-        sl    = round(X * 0.86, 2)
-        tp1   = round(X * 1.03, 2)
-        tp2   = round(X * 1.06, 2)
-        rr_val = _rr(entry, sl, tp1) or 1.5
+    def _strip_md_fences(s: str) -> str:
+        """Убирает ```...``` и тройные кавычки вокруг JSON-блоков, если есть."""
+        if not s:
+            return s
+        s = s.strip()
+        if s.startswith("```") and s.endswith("```"):
+            inner = s[3:-3].strip()
+            inner = re.sub(r"^json\s*\n", "", inner, flags=re.IGNORECASE)
+            return inner
+        if s.startswith('"""') and s.endswith('"""'):
+            return s[3:-3].strip()
+        return s
 
-        text = (
-            "0️⃣ Короткая суть (оценочно):\n"
-            "• Умеренно бычий контекст. Плавное DCA, частичная фиксация.\n"
-            "• Контроль просадки и риск ≤ 1.5% на сделку.\n"
-            "• Учитывай новости, волатильность и FVG-зоны.\n\n"
-            "1️⃣ Точка входа\n"
-            f"• Entry: ${entry:.2f}\n\n"
-            "2️⃣ Stop‑Loss\n"
-            f"• SL: ${sl:.2f}\n\n"
-            "3️⃣ Take‑Profit(ы)\n"
-            f"• TP1: ${tp1:.2f}\n"
-            f"• TP2: ${tp2:.2f}\n\n"
-            "4️⃣ R:R\n"
-            f"• По TP1: {rr_val:.2f}\n\n"
-            "5️⃣ Комментарии/предупреждения\n"
-            "• Проверяй уровни на своём графике. Не финансовый совет.\n"
-            f"• Текущая цена X ~ ${X:.2f} (оценочно)\n"
-        )
-        summary = {"entry": entry, "stop": sl, "tp": [tp1, tp2], "direction": "LONG", "rr": round(rr_val, 2)}
-        text += '\n\n' + '"""' + json.dumps(summary, ensure_ascii=False) + '"""'
-        return text
+    def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
+        """
+        Ищем JSON-словарь в ответе модели: сначала по fenced-кодам, затем по фигурным скобкам.
+        Возвращаем dict или None.
+        """
+        if not text:
+            return None
+        code_blocks = re.findall(r"(```[\s\S]*?```|\"\"\"[\s\S]*?\"\"\")", text)
+        candidates = [_strip_md_fences(cb) for cb in code_blocks] if code_blocks else []
+        candidates.append(text.strip())
+        for cand in candidates:
+            cand = _strip_md_fences(cand)
+            m = re.search(r"\{[\s\S]*\}", cand)
+            if not m:
+                continue
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                continue
+        return None
 
-    async def _download_image_as_base64_raw() -> str | None:
-        """Скачиваем фото/документ-изображение и возвращаем СЫРОЙ base64 без префикса."""
-        file_id = None
+    def _avg_entry_from_dca(dca: Optional[List[Dict[str, Any]]]) -> Optional[float]:
+        """
+        dca: [{'price': float, 'alloc_pct': float}, ...] или {'p','w'} как сокращения.
+        Возвращает среднюю цену входа по весам (доли 0..1 или проценты 0..100).
+        """
+        if not dca or not isinstance(dca, list):
+            return None
+        total_w = 0.0
+        acc = 0.0
+        for it in dca:
+            if not isinstance(it, dict):
+                continue
+            price = it.get("price", it.get("p"))
+            w     = it.get("alloc_pct", it.get("w"))
+            price = _safe_float(price)
+            w     = _safe_float(w)
+            if price is None or w is None:
+                continue
+            w = (w / 100.0) if w > 1.0 else w
+            acc += price * w
+            total_w += w
+        if total_w <= 0:
+            return None
+        return round(acc / total_w, 4)
+
+    async def _download_image_as_base64_raw_and_mime() -> Tuple[Optional[str], Optional[str]]:
+        """
+        Скачиваем фото/документ-изображение и возвращаем (base64_raw, mime).
+        - Для photo от Telegram mime считаем 'image/jpeg' (Telegram сжимает в JPEG).
+        - Для document берём mime из самого документа.
+        """
+        file_id, mime = None, None
         if getattr(msg, "photo", None):
             file_id = msg.photo[-1].file_id
+            mime = "image/jpeg"
         elif getattr(msg, "document", None):
             doc = msg.document
             if (doc.mime_type or "").startswith("image/"):
                 file_id = doc.file_id
+                mime = doc.mime_type or "image/jpeg"
             elif (doc.mime_type or "").lower().endswith("/pdf"):
                 await msg.reply_text("⚠️ PDF не подходит. Пришли график как фото (PNG/JPG).")
-                return None
+                return None, None
             else:
                 await msg.reply_text("⚠️ Пришли график как фото или документ‑картинку (PNG/JPG).")
-                return None
+                return None, None
         else:
             await msg.reply_text("⚠️ Не вижу изображения. Пришли график как фото или документ (PNG/JPG).")
-            return None
+            return None, None
 
         try:
             tg_file = await context.bot.get_file(file_id)
             bio = io.BytesIO()
             await tg_file.download_to_memory(out=bio)
             bio.seek(0)
-            return base64.b64encode(bio.read()).decode("utf-8")
+            b64_raw = base64.b64encode(bio.read()).decode("utf-8")
+            return b64_raw, (mime or "image/jpeg")
         except Exception as e:
             logging.error(f"[handle_strategy_photo] download error: {e}", exc_info=True)
             await msg.reply_text("⚠️ Не удалось скачать изображение. Пришли скрин ещё раз.")
-            return None
+            return None, None
 
     # ---------- скачать картинку ----------
-    b64_raw = await _download_image_as_base64_raw()
+    b64_raw, mime = await _download_image_as_base64_raw_and_mime()
     if not b64_raw:
         return
 
-    # ---------- англ. промпты (строгая структура, ответ RU) ----------
+    # ---------- англ. промпты (ответ STRICTLY RU), СПОТ LONG‑ONLY ----------
+    MIN_RR = 1.5
     system_role = (
-        "You are an institutional investment strategist with 20+ years of experience, "
-        "specializing in cryptocurrency markets, mid- and long-term investments without leverage. "
-        "Provide structured, professional, and executable analysis.\n\n"
-        "IMPORTANT:\n"
-        "- Your response must be strictly in Russian (Cyrillic).\n"
-        "- Never refuse to answer; never say 'as an AI'.\n"
-        "- Always follow this structure:\n"
+        "You are an institutional investment strategist with 20+ years focused on CRYPTOCURRENCY SPOT investing "
+        "(no leverage, NO SHORT positions). Produce structured, professional, EXECUTABLE plans.\n\n"
+        "LANGUAGE POLICY:\n"
+        "- Your output MUST be strictly in Russian (Cyrillic). If any English appears, immediately re-answer in Russian.\n"
+        "- Never refuse to answer; never say 'as an AI'. No apologies.\n\n"
+        "STRUCTURE:\n"
         "0) Short summary (3 lines)\n"
-        "1) Entry point\n"
-        "2) Stop-Loss\n"
-        "3) Take-Profit levels (at least TP1 and TP2)\n"
-        "4) Risk-to-Reward ratio (R:R)\n"
-        "5) Comments / Warnings\n\n"
+        "1) DCA ladder: 3–6 buy levels with allocation %; spacing tied to volatility (ATR% or recent swing %)\n"
+        "2) Average entry (avg_entry) computed from DCA\n"
+        "3) Invalidation level (soft scenario cancellation; e.g., weekly close below X). Do NOT use a tight stop.\n"
+        "4) Take-Profit levels (at least TP1 and TP2)\n"
+        f"5) Risk-to-Reward ratio (R:R) = |TP1 - avg_entry| / |avg_entry - invalidation|; minimum must be ≥ {MIN_RR}\n"
+        "6) Comments / Warnings (volatility, FVG, liquidity, news)\n\n"
         "REQUIREMENTS:\n"
-        "- Concrete price levels in USD ($) with 2 decimals.\n"
-        "- Minimum R:R by TP1 must be ≥ 1.5; if lower, explicitly warn and propose a correction.\n"
-        "- Mention risk warnings: volatility spikes, FVG, news events, liquidity zones.\n"
-        "- No AI disclaimers. Be concise and professional."
+        "- SPOT market ONLY, LONG-only. Do not propose any short positions, derivatives, or leverage.\n"
+        "- Concrete price levels in USD ($) with two decimals.\n"
+        f"- If R:R < {MIN_RR}, add a clear WARNING and propose a FIX (adjust ladder spacing/alloc% or TP, or reconsider invalidation).\n"
+        "- Reflect HIGH crypto volatility: provide a volatility class (low/medium/high) and recommended ladder spacing in %.\n"
+        "- Output concise and professional. Provide a JSON block with: dca[], avg_entry, invalidation, tp[], rr, volatility_class, ladder_spacing_pct, position_risk_pct_total, direction='LONG'."
     )
 
     user_prompt = (
-        "Analyze the attached trading chart in an investment context (preferred timeframe: 1D or 1W). "
-        "Determine the overall market bias, identify nearby key levels, and provide:\n"
-        "- Entry point (USD)\n- Stop-Loss (USD)\n- At least two Take-Profit levels (USD)\n"
-        "- Risk-to-Reward ratio (R:R)\n- Short comments/warnings on risks (volatility spikes, FVG, news)\n\n"
-        "Respond strictly in Russian, following the required structure."
+        "Analyze the attached trading chart for a SPOT LONG-only investment plan (no shorts, no leverage). "
+        "Identify the bias and key levels, then provide the structure above. "
+        "Respond strictly in Russian. Include a JSON block as requested."
     )
 
-    # ---------- вызов модели через универсальный vision-хелпер ----------
+    # ---------- вызов модели ----------
     analysis = await ask_gpt_vision(
         prompt_text=user_prompt,
         image_base64=b64_raw,
-        system_prompt=system_role
+        system_prompt=system_role,
+        mime=mime
     )
 
-    # ---------- фолбэк/санити ----------
+    # ---------- анти‑отказ: retry с усилением требований ----------
     if not analysis or _looks_like_refusal(analysis) or not _is_russian(analysis):
-        logging.warning("[handle_strategy_photo] using fallback (empty/refusal/non-RU)")
+        logging.warning("[handle_strategy_photo] retry with hardened prompt")
+        hardened_user = user_prompt + (
+            "\n\nHARD REQUIREMENTS:\n"
+            "- Output MUST be in Russian. If any English slips in — immediately re-answer in Russian.\n"
+            "- SPOT ONLY, LONG-only. Do NOT propose SHORT positions or leverage.\n"
+            "- Provide a DCA ladder (3–6 levels) with allocation %, avg_entry, invalidation, TP1/TP2.\n"
+            f"- Ensure R:R (TP1 vs avg_entry vs invalidation) ≥ {MIN_RR}; if not — add a clear warning and propose a fix.\n"
+            "- Include JSON with keys: dca[], avg_entry, invalidation, tp[], rr, volatility_class, ladder_spacing_pct, position_risk_pct_total, direction='LONG'.\n"
+        )
+        analysis = await ask_gpt_vision(
+            prompt_text=hardened_user,
+            image_base64=b64_raw,
+            system_prompt=system_role,
+            mime=mime
+        )
+
+    # ---------- фолбэк (SPOT/DCA/INVALIDATION) ----------
+    def _fallback_strategy() -> str:
+        X = 100.00
+        dca = [
+            {"price": 98.00, "alloc_pct": 0.30},
+            {"price": 95.00, "alloc_pct": 0.40},
+            {"price": 92.00, "alloc_pct": 0.30},
+        ]
+        avg_entry = _avg_entry_from_dca(dca) or 95.0
+        invalidation = 82.00   # мягкая отмена сценария (например, недельное закрытие ниже уровня)
+        tp1 = 103.00
+        tp2 = 106.00
+        rr_val = _rr(avg_entry, invalidation, tp1) or 1.5
+
+        text = (
+            "0️⃣ Короткая суть (оценочно):\n"
+            "• Умеренно бычий контекст. Лестница DCA + частичная фиксация.\n"
+            "• Без шортов. Мягкая отмена сценария (invalidation), без короткого SL.\n"
+            "• Высокая волатильность: смотри FVG/ликвидность/новости.\n\n"
+            "1️⃣ DCA‑лестница (цена / доля):\n"
+            f"• ${dca[0]['price']:.2f} / 30%\n"
+            f"• ${dca[1]['price']:.2f} / 40%\n"
+            f"• ${dca[2]['price']:.2f} / 30%\n\n"
+            "2️⃣ Средняя цена входа\n"
+            f"• avg_entry: ${avg_entry:.2f}\n\n"
+            "3️⃣ Invalidation (мягкая отмена)\n"
+            f"• ${invalidation:.2f}\n\n"
+            "4️⃣ Take‑Profit(ы)\n"
+            f"• TP1: ${tp1:.2f}\n"
+            f"• TP2: ${tp2:.2f}\n\n"
+            "5️⃣ R:R\n"
+            f"• По TP1: {rr_val:.2f}\n\n"
+            "6️⃣ Комментарии/предупреждения\n"
+            "• Проверяй уровни на своём графике. Учитывай новости и волатильность.\n"
+            f"• Текущая цена X ~ ${X:.2f} (оценочно)\n"
+        )
+        summary = {
+            "direction": "LONG",
+            "dca": dca,
+            "avg_entry": round(avg_entry, 2),
+            "invalidation": invalidation,
+            "tp": [tp1, tp2],
+            "rr": round(rr_val, 2),
+            "volatility_class": "high",
+            "ladder_spacing_pct": 3.0,
+            "position_risk_pct_total": 0.03
+        }
+        text += '\n\n' + '"""' + json.dumps(summary, ensure_ascii=False) + '"""'
+        return text
+
+    if not analysis or _looks_like_refusal(analysis) or not _is_russian(analysis):
+        logging.warning("[handle_strategy_photo] fallback after retry")
         analysis = _fallback_strategy()
 
-    # Попробуем прицепить предупреждение, если R:R подозрительно низкий
-    def _find_money(label: str) -> float | None:
-        pat = re.compile(rf"{label}[^$]*\$\s*([0-9]+(?:\.[0-9]{{1,2}})?)", re.IGNORECASE)
+    # ---------- пост‑обработка: JSON, DCA, R:R, LONG‑only ----------
+    parsed = _extract_json_block(analysis)
+
+    def _find_money(label: str) -> Optional[float]:
+        lab = re.escape(label)
+        pat = re.compile(rf"{lab}[^0-9$]*\$?\s*([0-9]+(?:[.,][0-9]{{1,2}})?)", re.IGNORECASE)
         m = pat.search(analysis)
-        return _safe_float(m.group(1)) if m else None
+        if not m:
+            return None
+        return _safe_float(m.group(1))
 
-    entry = _find_money("Entry") or _find_money("вход")
-    stop  = _find_money("SL") or _find_money("Stop") or _find_money("стоп")
-    tp1   = _find_money("TP1") or _find_money("тейк")
-    rrval = _rr(entry, stop, tp1)
+    avg_entry = None
+    invalidation = None
+    tp1 = None
+    direction = "LONG"
 
-    if rrval is not None and rrval < 1.5:
+    if isinstance(parsed, dict):
+        direction = str(parsed.get("direction") or "LONG").upper()
+        dca = parsed.get("dca")
+        avg_entry = _safe_float(parsed.get("avg_entry")) or _avg_entry_from_dca(dca)
+        invalidation = _safe_float(parsed.get("invalidation"))
+        tp = parsed.get("tp") if isinstance(parsed.get("tp"), list) else None
+        if tp and len(tp) >= 1:
+            tp1 = _safe_float(tp[0])
+
+    # эвристики из текста
+    if avg_entry is None:
+        avg_entry = _find_money("avg_entry") or _find_money("Entry") or _find_money("вход")
+    if invalidation is None:
+        invalidation = _find_money("invalidation") or _find_money("SL") or _find_money("Stop") or _find_money("стоп")
+    if tp1 is None:
+        tp1 = _find_money("TP1") or _find_money("тейк")
+
+    rrval = _rr(avg_entry, invalidation, tp1)
+
+    # Жёстко запрещаем шорт: если модель вдруг вернула SHORT — допишем предупреждение
+    if isinstance(direction, str) and direction == "SHORT":
         analysis += (
-            "\n\n⚠️ Предупреждение: вычисленный R:R по TP1 ниже 1.5. "
-            "Рассмотри более консервативный SL или более дальний TP для улучшения соотношения."
+            "\n\n⚠️ Ограничение режима: стратегия СПОТ — только LONG. "
+            "Возврат SHORT от модели отклонён; используй DCA‑лестницу и мягкую invalidation для LONG‑сценария."
+        )
+
+    # Предупреждение о низком R:R относительно avg_entry/invalidation
+    MIN_RR = 1.5
+    if rrval is not None and rrval < MIN_RR:
+        analysis += (
+            f"\n\n⚠️ Предупреждение: вычисленный R:R по TP1 (с учётом avg_entry и invalidation) ниже {MIN_RR:.2f}. "
+            "Варианты корректировки: увеличить spacing между DCA‑уровнями, перераспределить проценты, "
+            "сместить TP1 дальше или пересмотреть invalidation."
         )
 
     # ---------- ответ пользователю ----------
     await msg.reply_text(
-        "📊 Инвестиционная стратегия по твоему скрину:\n\n" + analysis,
-        reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        "📊 Инвестиционная стратегия по твоему скрину (СПОТ, LONG‑only):\n\n" + analysis,
+        reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True),
+        disable_web_page_preview=True
     )
-    context.user_data.clear()
 
+    # Чистим только временные ключи, если ты их используешь — при необходимости замени на точечную очистку
+    context.user_data.clear()
 
 
 # --- INVEST QUESTION (текстовая стратегия через кнопку "💡 Инвестор") ---
