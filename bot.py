@@ -222,7 +222,7 @@ reply_keyboard = [
 REPLY_MARKUP = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
 CHAT_DISCUSS_KEYBOARD = InlineKeyboardMarkup([
-    [InlineKeyboardButton("💬 Обсудить в чате", url="https://t.me/ai4traders_chat")]
+    [InlineKeyboardButton("💬 Обсудить в чате", url="https://t.me/TBX_Chat")]
 ])
 
 INTERPRET_NEWS, ASK_EVENT, ASK_FORECAST, ASK_ACTUAL, GENERAL_QUESTION, FOLLOWUP_1, FOLLOWUP_2, FOLLOWUP_3 = range(8)
@@ -925,7 +925,7 @@ async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         # Отправляем в канал
-        chat_id = '@ai4traders'
+        chat_id = '-1002747865995'
         message = await context.bot.send_photo(
             chat_id=chat_id,
             photo=image_stream,
@@ -1038,8 +1038,8 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
       {"direction":"LONG","entry":number|null,"avg_entry":number|null,"stop":number|null,
        "tp":[numbers],"dca":[{"price":number,"alloc_pct":number}],"notes":["text"]}
     Затем — понятный ответ на русском (без markdown).
-    На СПОТе мы не используем стоп-ордеры: показываем только план покупок (5 ступеней),
-    среднюю цену и цели. 'stop' в JSON принудительно = null (для совместимости схемы).
+    На СПОТе не используем «стоп-ордера»: показываем 5-ступенчатый DCA, среднюю цену и цели.
+    В итоговом JSON поле "stop" принудительно = null (совместимость со схемой).
     """
     # ---------- локальные хелперы ----------
     def _sfloat(x):
@@ -1081,7 +1081,6 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         if s <= 0:
             return [0.0 for _ in weights]
         scaled = [w * 100.0 / s for w in weights]
-        # подправим последнюю, чтобы сумма была ровно 100 (после округления до 2 знаков)
         rounded = [round(x, 2) for x in scaled]
         diff = round(100.0 - sum(rounded), 2)
         if rounded:
@@ -1090,12 +1089,10 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
 
     def _build_5_step_dca(dca_in: list[dict], base_price: float | None) -> list[dict]:
         """
-        Гарантируем 5 ступеней DCA:
-        - сортируем по цене по убыванию (покупаем сейчас/выше -> ниже);
-        - если <5 ступеней — достраиваем шаги 4 и 5 как -3% и -6% от нижней имеющейся цены
-          (или от base_price, если список пуст);
-        - проценты приводим к сумме 100%. Если исходные уже 100% и ступеней <5 —
-          мягко уменьшаем существующие доли пропорционально, чтобы освободить место для новых.
+        Гарантируем 5 DCA-ступеней:
+        - сортируем по цене по убыванию;
+        - если <5 — достраиваем 4-ю и 5-ю как −3% и −6% от текущей нижней цены (или base_price);
+        - проценты нормализуем к сумме 100%.
         """
         steps = []
         for s in (dca_in or []):
@@ -1103,67 +1100,44 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             a = _sfloat((s or {}).get("alloc_pct"))
             if p is not None and a is not None and p > 0 and a > 0:
                 steps.append({"price": p, "alloc_pct": a})
-        # сортировка: от более высокой цены к более низкой
         steps.sort(key=lambda x: x["price"], reverse=True)
 
-        # если нет цен — стартуем от base_price
-        low_ref = None
-        if steps:
-            low_ref = min(s["price"] for s in steps)
-        else:
-            low_ref = _sfloat(base_price)
-
-        # достройка недостающих уровней
+        low_ref = min((s["price"] for s in steps), default=_sfloat(base_price))
         while len(steps) < 5:
             if low_ref is None or low_ref <= 0:
-                # если вообще нет референса — пропустим цены (они будут заполнены позже моделью/пользователем)
                 new_price = None
             else:
-                # -3% и -6% от текущего нижнего (каждый следующий от предыдущего)
-                factor = 0.97 if len(steps) == 3 else 0.94  # 4-й, затем 5-й
+                factor = 0.97 if len(steps) == 3 else 0.94  # 4-я ≈−3%, 5-я ≈−6% от нижней
                 new_price = round(low_ref * factor, 2)
                 low_ref = new_price
             steps.append({"price": new_price, "alloc_pct": 0.0})
 
-        # распределение процентов:
-        # если исходная сумма <80 — добавим недостающее поровну в 4-й и 5-й;
-        # если >=80 — уменьшим существующие пропорционально, чтобы освободить ~20% для 4-5.
         exist_sum = sum(s["alloc_pct"] for s in steps[:3])
         if exist_sum <= 0:
-            # возьмём шаблон по убыванию: 40/25/20/10/5
             tmpl = [40.0, 25.0, 20.0, 10.0, 5.0]
             for i in range(5):
                 steps[i]["alloc_pct"] = tmpl[i]
         else:
-            target_new_sum = 20.0  # хотим 10%+10% на 4-й и 5-й
+            target_new_sum = 20.0  # хотим 10%+10% на 4-ю и 5-ю
             if exist_sum + target_new_sum <= 100.0:
-                # просто докинем
                 steps[3]["alloc_pct"] = 10.0
                 steps[4]["alloc_pct"] = 10.0
-                # оставшиеся проценты (если есть) — пропорционально к первым трём
                 remain = 100.0 - (exist_sum + 20.0)
                 if remain > 0:
                     scale = (exist_sum + remain) / exist_sum
                     for i in range(3):
                         steps[i]["alloc_pct"] = steps[i]["alloc_pct"] * scale
             else:
-                # пропорционально уменьшим существующие, чтобы освободить 20%
                 scale = max((100.0 - target_new_sum) / exist_sum, 0.0)
                 for i in range(3):
                     steps[i]["alloc_pct"] = steps[i]["alloc_pct"] * scale
                 steps[3]["alloc_pct"] = 10.0
                 steps[4]["alloc_pct"] = 10.0
 
-        # нормализуем к ровно 100
-        weights = [s["alloc_pct"] for s in steps]
-        weights = _normalize_to_100(weights)
+        weights = _normalize_to_100([s["alloc_pct"] for s in steps])
         for i in range(5):
             steps[i]["alloc_pct"] = weights[i]
-
-        # округлим цены до 2 знаков
-        for s in steps:
-            s["price"] = None if s["price"] is None else round(s["price"], 2)
-
+            steps[i]["price"] = None if steps[i]["price"] is None else round(steps[i]["price"], 2)
         return steps
 
     msg = update.effective_message if update else None
@@ -1171,7 +1145,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         return
 
     try:
-        # 1) Байты изображения (если забыли передать — вытащим сами)
+        # 1) Байты изображения
         if not isinstance(image_bytes, BytesIO):
             image_bytes = await _extract_image_bytes(update, context)
             if not image_bytes:
@@ -1215,7 +1189,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             low = t.lower()
             return any(s in low for s in ("i can't", "cannot", "i won’t", "sorry", "as an ai"))
 
-        # 4) Вызов модели (2 попытки, анти-отказ)
+        # 4) Вызов модели (2 попытки)
         client_obj = globals().get("client")
         if client_obj is None:
             from openai import AsyncOpenAI
@@ -1245,12 +1219,9 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
 
         # 5) Парсинг 1-й строки как JSON (фолбэк — регексы)
         if not content_text:
-            data = {
-                "direction": "LONG",
-                "entry": None, "avg_entry": None, "stop": None,
-                "tp": [], "dca": [],
-                "notes": ["Нет уверенных уровней на скрине. Используйте плавный DCA и контролируйте долю позиции в портфеле."]
-            }
+            data = {"direction": "LONG", "entry": None, "avg_entry": None, "stop": None, "tp": [], "dca": [], "notes": [
+                "Нет уверенных уровней на скрине. Используйте плавный DCA и контролируйте долю позиции в портфеле."
+            ]}
         else:
             lines = content_text.splitlines()
             first = (lines[0] if lines else "").strip()
@@ -1281,27 +1252,21 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
                             tps.append(v)
                 data = {"direction": "LONG", "entry": entry, "avg_entry": None, "stop": None, "tp": tps, "dca": dca, "notes": ["Эвристический парсинг текста."]}
 
-        # 6) Нормализация / построение 5-ступенчатого DCA
+        # 6) Нормализация и построение 5 ступеней
         data["direction"] = "LONG"
         entry = _sfloat(data.get("entry"))
         tps   = [_sfloat(x) for x in (data.get("tp") or []) if _sfloat(x) is not None]
         dca_in = data.get("dca") or []
 
-        # Базовая цена для достройки уровней — первая ступень или entry
-        base_price = None
-        if dca_in and _sfloat((dca_in[0] or {}).get("price")):
-            base_price = _sfloat(dca_in[0]["price"])
-        elif entry is not None:
-            base_price = entry
-
+        base_price = _sfloat((dca_in[0] or {}).get("price")) if dca_in else entry
         dca5 = _build_5_step_dca(dca_in, base_price)
 
-        # Пересчёт средней входа из 5-ступенчатого плана
+        # Средняя по 5 ступеням
         wsum = sum((s["alloc_pct"] or 0.0) for s in dca5)
         psum = sum((_sfloat(s["price"]) or 0.0) * (s["alloc_pct"] or 0.0) for s in dca5)
         avg_entry = (psum / wsum) if wsum > 0 else None
 
-        # TP: оставляем только > avg_entry
+        # Цели > средней
         if avg_entry is not None:
             tps = [x for x in tps if x > avg_entry]
             if not tps:
@@ -1310,7 +1275,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         tp1 = tps[0] if tps else None
         potential = _potential_pct(avg_entry, tp1)
 
-        # 7) Финальные данные (stop = None по СПОТ-логике)
+        # 7) Финальный JSON (stop = None)
         data_norm = {
             "direction": "LONG",
             "entry": _r2(entry),
@@ -1326,7 +1291,6 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         parts.append("0️⃣ Суть")
         parts.append("• Долгосрок, СПОТ, только покупка. План через DCA (5 ступеней, без плеча).")
 
-        # 1) План покупок (в одну строку)
         dca_line = " ; ".join(
             f"Купить {_fmt_pct(s['alloc_pct'])} по {_fmt_price(s['price'])}"
             for s in data_norm["dca"]
@@ -1334,25 +1298,19 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         parts.append("1️⃣ План покупок")
         parts.append("• " + dca_line)
 
-        # 2) Средняя цена входа
         if data_norm["avg_entry"] is not None:
             parts.append(f"2️⃣ Средняя цена входа: {_fmt_price(data_norm['avg_entry'])}")
 
-        # 3) (уровень отмены убран по твоему требованию)
-
-        # 4) Цели
         if data_norm["tp"]:
             tps_str = ", ".join(_fmt_price(x) for x in data_norm["tp"])
             parts.append(f"3️⃣ Цели (TP1..TP{len(data_norm['tp'])}): {tps_str}")
 
-        # 5) Потенциал к TP1
         if potential is not None:
             sign = "+" if potential >= 0 else ""
             parts.append(f"4️⃣ Потенциал к TP1: {sign}{potential}%")
         else:
             parts.append("4️⃣ Потенциал к TP1: недостаточно данных.")
 
-        # Комментарии
         notes = [str(n).strip() for n in (data_norm.get("notes") or []) if str(n).strip()]
         parts.append("⚠️ Комментарии")
         if notes:
@@ -1361,15 +1319,16 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         else:
             parts.append("• Нет особых замечаний. Действуйте по плану DCA и контролируйте долю позиции в портфеле.")
 
-        # Что дальше — СПОТ-гайд
         parts.append("✅ Что дальше")
         parts.append("• Не используйте плечо. Покупайте частями по плану DCA.")
         parts.append("• Доля одной позиции в портфеле — разумная (например, до 10–20%).")
         parts.append("• Фиксируйте часть прибыли по целям; остаток можно держать дольше при подтверждении тренда.")
 
-        # Тех-JSON (компактный, одной строкой) — оставляем для логов по стандарту проекта
+        # Тех-JSON: пишем в логи, в чат — только если включён флаг
         compact_json = json.dumps(data_norm, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-        parts.append(f'"""{compact_json}"""')
+        logging.info("strategy_json=%s", compact_json)
+        if bool(globals().get("SHOW_JSON_IN_CHAT", False)):
+            parts.append(f'"""{compact_json}"""')
 
         await msg.reply_text("\n".join(parts))
 
@@ -2042,7 +2001,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📰 Плюс: ссылки на проверенные источники — без шума, лудоманов и инфоцыган\n"
         "⚡️ Премиум: авторские скальперские сетапы + «люксовые» сигналы ИИ (с PRO TradingView)\n\n"
         f"🔥 Подключи ТВХ — всего ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.\n\n"
-        "👥 Чат трейдеров 👉 [TBX Chat](https://t.me/+yUYqG8JuwuZiZmUy)\n"
+        "👥 Чат трейдеров 👉 [TBX Chat](https://t.me/TBX_Chat)\n"
         "💬 Вопросы 👉 [@zhbankov_alex](https://t.me/zhbankov_alex)\n\n"
         "✨ И это только начало. Мы с ботом будем каждый день становиться лучше, чтобы ты рос вместе с комьюнити. "
         "ТВХ — это твоя точка входа и твоя поддержка. 🚀"
@@ -2053,7 +2012,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     try:
-        chat_id = "@TBXtrade"
+        chat_id = "https://t.me/TBX_Chat"
 
         # убираем старый закреп, если есть
         chat_obj = await context.bot.get_chat(chat_id)
@@ -2528,7 +2487,7 @@ async def notify_user_payment(user_id):
             ],
             [
                 InlineKeyboardButton("📏 Калькулятор риска", callback_data="start_risk_calc"),
-                InlineKeyboardButton("🔒 VIP‑канал", url="https://t.me/+your_invite_hash")
+                InlineKeyboardButton("🔒 VIP‑канал", url="https://t.me/+TAbYnYSzHYI0YzVi")
             ]
         ])
 
