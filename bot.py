@@ -1033,14 +1033,15 @@ refusal_markers = [
 
 async def handle_strategy_photo(update, context, image_bytes: BytesIO):
     """
-    СПОТ, LONG-only, DCA. Первая строка ответа модели — валидный JSON одной строкой
-    по схеме:
+    СПОТ, LONG-only, DCA.
+    Первая строка ответа модели — валидный JSON одной строкой по схеме:
       {"direction":"LONG","entry":number|null,"avg_entry":number|null,"stop":number|null,
        "tp":[numbers],"dca":[{"price":number,"alloc_pct":number}],"notes":["text"]}
     Затем — понятный ответ на русском (без markdown).
-    На СПОТе 'stop' = уровень отмены/пересмотра (alert), а не автостоп-ордер.
+    На СПОТе мы не используем стоп-ордеры: показываем только план покупок (5 ступеней),
+    среднюю цену и цели. 'stop' в JSON принудительно = null (для совместимости схемы).
     """
-    # --- локальные хелперы ---
+    # ---------- локальные хелперы ----------
     def _sfloat(x):
         try:
             if x is None:
@@ -1048,6 +1049,9 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             return float(str(x).replace(" ", "").replace(",", "."))
         except Exception:
             return None
+
+    def _r2(x):
+        return None if x is None else round(float(x), 2)
 
     def _fmt_price(x: float | None) -> str:
         if x is None:
@@ -1064,21 +1068,103 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             return f"{int(round(xi))}%"
         return f"{round(xi, max_dec)}%"
 
-    def _r2(x):
-        return None if x is None else round(float(x), 2)
-
-    def _updown(entry, cancel_level, tp1):
-        """Потенциал/просадка к TP1 (как R:R, но для СПОТа)."""
+    def _potential_pct(avg_entry: float | None, tp1: float | None) -> float | None:
         try:
-            if entry is None or cancel_level is None or tp1 is None:
+            if avg_entry is None or tp1 is None:
                 return None
-            dn = abs(entry - cancel_level)
-            if dn <= 0:
-                return None
-            up = abs(tp1 - entry)
-            return round(up / dn, 2)
+            return round((tp1 / avg_entry - 1.0) * 100.0, 2)
         except Exception:
             return None
+
+    def _normalize_to_100(weights: list[float]) -> list[float]:
+        s = sum(w for w in weights if w is not None)
+        if s <= 0:
+            return [0.0 for _ in weights]
+        scaled = [w * 100.0 / s for w in weights]
+        # подправим последнюю, чтобы сумма была ровно 100 (после округления до 2 знаков)
+        rounded = [round(x, 2) for x in scaled]
+        diff = round(100.0 - sum(rounded), 2)
+        if rounded:
+            rounded[-1] = round(rounded[-1] + diff, 2)
+        return rounded
+
+    def _build_5_step_dca(dca_in: list[dict], base_price: float | None) -> list[dict]:
+        """
+        Гарантируем 5 ступеней DCA:
+        - сортируем по цене по убыванию (покупаем сейчас/выше -> ниже);
+        - если <5 ступеней — достраиваем шаги 4 и 5 как -3% и -6% от нижней имеющейся цены
+          (или от base_price, если список пуст);
+        - проценты приводим к сумме 100%. Если исходные уже 100% и ступеней <5 —
+          мягко уменьшаем существующие доли пропорционально, чтобы освободить место для новых.
+        """
+        steps = []
+        for s in (dca_in or []):
+            p = _sfloat((s or {}).get("price"))
+            a = _sfloat((s or {}).get("alloc_pct"))
+            if p is not None and a is not None and p > 0 and a > 0:
+                steps.append({"price": p, "alloc_pct": a})
+        # сортировка: от более высокой цены к более низкой
+        steps.sort(key=lambda x: x["price"], reverse=True)
+
+        # если нет цен — стартуем от base_price
+        low_ref = None
+        if steps:
+            low_ref = min(s["price"] for s in steps)
+        else:
+            low_ref = _sfloat(base_price)
+
+        # достройка недостающих уровней
+        while len(steps) < 5:
+            if low_ref is None or low_ref <= 0:
+                # если вообще нет референса — пропустим цены (они будут заполнены позже моделью/пользователем)
+                new_price = None
+            else:
+                # -3% и -6% от текущего нижнего (каждый следующий от предыдущего)
+                factor = 0.97 if len(steps) == 3 else 0.94  # 4-й, затем 5-й
+                new_price = round(low_ref * factor, 2)
+                low_ref = new_price
+            steps.append({"price": new_price, "alloc_pct": 0.0})
+
+        # распределение процентов:
+        # если исходная сумма <80 — добавим недостающее поровну в 4-й и 5-й;
+        # если >=80 — уменьшим существующие пропорционально, чтобы освободить ~20% для 4-5.
+        exist_sum = sum(s["alloc_pct"] for s in steps[:3])
+        if exist_sum <= 0:
+            # возьмём шаблон по убыванию: 40/25/20/10/5
+            tmpl = [40.0, 25.0, 20.0, 10.0, 5.0]
+            for i in range(5):
+                steps[i]["alloc_pct"] = tmpl[i]
+        else:
+            target_new_sum = 20.0  # хотим 10%+10% на 4-й и 5-й
+            if exist_sum + target_new_sum <= 100.0:
+                # просто докинем
+                steps[3]["alloc_pct"] = 10.0
+                steps[4]["alloc_pct"] = 10.0
+                # оставшиеся проценты (если есть) — пропорционально к первым трём
+                remain = 100.0 - (exist_sum + 20.0)
+                if remain > 0:
+                    scale = (exist_sum + remain) / exist_sum
+                    for i in range(3):
+                        steps[i]["alloc_pct"] = steps[i]["alloc_pct"] * scale
+            else:
+                # пропорционально уменьшим существующие, чтобы освободить 20%
+                scale = max((100.0 - target_new_sum) / exist_sum, 0.0)
+                for i in range(3):
+                    steps[i]["alloc_pct"] = steps[i]["alloc_pct"] * scale
+                steps[3]["alloc_pct"] = 10.0
+                steps[4]["alloc_pct"] = 10.0
+
+        # нормализуем к ровно 100
+        weights = [s["alloc_pct"] for s in steps]
+        weights = _normalize_to_100(weights)
+        for i in range(5):
+            steps[i]["alloc_pct"] = weights[i]
+
+        # округлим цены до 2 знаков
+        for s in steps:
+            s["price"] = None if s["price"] is None else round(s["price"], 2)
+
+        return steps
 
     msg = update.effective_message if update else None
     if not msg:
@@ -1111,6 +1197,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             "Always respond with a VALID ONE-LINE JSON as the FIRST line using the schema: "
             "{\"direction\":\"LONG\",\"entry\":number|null,\"avg_entry\":number|null,\"stop\":number|null,"
             "\"tp\":[numbers],\"dca\":[{\"price\":number,\"alloc_pct\":number}],\"notes\":[\"text\"]}. "
+            "Prefer providing 4–5 DCA steps with decreasing prices. "
             "Then provide a Russian explanation for a beginner. Never refuse; provide best-effort values."
         )
         user_prompt = (
@@ -1118,7 +1205,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             "1) Read the chart image and propose a SPOT DCA plan (LONG-only).\n"
             "2) FIRST LINE: exactly ONE line JSON (no code fences) per schema.\n"
             "3) Then explain in Russian for a beginner (plain text, no markdown).\n"
-            "4) DCA list must have 2-4 steps with valid prices and alloc_pct (sum ≈100%).\n"
+            "4) DCA list must have 4-5 steps with valid prices and alloc_pct (sum ≈100%).\n"
             "5) If unsure, still provide best estimates. Do NOT refuse.\n"
         )
 
@@ -1161,12 +1248,8 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             data = {
                 "direction": "LONG",
                 "entry": None, "avg_entry": None, "stop": None,
-                "tp": [], "dca": [
-                    {"price": None, "alloc_pct": 30.0},
-                    {"price": None, "alloc_pct": 30.0},
-                    {"price": None, "alloc_pct": 40.0},
-                ],
-                "notes": ["Нет уверенных уровней на скрине, используйте плавный DCA и контролируйте риск позиции в портфеле."]
+                "tp": [], "dca": [],
+                "notes": ["Нет уверенных уровней на скрине. Используйте плавный DCA и контролируйте долю позиции в портфеле."]
             }
         else:
             lines = content_text.splitlines()
@@ -1186,13 +1269,9 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
                     price = _sfloat(m.group(1)); alloc = _sfloat(m.group(2))
                     if price is not None and alloc is not None:
                         dca.append({"price": price, "alloc_pct": alloc})
-
                 entry = None
                 m = re.search(r'(?:Entry|Вход)\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
                 if m: entry = _sfloat(m.group(1))
-                stop = None
-                m = re.search(r'(?:Stop|Стоп)\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
-                if m: stop = _sfloat(m.group(1))
                 tps = []
                 for label in ("TP1","TP2","TP3","Цель1","Цель2","Цель3"):
                     m = re.search(rf'(?:{label})\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I)
@@ -1200,100 +1279,78 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
                         v = _sfloat(m.group(1))
                         if v is not None:
                             tps.append(v)
+                data = {"direction": "LONG", "entry": entry, "avg_entry": None, "stop": None, "tp": tps, "dca": dca, "notes": ["Эвристический парсинг текста."]}
 
-                data = {"direction": "LONG", "entry": entry, "avg_entry": None, "stop": stop, "tp": tps, "dca": dca, "notes": ["Эвристический парсинг текста."]}
-
-        # 6) Нормализация / валидация (СПОТ)
+        # 6) Нормализация / построение 5-ступенчатого DCA
         data["direction"] = "LONG"
         entry = _sfloat(data.get("entry"))
-        stop  = _sfloat(data.get("stop"))         # трактуем как «уровень отмены/пересмотра»
         tps   = [_sfloat(x) for x in (data.get("tp") or []) if _sfloat(x) is not None]
-        dca   = data.get("dca") or []
+        dca_in = data.get("dca") or []
 
-        avg_entry = _sfloat(data.get("avg_entry"))
-        if entry is None:
-            wsum = psum = 0.0
-            for s in dca:
-                p = _sfloat(s.get("price")); w = _sfloat(s.get("alloc_pct"))
-                if p is not None and w is not None and w > 0:
-                    wsum += w; psum += p * w
-            if wsum > 0:
-                avg_entry = psum / wsum
-        if avg_entry is None and entry is not None:
-            avg_entry = entry
+        # Базовая цена для достройки уровней — первая ступень или entry
+        base_price = None
+        if dca_in and _sfloat((dca_in[0] or {}).get("price")):
+            base_price = _sfloat(dca_in[0]["price"])
+        elif entry is not None:
+            base_price = entry
 
-        # По умолчанию «уровень отмены» ~8% ниже средней (не автостоп, а alert)
-        if stop is None and avg_entry is not None:
-            stop = avg_entry * 0.92
+        dca5 = _build_5_step_dca(dca_in, base_price)
 
-        base_entry = entry if entry is not None else avg_entry
-        if base_entry is not None:
-            tps = [x for x in tps if x > base_entry]
+        # Пересчёт средней входа из 5-ступенчатого плана
+        wsum = sum((s["alloc_pct"] or 0.0) for s in dca5)
+        psum = sum((_sfloat(s["price"]) or 0.0) * (s["alloc_pct"] or 0.0) for s in dca5)
+        avg_entry = (psum / wsum) if wsum > 0 else None
+
+        # TP: оставляем только > avg_entry
+        if avg_entry is not None:
+            tps = [x for x in tps if x > avg_entry]
             if not tps:
-                tps = [base_entry * 1.05, base_entry * 1.10, base_entry * 1.20]
+                tps = [avg_entry * 1.05, avg_entry * 1.10]
 
         tp1 = tps[0] if tps else None
-        updown = _updown(base_entry, stop, tp1)
+        potential = _potential_pct(avg_entry, tp1)
 
-        # Сумма долей DCA
-        try:
-            alloc_sum = sum(_sfloat(s.get("alloc_pct")) or 0.0 for s in dca)
-        except Exception:
-            alloc_sum = None
-
-        # 7) Финальные данные
+        # 7) Финальные данные (stop = None по СПОТ-логике)
         data_norm = {
             "direction": "LONG",
             "entry": _r2(entry),
             "avg_entry": _r2(avg_entry),
-            "stop": _r2(stop),
+            "stop": None,
             "tp": [_r2(x) for x in tps[:3]],
-            "dca": [
-                {"price": _r2(_sfloat(s.get("price"))), "alloc_pct": _r2(_sfloat(s.get("alloc_pct")))}
-                for s in (dca or [])
-                if (_sfloat(s.get("price")) is not None and _sfloat(s.get("alloc_pct")) is not None)
-            ],
+            "dca": [{"price": _r2(_sfloat(s["price"])), "alloc_pct": _r2(_sfloat(s["alloc_pct"]))} for s in dca5],
             "notes": list(dict.fromkeys((data.get("notes") or [])))
         }
 
-        # --- чистый СПОТ-ответ ---
+        # ---------- красивый ответ ----------
         parts = []
         parts.append("0️⃣ Суть")
-        parts.append("• Долгосрок, СПОТ, только покупка. План через DCA (постепенные покупки, без плеча).")
+        parts.append("• Долгосрок, СПОТ, только покупка. План через DCA (5 ступеней, без плеча).")
 
-        # 1) План покупок
+        # 1) План покупок (в одну строку)
         dca_line = " ; ".join(
             f"Купить {_fmt_pct(s['alloc_pct'])} по {_fmt_price(s['price'])}"
             for s in data_norm["dca"]
-        ) if data_norm["dca"] else ""
+        )
         parts.append("1️⃣ План покупок")
-        parts.append("• " + (dca_line if dca_line else "Разбей сумму на 3–4 части и покупай по мере снижения цены."))
+        parts.append("• " + dca_line)
 
         # 2) Средняя цена входа
         if data_norm["avg_entry"] is not None:
             parts.append(f"2️⃣ Средняя цена входа: {_fmt_price(data_norm['avg_entry'])}")
 
-        # 3) Уровень отмены/пересмотра (alert, не автостоп)
-        if data_norm["stop"] is not None and data_norm["avg_entry"] is not None:
-            dd = (data_norm["avg_entry"] - data_norm["stop"]) / max(1e-9, data_norm["avg_entry"]) * 100.0
-            parts.append(f"3️⃣ Уровень отмены/пересмотра: {_fmt_price(data_norm['stop'])} (≈ {_fmt_pct(dd)})")
-            parts.append("• Это не стоп-ордер. Поставьте уведомление и пересмотрите идею/долю позиции при достижении уровня.")
-        elif data_norm["stop"] is not None:
-            parts.append(f"3️⃣ Уровень отмены/пересмотра: {_fmt_price(data_norm['stop'])}")
-            parts.append("• Это не стоп-ордер. Поставьте уведомление и пересмотрите идею при достижении уровня.")
+        # 3) (уровень отмены убран по твоему требованию)
 
         # 4) Цели
         if data_norm["tp"]:
             tps_str = ", ".join(_fmt_price(x) for x in data_norm["tp"])
-            parts.append(f"4️⃣ Цели (TP1..TP{len(data_norm['tp'])}): {tps_str}")
+            parts.append(f"3️⃣ Цели (TP1..TP{len(data_norm['tp'])}): {tps_str}")
 
-        # 5) Потенциал/просадка к TP1
-        if updown is not None:
-            parts.append(f"5️⃣ Потенциал/просадка к TP1: {updown}")
-            if updown < 1.5:
-                parts.append("⚠️ Соотношение скромное. Уменьшите долю покупки или дождитесь лучших уровней.")
+        # 5) Потенциал к TP1
+        if potential is not None:
+            sign = "+" if potential >= 0 else ""
+            parts.append(f"4️⃣ Потенциал к TP1: {sign}{potential}%")
         else:
-            parts.append("5️⃣ Потенциал/просадка: недостаточно данных (нужны средняя цена, уровень отмены и TP1).")
+            parts.append("4️⃣ Потенциал к TP1: недостаточно данных.")
 
         # Комментарии
         notes = [str(n).strip() for n in (data_norm.get("notes") or []) if str(n).strip()]
@@ -1307,14 +1364,12 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         # Что дальше — СПОТ-гайд
         parts.append("✅ Что дальше")
         parts.append("• Не используйте плечо. Покупайте частями по плану DCA.")
-        parts.append("• Держите долю одной позиции разумной (например, не более 10–20% портфеля).")
-        parts.append("• Если цена уходит ниже уровня отмены — приостановите покупки и пересмотрите тезис.")
-        parts.append("• Фиксируйте часть прибыли по целям, а остаток переносите на долгосрок при подтверждении тренда.")
-        if alloc_sum is not None and abs(alloc_sum - 100.0) > 0.5 and data_norm["dca"]:
-            parts.append(f"• Сумма долей DCA сейчас ≈ {round(alloc_sum,1)}%. Скорректируйте до 100% для удобства.")
+        parts.append("• Доля одной позиции в портфеле — разумная (например, до 10–20%).")
+        parts.append("• Фиксируйте часть прибыли по целям; остаток можно держать дольше при подтверждении тренда.")
 
-        # Технический JSON для логов — одной строкой в тройных кавычках
-        parts.append(f'"""{json.dumps(data_norm, ensure_ascii=False)}"""')
+        # Тех-JSON (компактный, одной строкой) — оставляем для логов по стандарту проекта
+        compact_json = json.dumps(data_norm, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        parts.append(f'"""{compact_json}"""')
 
         await msg.reply_text("\n".join(parts))
 
