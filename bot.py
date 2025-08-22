@@ -1038,8 +1038,9 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
       {"direction":"LONG","entry":number|null,"avg_entry":number|null,"stop":number|null,
        "tp":[numbers],"dca":[{"price":number,"alloc_pct":number}],"notes":["text"]}
     Затем — понятный ответ на русском (без markdown).
+    На СПОТе 'stop' = уровень отмены/пересмотра (alert), а не автостоп-ордер.
     """
-    # --- локальные хелперы (без внешних зависимостей) ---
+    # --- локальные хелперы ---
     def _sfloat(x):
         try:
             if x is None:
@@ -1052,7 +1053,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         if x is None:
             return "—"
         d = 2 if abs(x) >= 1 else 4
-        s = f"{x:,.{d}f}".replace(",", " ")  # узкий неразрывный пробел как разделитель тысяч
+        s = f"{x:,.{d}f}".replace(",", " ")
         return f"${s}"
 
     def _fmt_pct(x: float | None, max_dec=2) -> str:
@@ -1066,14 +1067,16 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
     def _r2(x):
         return None if x is None else round(float(x), 2)
 
-    def _rr(entry, stop, tp1):
+    def _updown(entry, cancel_level, tp1):
+        """Потенциал/просадка к TP1 (как R:R, но для СПОТа)."""
         try:
-            if entry is None or stop is None or tp1 is None:
+            if entry is None or cancel_level is None or tp1 is None:
                 return None
-            risk = abs(entry - stop)
-            if risk <= 0:
+            dn = abs(entry - cancel_level)
+            if dn <= 0:
                 return None
-            return round(abs(tp1 - entry) / risk, 2)
+            up = abs(tp1 - entry)
+            return round(up / dn, 2)
         except Exception:
             return None
 
@@ -1102,7 +1105,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             await msg.reply_text("Не удалось прочитать изображение. Пришлите скрин в формате PNG/JPG.")
             return
 
-        # 3) Промпты (EN для модели)
+        # 3) Промпты (EN)
         system_prompt = (
             "You are an institutional investor creating a SPOT DCA plan (LONG only). "
             "Always respond with a VALID ONE-LINE JSON as the FIRST line using the schema: "
@@ -1163,7 +1166,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
                     {"price": None, "alloc_pct": 30.0},
                     {"price": None, "alloc_pct": 40.0},
                 ],
-                "notes": ["Нет уверенных уровней на скрине, используйте плавный DCA и контролируйте риск."]
+                "notes": ["Нет уверенных уровней на скрине, используйте плавный DCA и контролируйте риск позиции в портфеле."]
             }
         else:
             lines = content_text.splitlines()
@@ -1175,12 +1178,10 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             except Exception:
                 txt = content_text
                 dca = []
-                # «Купить 25% по $123» / «Buy 25% at $123»
                 for m in re.finditer(r'(?:Купить|Buy)\s*([0-9]+(?:\.[0-9]+)?)\s*%\D+\$?\s*([0-9]+(?:\.[0-9]+)?)', txt, re.I):
                     alloc = _sfloat(m.group(1)); price = _sfloat(m.group(2))
                     if price is not None and alloc is not None:
                         dca.append({"price": price, "alloc_pct": alloc})
-                # «price: 123, alloc: 25%»
                 for m in re.finditer(r'price\s*[:=]\s*\$?\s*([0-9]+(?:\.[0-9]+)?)\D+alloc(?:_pct)?\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)\s*%', txt, re.I):
                     price = _sfloat(m.group(1)); alloc = _sfloat(m.group(2))
                     if price is not None and alloc is not None:
@@ -1202,12 +1203,12 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
 
                 data = {"direction": "LONG", "entry": entry, "avg_entry": None, "stop": stop, "tp": tps, "dca": dca, "notes": ["Эвристический парсинг текста."]}
 
-        # 6) Нормализация / валидация
+        # 6) Нормализация / валидация (СПОТ)
         data["direction"] = "LONG"
         entry = _sfloat(data.get("entry"))
-        stop  = _sfloat(data.get("stop"))
+        stop  = _sfloat(data.get("stop"))         # трактуем как «уровень отмены/пересмотра»
         tps   = [_sfloat(x) for x in (data.get("tp") or []) if _sfloat(x) is not None]
-        dca   = data.get("dca") | []
+        dca   = data.get("dca") or []
 
         avg_entry = _sfloat(data.get("avg_entry"))
         if entry is None:
@@ -1221,8 +1222,9 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         if avg_entry is None and entry is not None:
             avg_entry = entry
 
+        # По умолчанию «уровень отмены» ~8% ниже средней (не автостоп, а alert)
         if stop is None and avg_entry is not None:
-            stop = avg_entry * 0.92  # ~8% ниже
+            stop = avg_entry * 0.92
 
         base_entry = entry if entry is not None else avg_entry
         if base_entry is not None:
@@ -1231,16 +1233,15 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
                 tps = [base_entry * 1.05, base_entry * 1.10, base_entry * 1.20]
 
         tp1 = tps[0] if tps else None
-        rr = _rr(base_entry, stop, tp1)
+        updown = _updown(base_entry, stop, tp1)
 
-        # Сумма долей DCA для контроля (может быть не ровно 100%)
-        alloc_sum = None
+        # Сумма долей DCA
         try:
             alloc_sum = sum(_sfloat(s.get("alloc_pct")) or 0.0 for s in dca)
         except Exception:
             alloc_sum = None
 
-        # 7) Финальные данные (округления только для вывода)
+        # 7) Финальные данные
         data_norm = {
             "direction": "LONG",
             "entry": _r2(entry),
@@ -1255,12 +1256,12 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             "notes": list(dict.fromkeys((data.get("notes") or [])))
         }
 
-        # --- красивый и чёткий ответ ---
+        # --- чистый СПОТ-ответ ---
         parts = []
         parts.append("0️⃣ Суть")
-        parts.append("• Долгосрок, СПОТ, только покупка. План через DCA, чтобы не заходить всей суммой сразу.")
+        parts.append("• Долгосрок, СПОТ, только покупка. План через DCA (постепенные покупки, без плеча).")
 
-        # 1) План покупок — в одну строку, без «грязных» десятичных
+        # 1) План покупок
         dca_line = " ; ".join(
             f"Купить {_fmt_pct(s['alloc_pct'])} по {_fmt_price(s['price'])}"
             for s in data_norm["dca"]
@@ -1272,27 +1273,27 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         if data_norm["avg_entry"] is not None:
             parts.append(f"2️⃣ Средняя цена входа: {_fmt_price(data_norm['avg_entry'])}")
 
-        # 3) Стоп с указанием просадки
+        # 3) Уровень отмены/пересмотра (alert, не автостоп)
         if data_norm["stop"] is not None and data_norm["avg_entry"] is not None:
             dd = (data_norm["avg_entry"] - data_norm["stop"]) / max(1e-9, data_norm["avg_entry"]) * 100.0
-            parts.append(f"3️⃣ Уровень отмены (стоп): {_fmt_price(data_norm['stop'])} (≈ {_fmt_pct(dd)[:-1]}%)")
+            parts.append(f"3️⃣ Уровень отмены/пересмотра: {_fmt_price(data_norm['stop'])} (≈ {_fmt_pct(dd)})")
+            parts.append("• Это не стоп-ордер. Поставьте уведомление и пересмотрите идею/долю позиции при достижении уровня.")
         elif data_norm["stop"] is not None:
-            parts.append(f"3️⃣ Уровень отмены (стоп): {_fmt_price(data_norm['stop'])}")
+            parts.append(f"3️⃣ Уровень отмены/пересмотра: {_fmt_price(data_norm['stop'])}")
+            parts.append("• Это не стоп-ордер. Поставьте уведомление и пересмотрите идею при достижении уровня.")
 
         # 4) Цели
         if data_norm["tp"]:
             tps_str = ", ".join(_fmt_price(x) for x in data_norm["tp"])
             parts.append(f"4️⃣ Цели (TP1..TP{len(data_norm['tp'])}): {tps_str}")
 
-        # 5) R:R с оценкой качества
-        if rr is not None:
-            parts.append(f"5️⃣ Прибыль/риск (R:R к TP1): {rr}")
-            if rr < 1.5:
-                parts.append("⚠️ Соотношение риск/прибыль низкое. Уменьшите долю покупки или дождитесь лучших уровней.")
-            elif rr < 3.0:
-                parts.append("⚠️ Соотношение риск/прибыль среднее. Следите за подтверждением на графике.")
+        # 5) Потенциал/просадка к TP1
+        if updown is not None:
+            parts.append(f"5️⃣ Потенциал/просадка к TP1: {updown}")
+            if updown < 1.5:
+                parts.append("⚠️ Соотношение скромное. Уменьшите долю покупки или дождитесь лучших уровней.")
         else:
-            parts.append("5️⃣ Прибыль/риск (R:R): невозможно оценить без точных уровней входа и стопа.")
+            parts.append("5️⃣ Потенциал/просадка: недостаточно данных (нужны средняя цена, уровень отмены и TP1).")
 
         # Комментарии
         notes = [str(n).strip() for n in (data_norm.get("notes") or []) if str(n).strip()]
@@ -1301,16 +1302,18 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
             for n in notes[:5]:
                 parts.append(f"• {n}")
         else:
-            parts.append("• Нет особых замечаний. Действуйте по плану DCA и контролируйте риск.")
+            parts.append("• Нет особых замечаний. Действуйте по плану DCA и контролируйте долю позиции в портфеле.")
 
-        # Небольшой «что дальше»
+        # Что дальше — СПОТ-гайд
         parts.append("✅ Что дальше")
-        parts.append("• Покупайте по плану DCA, не превышайте 1–2% риска на сделку.")
-        parts.append("• Проверьте уровни на своём графике и актуальные новости перед покупкой.")
+        parts.append("• Не используйте плечо. Покупайте частями по плану DCA.")
+        parts.append("• Держите долю одной позиции разумной (например, не более 10–20% портфеля).")
+        parts.append("• Если цена уходит ниже уровня отмены — приостановите покупки и пересмотрите тезис.")
+        parts.append("• Фиксируйте часть прибыли по целям, а остаток переносите на долгосрок при подтверждении тренда.")
         if alloc_sum is not None and abs(alloc_sum - 100.0) > 0.5 and data_norm["dca"]:
             parts.append(f"• Сумма долей DCA сейчас ≈ {round(alloc_sum,1)}%. Скорректируйте до 100% для удобства.")
 
-        # Технический JSON для логов — в тройных кавычках (одной строкой)
+        # Технический JSON для логов — одной строкой в тройных кавычках
         parts.append(f'"""{json.dumps(data_norm, ensure_ascii=False)}"""')
 
         await msg.reply_text("\n".join(parts))
@@ -1318,6 +1321,7 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
     except Exception:
         logging.exception("handle_strategy_photo failed")
         await msg.reply_text("Не удалось построить инвест-стратегию по скрину. Пришлите другой скрин или попробуйте позже.")
+
 
 # --- UID SUBMISSION (реферал через брокера) ---
 async def handle_uid_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
