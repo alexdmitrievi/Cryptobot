@@ -98,6 +98,14 @@ except Exception as e:
     logging.exception("❌ Google Sheets init failed")
     raise
 
+_REFUSAL_RE = _re.compile(
+    r"(i\s*can'?t\s*assist|i'?m\s*sorry|i\s*cannot\s*help|can'?t\s*help|won'?t\s*assist|not\s*able\s*to\s*comply)",
+    _re.IGNORECASE
+)
+
+def _is_refusal(text: str) -> bool:
+    return bool(_REFUSAL_RE.search(text or ""))
+
 def _safe_float(x):
     try:
         if x is None:
@@ -130,7 +138,16 @@ def _bytes_to_jpeg_b64(bio: BytesIO) -> str:
     import base64 as _b64
     return _b64.b64encode(out.read()).decode("ascii")
 
-
+# --- любой image bytes -> JPEG base64 ---
+def _to_jpeg_base64(image_bytes: bytes) -> str:
+    from io import BytesIO as _BytesIO
+    from PIL import Image as _Image
+    buf_in = _BytesIO(image_bytes)
+    with _Image.open(buf_in) as im:
+        im = im.convert("RGB")
+        out = _BytesIO()
+        im.save(out, format="JPEG", quality=90, optimize=True)
+        return base64.b64encode(out.getvalue()).decode("ascii")
 
 def save_referral_data(user_id, username, ref_program, broker, uid):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1405,128 +1422,111 @@ async def handle_uid_submission(update: Update, context: ContextTypes.DEFAULT_TY
     # context.user_data.pop("broker", None)
     # context.user_data.pop("ref_program", None)
 
-# ===================== Экономкалендарь: анализ скрина =====================
-async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, image_bytes: BytesIO | None = None):
-    """Принимает BytesIO из unified_text_handler (или фото из update), готовит JPEG→base64 и вызывает интерпретацию."""
+async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Обработка скрина из экономического календаря:
+    - принимает фото/док-изображение;
+    - конвертирует в JPEG base64;
+    - запрашивает у Vision интерпретацию (RU, education-only);
+    - устойчив к отказам модели.
+    """
     msg = update.effective_message
 
-    # 1) Достаём байты изображения (если пришли фото без BytesIO)
-    if image_bytes is None:
-        try:
-            photo = msg.photo[-1]
-            tg_file = await photo.get_file()
-            image_bytes = BytesIO()
-            await tg_file.download_to_memory(image_bytes)
-        except Exception:
-            await msg.reply_text("⚠️ Не удалось получить изображение. Пришлите скрин как фото или документ-картинку.")
-            return
-
-    # 2) JPEG нормализация
-    try:
-        image_bytes.seek(0)
-        im = Image.open(image_bytes).convert("RGB")
-        max_side = 1600
-        w, h = im.size
-        if max(w, h) > max_side:
-            k = max_side / float(max(w, h))
-            im = im.resize((int(w*k), int(h*k)))
-        buf = BytesIO()
-        im.save(buf, format="JPEG", quality=88, optimize=True)
-        buf.seek(0)
-        import base64 as _b64
-        image_base64 = _b64.b64encode(buf.read()).decode("ascii")
-    except Exception:
-        await msg.reply_text("⚠️ Не удалось прочитать изображение. Нужен PNG/JPG/WEBP.")
+    # Проверка ожидания (если используешь флаг)
+    awaiting = context.user_data.get("awaiting_calendar_photo")
+    if awaiting is not None and not awaiting:
+        await msg.reply_text(
+            "⚠️ Сейчас не жду скрин календаря. Нажмите «🔍 Новости» и пришлите скрин.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
         return
 
-    await msg.reply_text("🔎 Читаю значения и формирую интерпретацию…")
-    result = await generate_news_from_image(image_base64)
-
-    if result:
+    try:
+        # достанем bytes (фото или документ-изображение)
+        if getattr(msg, "photo", None):
+            file = await msg.photo[-1].get_file()
+            img_bytes = await file.download_as_bytearray()
+        elif getattr(msg, "document", None) and (msg.document.mime_type or "").startswith("image/"):
+            file = await msg.document.get_file()
+            img_bytes = await file.download_as_bytearray()
+        else:
+            raise ValueError("Не найдено изображение.")
+    except Exception as e:
+        logging.warning(f"[calendar] no image: {e}")
         await msg.reply_text(
-            f"📰 Интерпретация события:\n\n{result}",
+            "⚠️ Пришлите скрин как фото или документ-картинку (PNG/JPG).",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
-    else:
+        return
+
+    await msg.reply_text("🔎 Читаю значения и формирую интерпретацию...")
+
+    try:
+        jpeg_b64 = _to_jpeg_base64(img_bytes)  # см. блок B
+        analysis_ru = await generate_news_from_image(jpeg_b64)
         await msg.reply_text(
-            "⚠️ Не удалось уверенно распознать данные. Пришлите более чёткий скрин (название, факт/прогноз/предыдущее должны быть видны).",
+            f"🧠 Интерпретация события:\n\n{analysis_ru}",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
+    except Exception as e:
+        logging.exception(f"[calendar] error: {e}")
+        await msg.reply_text(
+            "⚠️ Не удалось распознать скрин. Попробуйте кадрировать область с названием события и числами "
+            "(ФАКТ / ПРОГНОЗ / ПРЕД.) и пришлите снова.",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
+    finally:
+        context.user_data.pop("awaiting_calendar_photo", None)
 
-async def generate_news_from_image(image_base64: str) -> str | None:
-    """
-    EN-only prompts. RU-only answer. Altseason context enforced.
-    2 попытки с базовой валидацией.
-    """
-    system_prompt = (
-        "You are a senior macro & crypto strategist. "
-        "You analyze economic-calendar cards and produce short, practical market takeaways. "
-        "IMPORTANT: Always respond in RUSSIAN language (plain text, no markdown). "
-        "Do NOT give trade signals or exact orders; provide interpretation only."
-    )
+# === NEWS INTERPRETATION (economic calendar) ===
+NEWS_PROMPT_EN = """
+You are a macro analyst. Task: interpret an economic calendar screenshot (PMI, CPI, jobs, FOMC etc.)
+ONLY provide an educational, high-level macro interpretation. DO NOT give personal investment advice,
+no trading signals, no entries/stops/take-profits.
 
-    # Контекст «альтсезона» зашиваем прямо в задание:
-    user_prompt = (
-        "You will be given a screenshot of a single event from an economic calendar "
-        "(e.g., PMI, CPI, Jobless Claims, Nonfarm Payrolls, ZEW). "
-        "Extract the following if visible on the image: Event name, Country/Currency, Actual, Forecast, Previous. "
-        "Determine whether the surprise is Better than forecast, Worse, or Neutral.\n\n"
-        "FRAME YOUR INTERPRETATION IN THE CONTEXT OF AN APPROACHING ALTCOIN SEASON, driven by:\n"
-        "- market expectations of a policy rate cut on September 17, 2025, and\n"
-        "- anticipated approvals of spot ETFs for several altcoins.\n\n"
-        "Write the answer STRICTLY in Russian (no markdown, no English). "
-        "Use simple, short sentences. No trade calls, no SL/TP.\n\n"
-        "Return EXACTLY the following structure in Russian:\n"
-        "0️⃣ Что за событие и для какой экономики/валюты.\n"
-        "1️⃣ Итог релиза: факт vs прогноз vs предыдущее (например: «49,4 против 49,5 прогн., 49,3 пред.»).\n"
-        "2️⃣ Сюрприз: лучше / хуже / нейтрально — и что это значит для аппетита к риску.\n"
-        "3️⃣ Интерпретация в контексте приближающегося альтсезона: "
-        "связь с ожиданием снижения ставки 17.09.2025 и с вероятными одобрениями спотовых ETF на альткоины "
-        "(канал влияния: доллар/ликвидность/потоки в риск, ротация из BTC в альты).\n"
-        "4️⃣ Кому это на руку в ближайшие 24–72 часа: USD, основные фондовые индексы, сырьё, BTC/ETH, "
-        "и СЕГМЕНТЫ альткоинов (L2, DeFi, AI, инфраструктура) — кратко: «в плюс/в минус/нейтрально» + одно объяснение.\n"
-        "5️⃣ Риски и что может сломать сценарий (например: пересмотр данных, риторика ФРС, геополитика).\n"
-        "6️⃣ Уровень уверенности (0–100%) и чего не хватает для большей точности (≤2 пункта)."
-    )
+Context to consider:
+- Market narrative: incoming altseason on expectations of a Fed rate cut on Sep 17, 2025 and approvals of spot ETFs for several altcoins.
+- Output must be in RUSSIAN only. If you produce any English phrase, regenerate in Russian.
+- Be specific: identify EVENT, ACTUAL vs FORECAST vs PREVIOUS, whether surprise is positive/negative,
+  short-term risk-on/risk-off bias, potential impact on Crypto (BTC, ETH) and majors (DXY, SPX) in 1–3 days.
+- Provide 2 scenario paths (bull/bear) and simple risk notes. No financial advice.
 
-    def _needs_retry(txt: str) -> bool:
-        if not txt:
-            return True
-        low = txt.lower()
-        # отказы/английский
-        if any(k in low for k in ["sorry", "i can", "cannot", "financial advice", "markdown"]):
-            return True
-        cyr = sum("а" <= ch <= "я" or ch == "ё" for ch in low)
-        if cyr < max(20, len(low)//10):
-            return True
-        must = ["итог релиза", "сюрприз", "интерпретация", "риски", "уверенности"]
-        return not all(m in low for m in must)
+Return format (RUSSIAN):
+1) Событие и показатели: ...
+2) Ключевая интерпретация: ...
+3) Влияние на рынок (1–3 дня): ...
+4) Крипто в контексте альтсезона: ...
+5) Два сценария: ...
+6) Риски и на что смотреть дальше: ...
+"""
 
-    content_text = ""
-    for _ in range(2):
-        try:
-            resp = await client.chat.completions.create(
-                model="gpt-4o",
-                temperature=0.2,
-                max_tokens=900,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": user_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                    ]},
-                ],
-            )
-            content_text = (resp.choices[0].message.content or "").strip()
-            if not _needs_retry(content_text):
-                break
-            # усиление правил на ретрае
-            system_prompt += " Your output MUST be in Russian and follow items 0–6, no exceptions."
-        except Exception as e:
-            logging.error(f"[generate_news_from_image] Vision error: {e}")
+async def generate_news_from_image(jpeg_b64: str) -> str:
+    """Интерпретация календаря по скрину. 2 попытки + читаемый fallback, строго RU."""
+    # Попытка 1 (через работающий ask_gpt_vision)
+    prompt = NEWS_PROMPT_EN + "\n\nRespond strictly in Russian (Cyrillic). No markdown. No apologies."
+    out = await ask_gpt_vision(prompt_text=prompt, image_base64=jpeg_b64)
 
-    return content_text or None
+    # Попытка 2 при отказе/пусто/англ
+    if _is_refusal(out) or not out or out[:40].isascii():
+        stronger = (NEWS_PROMPT_EN + 
+                   "\n\nSTRICTLY EDUCATIONAL, NO PERSONAL ADVICE. " 
+                   "Ответ ДОЛЖЕН быть строго на русском языке. "
+                   "Если начинаешь на английском или даёшь отказ — перегенерируй и выдай русский аналитический разбор без инвестрекомендаций.")
+        out = await ask_gpt_vision(prompt_text=stronger, image_base64=jpeg_b64)
 
+    # План Б
+    if _is_refusal(out) or not out:
+        out = (
+            "1) Событие и показатели: не удалось надёжно распознать значения с изображения.\n"
+            "2) Ключевая интерпретация: сопоставьте ФАКТ с ПРОГНОЗОМ — выше прогноза → риск-он, ниже → риск-офф.\n"
+            "3) Влияние (1–3 дня): позитивный сюрприз поддерживает риск-активы; негативный повышает вероятность коррекции.\n"
+            "4) Крипто в контексте альтсезона: основной фон — ожидания снижения ставки 17.09.2025 и возможные одобрения ETF на альткоины.\n"
+            "5) Два сценария:\n"
+            "   • Bull: факт > прогноз — краткосрочный риск-он (BTC/ETH устойчивее, интерес к альтам растёт).\n"
+            "   • Bear: факт < прогноз — риск-офф (рост DXY/волатильности, давление на альткоины).\n"
+            "6) Риски: пересмотр данных, комментарии ФРС, геополитика; смежные релизы (ISM, NFP, инфляция) могут изменить баланс."
+        )
+    return out
 
 async def handle_definition_term(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
@@ -2332,7 +2332,7 @@ async def unified_text_handler(update, context):
     Единый роутер сообщений (PTB 21.x, async).
 
     Приоритет:
-    1) awaiting_calendar_photo  -> обработка календаря (заглушка)
+    1) awaiting_calendar_photo  -> обработка календаря
     2) awaiting_strategy == 'photo' -> вытащить байты и вызвать handle_strategy_photo
     3) если фото/док-картинка — handle_photo
     4) иначе — handle_main
@@ -2360,18 +2360,11 @@ async def unified_text_handler(update, context):
                 "awaiting_invest_question",
                 "awaiting_uid",
             ):
-                try:
-                    context.user_data.pop(k, None)
-                except Exception:
-                    pass
+                context.user_data.pop(k, None)
 
-            # вернуть клавиатуру
-            try:
-                await msg.reply_text("Вернулись в главное меню.", reply_markup=_get_main_markup())
-            except Exception:
-                await msg.reply_text("Вернулись в главное меню.")
+            await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
 
-            # вывести само меню (если есть handle_main) и не падать дальше
+            # вызвать handle_main, если он есть
             await _call_if_exists(
                 "handle_main",
                 update, context,
@@ -2381,22 +2374,26 @@ async def unified_text_handler(update, context):
 
         # 1) Экономкалендарь (фото/док-картинка)
         if context.user_data.get("awaiting_calendar_photo"):
-            bio = await _extract_image_bytes(update, context)
+            try:
+                bio = await _extract_image_bytes(update)
+            except Exception:
+                bio = None
             context.user_data.pop("awaiting_calendar_photo", None)
             if not bio:
-                await msg.reply_text("Не вижу изображения календаря. Пришлите фото или документ-картинку (PNG/JPG/WEBP).")
+                await msg.reply_text("⚠️ Не вижу изображения календаря. Пришлите фото или документ-картинку (PNG/JPG).")
                 return
-            # сразу анализируем скрин календаря
             await handle_calendar_photo(update, context, image_bytes=bio)
             return
 
-
         # 2) Инвест-стратегия по фото
         if context.user_data.get("awaiting_strategy") == "photo":
-            bio = await _extract_image_bytes(update, context)
+            try:
+                bio = await _extract_image_bytes(update)
+            except Exception:
+                bio = None
             context.user_data.pop("awaiting_strategy", None)
             if not bio:
-                await msg.reply_text("Не вижу изображения. Пришлите скрин как фото или документ-картинку.")
+                await msg.reply_text("⚠️ Не вижу изображения. Пришлите скрин как фото или документ-картинку.")
                 return
             await handle_strategy_photo(update, context, image_bytes=bio)
             return  # важно: не сваливаться потом в handle_main
@@ -2417,7 +2414,7 @@ async def unified_text_handler(update, context):
     except Exception:
         logging.exception("unified_text_handler failed")
         try:
-            await update.effective_message.reply_text("Произошла ошибка обработки сообщения. Попробуйте ещё раз.")
+            await update.effective_message.reply_text("⚠️ Ошибка обработки сообщения. Попробуйте ещё раз.")
         except Exception:
             pass
 
