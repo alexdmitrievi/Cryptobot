@@ -139,17 +139,70 @@ def _bytes_to_jpeg_b64(bio: BytesIO) -> str:
     out.seek(0)
     return base64.b64encode(out.read()).decode("ascii")
 
-# Универсальный конвертер bytes -> JPEG Base64 (используй его в новых местах)
-def _to_jpeg_base64(image_bytes: bytes) -> str:
-    buf_in = BytesIO(image_bytes)
-    with Image.open(buf_in) as im:
+# ---- image utils (единые версии; удалите дубли в файле) ----
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff", ".heic")
+
+async def _extract_image_bytes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BytesIO | None:
+    """
+    Возвращает BytesIO с данными изображения из:
+      • message.photo
+      • message.effective_attachment (альбом)
+      • message.document с image/* или подходящим расширением
+    """
+    msg = update.effective_message
+
+    # 1) Обычное фото
+    if getattr(msg, "photo", None):
+        file_id = msg.photo[-1].file_id
+        tg_file = await context.bot.get_file(file_id)
+        bio = BytesIO()
+        await tg_file.download_to_memory(out=bio)
+        bio.seek(0)
+        return bio
+
+    # 2) Альбом / effective_attachment
+    att = getattr(msg, "effective_attachment", None)
+    if isinstance(att, list) and att:
+        for a in reversed(att):  # крупные обычно в конце
+            if isinstance(a, PhotoSize):
+                tg_file = await context.bot.get_file(a.file_id)
+                bio = BytesIO()
+                await tg_file.download_to_memory(out=bio)
+                bio.seek(0)
+                return bio
+            if isinstance(a, Document):
+                a_mt = (a.mime_type or "").lower()
+                a_fn = (a.file_name or "").lower()
+                if a_mt.startswith("image/") or any(a_fn.endswith(ext) for ext in IMAGE_EXTS):
+                    tg_file = await context.bot.get_file(a.file_id)
+                    bio = BytesIO()
+                    await tg_file.download_to_memory(out=bio)
+                    bio.seek(0)
+                    return bio
+
+    # 3) Документ-картинка
+    doc = getattr(msg, "document", None)
+    if isinstance(doc, Document):
+        mt = (doc.mime_type or "").lower()
+        fn = (doc.file_name or "").lower()
+        if mt.startswith("image/") or any(fn.endswith(ext) for ext in IMAGE_EXTS):
+            tg_file = await context.bot.get_file(doc.file_id)
+            bio = BytesIO()
+            await tg_file.download_to_memory(out=bio)
+            bio.seek(0)
+            return bio
+
+    return None
+
+def _to_jpeg_base64(bio: BytesIO) -> str:
+    """BytesIO -> JPEG -> base64 (ascii)"""
+    bio.seek(0)
+    with Image.open(bio) as im:
         im = im.convert("RGB")
         out = BytesIO()
         im.save(out, format="JPEG", quality=90, optimize=True)
-        return base64.b64encode(out.getvalue()).decode("ascii")
-
-# Надёжные расширения изображений (для документов)
-IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff", ".heic")
+        out.seek(0)
+        return base64.b64encode(out.read()).decode("ascii")
 
 # Устойчивый экстрактор изображений из Update (photo / document / media group)
 async def _extract_image_bytes(update) -> bytes:
@@ -1466,56 +1519,39 @@ async def handle_uid_submission(update: Update, context: ContextTypes.DEFAULT_TY
     # context.user_data.pop("broker", None)
     # context.user_data.pop("ref_program", None)
 
-async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, image_bytes: BytesIO | None = None):
     """
-    Обработка скрина из экономического календаря:
-    - принимает фото/док-изображение;
-    - конвертирует в JPEG base64;
-    - запрашивает у Vision интерпретацию (RU, education-only);
-    - устойчив к отказам модели.
+    Скрин экономического календаря:
+    - берём BytesIO (из аргумента или вытаскиваем сами),
+    - конвертируем в JPEG b64,
+    - вызываем generate_news_from_image(...) и отправляем ответ.
     """
     msg = update.effective_message
 
-    # Проверка ожидания (если используешь флаг)
-    awaiting = context.user_data.get("awaiting_calendar_photo")
-    if awaiting is not None and not awaiting:
-        await msg.reply_text(
-            "⚠️ Сейчас не жду скрин календаря. Нажмите «🔍 Новости» и пришлите скрин.",
-            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-        )
-        return
-
-    try:
-        # достанем bytes (фото или документ-изображение)
-        if getattr(msg, "photo", None):
-            file = await msg.photo[-1].get_file()
-            img_bytes = await file.download_as_bytearray()
-        elif getattr(msg, "document", None) and (msg.document.mime_type or "").startswith("image/"):
-            file = await msg.document.get_file()
-            img_bytes = await file.download_as_bytearray()
-        else:
-            raise ValueError("Не найдено изображение.")
-    except Exception as e:
-        logging.warning(f"[calendar] no image: {e}")
-        await msg.reply_text(
-            "⚠️ Пришлите скрин как фото или документ-картинку (PNG/JPG).",
-            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-        )
-        return
+    # 1) Достаём картинку
+    if image_bytes is None:
+        image_bytes = await _extract_image_bytes(update, context)
+        if image_bytes is None:
+            await msg.reply_text(
+                "⚠️ Не вижу изображения календаря. Пришлите фото или документ-картинку (PNG/JPG).",
+                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+            )
+            return
 
     await msg.reply_text("🔎 Читаю значения и формирую интерпретацию...")
 
+    # 2) JPEG→b64 и генерация
     try:
-        jpeg_b64 = _to_jpeg_base64(img_bytes)  # см. блок B
+        jpeg_b64 = _to_jpeg_base64(image_bytes)
         analysis_ru = await generate_news_from_image(jpeg_b64)
         await msg.reply_text(
             f"🧠 Интерпретация события:\n\n{analysis_ru}",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
     except Exception as e:
-        logging.exception(f"[calendar] error: {e}")
+        logging.exception("[calendar] error")
         await msg.reply_text(
-            "⚠️ Не удалось распознать скрин. Попробуйте кадрировать область с названием события и числами "
+            "⚠️ Не удалось распознать скрин. Кадрируйте область с названием события и числами "
             "(ФАКТ / ПРОГНОЗ / ПРЕД.) и пришлите снова.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
@@ -2438,7 +2474,7 @@ async def unified_text_handler(update, context):
         # 1) Экономкалендарь (фото/док-картинка)
         if context.user_data.get("awaiting_calendar_photo"):
             try:
-                bio = await _extract_image_bytes(update)
+                bio = await _extract_image_bytes(update, context)
             except Exception:
                 bio = None
             context.user_data.pop("awaiting_calendar_photo", None)
@@ -2451,7 +2487,7 @@ async def unified_text_handler(update, context):
         # 2) Инвест-стратегия по фото
         if context.user_data.get("awaiting_strategy") == "photo":
             try:
-                bio = await _extract_image_bytes(update)
+                bio = await _extract_image_bytes(update, context)
             except Exception:
                 bio = None
             context.user_data.pop("awaiting_strategy", None)
