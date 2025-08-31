@@ -98,14 +98,14 @@ except Exception as e:
     logging.exception("❌ Google Sheets init failed")
     raise
 
-_REFUSAL_RE = _re.compile(
+_REFUSAL_RE = re.compile(
     r"(i\s*can'?t\s*assist|i'?m\s*sorry|i\s*cannot\s*help|can'?t\s*help|won'?t\s*assist|not\s*able\s*to\s*comply)",
-    _re.IGNORECASE
+    re.IGNORECASE
 )
 
 def _is_refusal(text: str) -> bool:
     return bool(_REFUSAL_RE.search(text or ""))
-
+    
 def _safe_float(x):
     try:
         if x is None:
