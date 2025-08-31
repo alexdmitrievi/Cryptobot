@@ -2448,7 +2448,7 @@ async def unified_text_handler(update, context):
 
         has_photo = bool(getattr(msg, "photo", None)) or is_image_doc or att_has_image
 
-        # ↩️ Выход в меню — сбрасываем все «ожидалки», показываем меню и выходим
+        # ↩️ Выход в меню — сбрасываем все «ожидалки», показываем меню и выходим (без вызова handle_main)
         if text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
             for k in (
                 "awaiting_calendar_photo",
@@ -2462,13 +2462,6 @@ async def unified_text_handler(update, context):
                 context.user_data.pop(k, None)
 
             await msg.reply_text("🔙 Вернулись в главное меню.", reply_markup=REPLY_MARKUP)
-
-            # вызвать handle_main, если он есть
-            await _call_if_exists(
-                "handle_main",
-                update, context,
-                fallback_text="🧭 Главное меню."
-            )
             return
 
         # 1) Экономкалендарь (фото/док-картинка)
@@ -2516,7 +2509,6 @@ async def unified_text_handler(update, context):
             await update.effective_message.reply_text("⚠️ Ошибка обработки сообщения. Попробуйте ещё раз.")
         except Exception:
             pass
-
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
