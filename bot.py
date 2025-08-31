@@ -20,13 +20,13 @@ from typing import Tuple, Optional, Dict, Any, List
 from io import BytesIO  # для работы с изображениями в памяти
 from dataclasses import dataclass, asdict
 
-
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 
 from telegram import (
     Update, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, ReplyKeyboardRemove,
+    PhotoSize, Document,    # ⬅️ важно: используются в _extract_image_bytes
 )
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -71,7 +71,7 @@ VIDEO_PATH = os.path.join(BASE_DIR, "Video_TBX.mp4")  # файл в корне!
 
 app_flask = Flask(__name__)  # создаём один раз глобально
 
-# анти‑дубликаты (idempotency)
+# анти-дубликаты (idempotency)
 PROCESSED_PAYMENTS: Dict[str, float] = {}  # хранит уникальные payment_id/tx_id/комбинации
 PROCESSED_TTL_SEC = 3600  # 1 час
 
@@ -98,14 +98,15 @@ except Exception as e:
     logging.exception("❌ Google Sheets init failed")
     raise
 
+# =====================[ UTILS / HELPERS ]=====================
+# Детектор отказов модели (refusal)
 _REFUSAL_RE = re.compile(
     r"(i\s*can'?t\s*assist|i'?m\s*sorry|i\s*cannot\s*help|can'?t\s*help|won'?t\s*assist|not\s*able\s*to\s*comply)",
     re.IGNORECASE
 )
-
 def _is_refusal(text: str) -> bool:
     return bool(_REFUSAL_RE.search(text or ""))
-    
+
 def _safe_float(x):
     try:
         if x is None:
@@ -129,25 +130,68 @@ def _calc_rr(entry, stop, tp1):
     except Exception:
         return None
 
+# Конвертация BytesIO -> JPEG Base64 (оставь, если где-то нужен именно BytesIO)
 def _bytes_to_jpeg_b64(bio: BytesIO) -> str:
     bio.seek(0)
     im = Image.open(bio).convert("RGB")
     out = BytesIO()
     im.save(out, format="JPEG", quality=90, optimize=True)
     out.seek(0)
-    import base64 as _b64
-    return _b64.b64encode(out.read()).decode("ascii")
+    return base64.b64encode(out.read()).decode("ascii")
 
-# --- любой image bytes -> JPEG base64 ---
+# Универсальный конвертер bytes -> JPEG Base64 (используй его в новых местах)
 def _to_jpeg_base64(image_bytes: bytes) -> str:
-    from io import BytesIO as _BytesIO
-    from PIL import Image as _Image
-    buf_in = _BytesIO(image_bytes)
-    with _Image.open(buf_in) as im:
+    buf_in = BytesIO(image_bytes)
+    with Image.open(buf_in) as im:
         im = im.convert("RGB")
-        out = _BytesIO()
+        out = BytesIO()
         im.save(out, format="JPEG", quality=90, optimize=True)
         return base64.b64encode(out.getvalue()).decode("ascii")
+
+# Надёжные расширения изображений (для документов)
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff", ".heic")
+
+# Устойчивый экстрактор изображений из Update (photo / document / media group)
+async def _extract_image_bytes(update) -> bytes:
+    """
+    Возвращает bytes изображения из:
+    - message.photo (стандартные фото)
+    - effective_attachment (альбом: PhotoSize или Document-картинка)
+    - message.document (если это картинка или файл с img-расширением)
+    Бросает ValueError('image_not_found'), если ничего не нашли.
+    """
+    msg = update.effective_message
+
+    # 1) Обычное фото
+    if getattr(msg, "photo", None):
+        file = await msg.photo[-1].get_file()
+        return await file.download_as_bytearray()
+
+    # 2) Альбом/прочие вложения (effective_attachment)
+    att = getattr(msg, "effective_attachment", None)
+    if isinstance(att, list) and att:
+        # берём подходящее вложение (крупные обычно ближе к концу)
+        for a in reversed(att):
+            if isinstance(a, PhotoSize):
+                file = await a.get_file()
+                return await file.download_as_bytearray()
+            if isinstance(a, Document):
+                mt = (a.mime_type or "").lower()
+                fn = (a.file_name or "").lower()
+                if mt.startswith("image/") or any(fn.endswith(ext) for ext in IMAGE_EXTS):
+                    file = await a.get_file()
+                    return await file.download_as_bytearray()
+
+    # 3) Документ как картинка (или «файл», но по расширению — картинка)
+    doc = getattr(msg, "document", None)
+    if isinstance(doc, Document):
+        mt = (doc.mime_type or "").lower()
+        fn = (doc.file_name or "").lower()
+        if mt.startswith("image/") or any(fn.endswith(ext) for ext in IMAGE_EXTS):
+            file = await doc.get_file()
+            return await file.download_as_bytearray()
+
+    raise ValueError("image_not_found")
 
 def save_referral_data(user_id, username, ref_program, broker, uid):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -2345,9 +2389,28 @@ async def unified_text_handler(update, context):
             return
 
         text = (getattr(msg, "text", "") or "").strip()
+
+        # --- детекция присутствия изображения (photo / document / media group)
         doc = getattr(msg, "document", None)
-        is_image_doc = bool(doc and (doc.mime_type or "").startswith("image/"))
-        has_photo = bool(getattr(msg, "photo", None)) or is_image_doc
+        fn = (doc.file_name or "").lower() if doc else ""
+        mt = (doc.mime_type or "").lower() if doc else ""
+        is_image_doc = bool(doc and (mt.startswith("image/") or any(fn.endswith(ext) for ext in IMAGE_EXTS)))
+
+        att = getattr(msg, "effective_attachment", None)
+        att_has_image = False
+        if isinstance(att, list) and att:
+            for a in att:
+                if isinstance(a, PhotoSize):
+                    att_has_image = True
+                    break
+                if isinstance(a, Document):
+                    a_mt = (a.mime_type or "").lower()
+                    a_fn = (a.file_name or "").lower()
+                    if a_mt.startswith("image/") or any(a_fn.endswith(ext) for ext in IMAGE_EXTS):
+                        att_has_image = True
+                        break
+
+        has_photo = bool(getattr(msg, "photo", None)) or is_image_doc or att_has_image
 
         # ↩️ Выход в меню — сбрасываем все «ожидалки», показываем меню и выходим
         if text in ("↩️ Выйти в меню", "↩️ Вернуться в меню"):
@@ -2398,7 +2461,7 @@ async def unified_text_handler(update, context):
             await handle_strategy_photo(update, context, image_bytes=bio)
             return  # важно: не сваливаться потом в handle_main
 
-        # 3) Обычное фото/док-картинка -> трейдерский разбор
+        # 3) Обычное фото/док-картинка/альбом -> трейдерский разбор
         if has_photo:
             await handle_photo(update, context)
             return  # важно: не дублировать меню после ответа
