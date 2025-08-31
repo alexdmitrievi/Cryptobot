@@ -210,6 +210,9 @@ def get_allowed_users():
 TON_WALLET = "UQC4nBKWF5sO2UIP9sKl3JZqmmRlsGC5B7xM7ArruA61nTGR"
 PENDING_USERS = {}
 RECEIVED_MEMOS = set()
+# кто принимает личные обращения по рефералам
+OWNER_CHAT_ID = 407721399
+
 
 reply_keyboard = [
     ["💡 Инвестор", "🚀 Трейдер", "🔍 Новости"],
@@ -1337,96 +1340,193 @@ async def handle_strategy_photo(update, context, image_bytes: BytesIO):
         await msg.reply_text("Не удалось построить инвест-стратегию по скрину. Пришлите другой скрин или попробуйте позже.")
 
 
-# --- UID SUBMISSION (реферал через брокера) ---
-async def handle_uid_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_uid_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Пользователь выбрал брокера по кнопке и прислал UID для проверки.
-    Записываем заявку в таблицу и подтверждаем приём.
+    Пользователь прислал UID для реферальной программы:
+    - Аккуратно извлекаем UID (строка цифр, допускаем пробелы/дефисы в исходном тексте)
+    - Валидируем базово (>= 5 цифр)
+    - Пишем строку в Google Sheets
+    - Даём пользователю подтверждение
     """
-    uid = (update.message.text or "").strip()
-    if not uid.isdigit():
-        await update.message.reply_text("❗️ Пришли, пожалуйста, UID цифрами. Пример: 12345678.")
+    msg = update.effective_message
+    raw = (getattr(msg, "text", "") or "").strip()
+
+    # 1) Нормализация UID: вытаскиваем только цифры (сохраняем лидирующие нули)
+    digits_only = _re.sub(r"\D", "", raw)
+    if len(digits_only) < 5:
+        await msg.reply_text(
+            "❗️ Пришли UID цифрами. Пример: 24676081.",
+            reply_markup=REPLY_MARKUP
+        )
         return
 
-    user_id = update.effective_user.id
-    username = update.effective_user.username or "no_username"
+    uid = digits_only
+
+    # 2) Данные пользователя и контекста
+    user = update.effective_user
+    user_id = getattr(user, "id", None)
+    username = (getattr(user, "username", None) or "no_username")
+
     ref_program = context.user_data.get("ref_program", "broker_ref")
     broker = context.user_data.get("broker", "unknown")
 
-    # Пишем в таблицу безопасным способом (без rate‑limit проблем)
+    # 3) Подготовка строки для записи
+    now = datetime.now(tz=_TZ) if _TZ else datetime.now()
+    when_str = now.strftime("%Y-%m-%d %H:%M")
+
+    row = [
+        str(user_id or ""),
+        username,
+        when_str,
+        ref_program,
+        broker,
+        uid
+    ]
+
+    # 4) Пишем в таблицу безопасно (в отдельном потоке)
     try:
-        from datetime import datetime  # на случай, если не импортирован наверху
-        row = [str(user_id), username, datetime.now().strftime("%Y-%m-%d %H:%M"), ref_program, broker, uid]
         await asyncio.to_thread(safe_append_row, row)
-        logging.info(f"[REF_UID] {user_id=} {username=} {broker=} {uid=}")
-        await update.message.reply_text(
-            "✅ UID принят. Проверка займёт до 10 минут. Я отпишусь, как только доступ будет активирован.",
+        logging.info(f"[REF_UID] ok user_id={user_id} username={username} broker={broker} uid={uid}")
+        await msg.reply_text(
+            "✅ UID принят. Проверка займёт до 10 минут. Напишу в этот чат, когда доступ будет активирован.",
             reply_markup=REPLY_MARKUP
         )
     except Exception as e:
         logging.error(f"[handle_uid_submission] Google Sheets error: {e}")
-        await update.message.reply_text(
-            "⚠️ Не удалось зафиксировать UID. Попробуй ещё раз позже или напиши менеджеру @zhbankov_alex.",
+        await msg.reply_text(
+            "⚠️ Не удалось зафиксировать UID. Попробуй ещё раз позже "
+            f"или напиши владельцу: tg://user?id={OWNER_CHAT_ID}",
             reply_markup=REPLY_MARKUP
         )
 
-    # Снимаем флаг ожидания UID
+    # 5) Чистим флаг ожидания UID и вспомогательные поля
     context.user_data.pop("awaiting_uid", None)
+    # Если нужно сбрасывать выбранного брокера/программу после подачи, раскомментируй:
+    # context.user_data.pop("broker", None)
+    # context.user_data.pop("ref_program", None)
 
+# ===================== Экономкалендарь: анализ скрина =====================
+async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, image_bytes: BytesIO | None = None):
+    """Принимает BytesIO из unified_text_handler (или фото из update), готовит JPEG→base64 и вызывает интерпретацию."""
+    msg = update.effective_message
 
-async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    photo = update.message.photo[-1]
-    file = await photo.get_file()
-    image_bytes = await file.download_as_bytearray()
+    # 1) Достаём байты изображения (если пришли фото без BytesIO)
+    if image_bytes is None:
+        try:
+            photo = msg.photo[-1]
+            tg_file = await photo.get_file()
+            image_bytes = BytesIO()
+            await tg_file.download_to_memory(image_bytes)
+        except Exception:
+            await msg.reply_text("⚠️ Не удалось получить изображение. Пришлите скрин как фото или документ-картинку.")
+            return
 
-    image = Image.open(BytesIO(image_bytes)).convert("RGB")
-    buffer = BytesIO()
-    image.save(buffer, format="JPEG", quality=80)
-    image_base64 = base64.b64encode(buffer.getvalue()).decode()
+    # 2) JPEG нормализация
+    try:
+        image_bytes.seek(0)
+        im = Image.open(image_bytes).convert("RGB")
+        max_side = 1600
+        w, h = im.size
+        if max(w, h) > max_side:
+            k = max_side / float(max(w, h))
+            im = im.resize((int(w*k), int(h*k)))
+        buf = BytesIO()
+        im.save(buf, format="JPEG", quality=88, optimize=True)
+        buf.seek(0)
+        import base64 as _b64
+        image_base64 = _b64.b64encode(buf.read()).decode("ascii")
+    except Exception:
+        await msg.reply_text("⚠️ Не удалось прочитать изображение. Нужен PNG/JPG/WEBP.")
+        return
 
-    await update.message.reply_text("🔎 Распознаю значения и формирую интерпретацию...")
-
+    await msg.reply_text("🔎 Читаю значения и формирую интерпретацию…")
     result = await generate_news_from_image(image_base64)
 
     if result:
-        await update.message.reply_text(f"📈 Интерпретация по скриншоту:\n\n{result}", reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True))
+        await msg.reply_text(
+            f"📰 Интерпретация события:\n\n{result}",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
     else:
-        await update.message.reply_text("⚠️ Не удалось распознать данные. Попробуйте загрузить более чёткий скрин.", reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True))
+        await msg.reply_text(
+            "⚠️ Не удалось уверенно распознать данные. Пришлите более чёткий скрин (название, факт/прогноз/предыдущее должны быть видны).",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
 
-async def generate_news_from_image(image_base64: str) -> str:
-    prompt = (
-        "Act as a world-class macroeconomic strategist with 20+ years of experience advising hedge funds, prop trading desks, and crypto funds. "
-        "You specialize in interpreting economic calendar data, surprises in forecasts, and macro releases to assess their short-term market impact.\n\n"
-        "You are analyzing a screenshot from an economic calendar (such as 'Initial Jobless Claims', 'CPI', etc). Extract from the image:\n"
-        "- Event\n- Fact\n- Forecast\n- Previous\n\n"
-        "Then give a professional, concise macroeconomic interpretation.\n\n"
-        "🎯 Your response must be written STRICTLY in Russian, without using markdown symbols (*, _, -).\n\n"
-        "📐 Structure your analysis as follows:\n\n"
-        "1️⃣ Фундаментальная интерпретация события:\n"
-        "2️⃣ Влияние на ликвидность, волатильность и поведение участников:\n"
-        "3️⃣ Возможные сценарии:\n"
-        "➡️ Bullish —\n"
-        "➡️ Bearish —\n"
-        "4️⃣ Историческая аналогия:\n\n"
-        "🚫 Do NOT give trade entries, SL, or TP levels. Focus only on macro reasoning, narrative shifts, and positioning logic.\n"
-        "Use short paragraphs. Be direct, sharp, and professional. Absolutely no markdown."
+async def generate_news_from_image(image_base64: str) -> str | None:
+    """
+    EN-only prompts. RU-only answer. Altseason context enforced.
+    2 попытки с базовой валидацией.
+    """
+    system_prompt = (
+        "You are a senior macro & crypto strategist. "
+        "You analyze economic-calendar cards and produce short, practical market takeaways. "
+        "IMPORTANT: Always respond in RUSSIAN language (plain text, no markdown). "
+        "Do NOT give trade signals or exact orders; provide interpretation only."
     )
 
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "user", "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                ]}
-            ]
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logging.error(f"[generate_news_from_image error] {e}")
-        return None
+    # Контекст «альтсезона» зашиваем прямо в задание:
+    user_prompt = (
+        "You will be given a screenshot of a single event from an economic calendar "
+        "(e.g., PMI, CPI, Jobless Claims, Nonfarm Payrolls, ZEW). "
+        "Extract the following if visible on the image: Event name, Country/Currency, Actual, Forecast, Previous. "
+        "Determine whether the surprise is Better than forecast, Worse, or Neutral.\n\n"
+        "FRAME YOUR INTERPRETATION IN THE CONTEXT OF AN APPROACHING ALTCOIN SEASON, driven by:\n"
+        "- market expectations of a policy rate cut on September 17, 2025, and\n"
+        "- anticipated approvals of spot ETFs for several altcoins.\n\n"
+        "Write the answer STRICTLY in Russian (no markdown, no English). "
+        "Use simple, short sentences. No trade calls, no SL/TP.\n\n"
+        "Return EXACTLY the following structure in Russian:\n"
+        "0️⃣ Что за событие и для какой экономики/валюты.\n"
+        "1️⃣ Итог релиза: факт vs прогноз vs предыдущее (например: «49,4 против 49,5 прогн., 49,3 пред.»).\n"
+        "2️⃣ Сюрприз: лучше / хуже / нейтрально — и что это значит для аппетита к риску.\n"
+        "3️⃣ Интерпретация в контексте приближающегося альтсезона: "
+        "связь с ожиданием снижения ставки 17.09.2025 и с вероятными одобрениями спотовых ETF на альткоины "
+        "(канал влияния: доллар/ликвидность/потоки в риск, ротация из BTC в альты).\n"
+        "4️⃣ Кому это на руку в ближайшие 24–72 часа: USD, основные фондовые индексы, сырьё, BTC/ETH, "
+        "и СЕГМЕНТЫ альткоинов (L2, DeFi, AI, инфраструктура) — кратко: «в плюс/в минус/нейтрально» + одно объяснение.\n"
+        "5️⃣ Риски и что может сломать сценарий (например: пересмотр данных, риторика ФРС, геополитика).\n"
+        "6️⃣ Уровень уверенности (0–100%) и чего не хватает для большей точности (≤2 пункта)."
+    )
+
+    def _needs_retry(txt: str) -> bool:
+        if not txt:
+            return True
+        low = txt.lower()
+        # отказы/английский
+        if any(k in low for k in ["sorry", "i can", "cannot", "financial advice", "markdown"]):
+            return True
+        cyr = sum("а" <= ch <= "я" or ch == "ё" for ch in low)
+        if cyr < max(20, len(low)//10):
+            return True
+        must = ["итог релиза", "сюрприз", "интерпретация", "риски", "уверенности"]
+        return not all(m in low for m in must)
+
+    content_text = ""
+    for _ in range(2):
+        try:
+            resp = await client.chat.completions.create(
+                model="gpt-4o",
+                temperature=0.2,
+                max_tokens=900,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                    ]},
+                ],
+            )
+            content_text = (resp.choices[0].message.content or "").strip()
+            if not _needs_retry(content_text):
+                break
+            # усиление правил на ретрае
+            system_prompt += " Your output MUST be in Russian and follow items 0–6, no exceptions."
+        except Exception as e:
+            logging.error(f"[generate_news_from_image] Vision error: {e}")
+
+    return content_text or None
+
 
 async def handle_definition_term(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
@@ -1500,7 +1600,7 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 💡 Инвестор (выбор формата)
     if text == "💡 Инвестор":
         context.user_data.clear()
-        # 👇 включаем дефолтный «инвест-режим по фото», чтобы скрин сразу ушёл в handle_strategy_photo
+        # включаем дефолтный «инвест-режим по фото», чтобы скрин сразу ушёл в handle_strategy_photo
         context.user_data["awaiting_strategy"] = "photo"
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✍️ Написать текст", callback_data="strategy_text")],
@@ -1593,17 +1693,20 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔗 Бесплатный доступ через брокера
+    # 🔗 Бесплатный доступ через брокера (разрешено без подписки)
     if text == "🔗 Бесплатный доступ через брокера":
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Bybit", callback_data="ref_bybit")],
-            [InlineKeyboardButton("Forex4You", callback_data="ref_forex4you")],
+            [InlineKeyboardButton("Bybit — регистрация", callback_data="ref_bybit")],
+            [InlineKeyboardButton("Forex4You — регистрация", callback_data="ref_forex4you")],
+            [InlineKeyboardButton("Связаться с владельцем", url=f"tg://user?id={OWNER_CHAT_ID}")],
         ])
         await msg.reply_text(
-            "🚀 Выберите брокера для регистрации по моей реферальной ссылке:\n"
-            "- Для Bybit минимальный депозит $150\n"
-            "- Для Forex4You минимальный депозит $200\n\n"
-            "После регистрации пришлите сюда свой UID для проверки.",
+            "Мы готовы обработать ваш новый UID. Давайте продолжим.\n\n"
+            "Если предыдущий UID не прошёл проверку, сделайте так:\n\n"
+            "👉 Если у вас ещё нет аккаунта на Bybit — зарегистрируйтесь по моей реферальной ссылке (нажмите кнопку выше).\n"
+            "👉 Если аккаунт уже есть — прикрепите его к нашему реферальному коду. После этого пришлите свой новый UID сюда.\n\n"
+            "После регистрации/привязки внесите минимальный депозит (Bybit: $150, Forex4You: $200) и пришлите UID в чат.\n\n"
+            "Если возникнут трудности — нажмите «Связаться с владельцем».",
             reply_markup=keyboard
         )
         return
@@ -1636,7 +1739,8 @@ async def handle_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     saved = {k: v for k, v in context.user_data.items() if k in ("selected_market", "selected_strategy")}
     context.user_data.clear()
     context.user_data.update(saved)
-    await msg.reply_text("🔄 Сброс всех ожиданий. Продолжай.", reply_markup=REPLY_MARKUP)
+    await msg.reply_text("🔄 Сброс всех ожиданий. Выберите действие в меню.", reply_markup=REPLY_MARKUP)
+
 
 async def start_therapy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Устанавливаем флаг, чтобы handle_main понимал, что активен психолог
@@ -2280,11 +2384,12 @@ async def unified_text_handler(update, context):
             bio = await _extract_image_bytes(update, context)
             context.user_data.pop("awaiting_calendar_photo", None)
             if not bio:
-                await msg.reply_text("Не вижу изображения календаря. Пришлите фото или документ-картинку.")
+                await msg.reply_text("Не вижу изображения календаря. Пришлите фото или документ-картинку (PNG/JPG/WEBP).")
                 return
-            # здесь может быть твой handle_calendar_photo(...)
-            await msg.reply_text("Календарь получен. Анализ будет доступен в отдельном модуле.")
+            # сразу анализируем скрин календаря
+            await handle_calendar_photo(update, context, image_bytes=bio)
             return
+
 
         # 2) Инвест-стратегия по фото
         if context.user_data.get("awaiting_strategy") == "photo":
