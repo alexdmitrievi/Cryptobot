@@ -68,6 +68,8 @@ global_bot = None
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PHOTO_PATH = os.path.join(BASE_DIR, "banner.jpg")
 VIDEO_PATH = os.path.join(BASE_DIR, "Video_TBX.mp4")  # файл в корне!
+POST_VIDEO_PATH = Path("Promo_TBX.gif") 
+CHANNEL_USERNAME = "@TBXtrade"   # или numeric ID канала
 
 app_flask = Flask(__name__)  # создаём один раз глобально
 
@@ -2171,70 +2173,102 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔️ У тебя нет прав на публикацию.")
         return
 
-    # используем общую ссылку на бота из константы, если есть
     bot_url = globals().get("BOT_URL", "https://t.me/CtyptorobBot")
 
+    # --- Текст поста ---
     caption = (
-        "🚀 *ТВХ (Твоя точка входа)* — экосистема трейдинга: 🤖 GPT-бот, 📢 публичный канал, 💬 чат с топиками и 🔒 VIP-сигналы.\n\n"
-        "📊 Что даёт бот ТВХ:\n"
+        "🚀 <b>ТВХ — твоя точка входа в трейдинг</b>\n"
+        "Не просто бот, а целая экосистема: 🤖 GPT-бот · 📢 публичный канал · 💬 чат с топиками · 🔒 VIP-сигналы.\n\n"
+
+        "⏳ <b>Почему сейчас</b>\n"
+        "• Альтсезон на горизонте: промедлишь — войдёшь хуже\n"
+        "• VIP-места ограничены — потом доступ будет дороже\n"
+        "• Каждая неделя промаха = потерянные X% роста\n\n"
+
+        "📈 <b>Что ты получаешь</b>\n"
         "• Прогноз по скрину за 10 секунд\n"
-        "• Чёткие уровни: вход, стоп, тейки\n"
-        "• Рынки: Crypto, Forex и MOEX\n"
+        "• Чёткие уровни: вход · стоп · тейки\n"
+        "• Рынки: Crypto · Forex · MOEX\n"
         "• Анализ новостей (ФРС, ETF, хардфорки, макро)\n"
-        "• Поддержка GPT-психолога 😅\n\n"
-        "📰 Плюс: ссылки на проверенные источники — без шума, лудоманов и инфоцыган\n"
-        "⚡️ Премиум: авторские скальперские сетапы + «люксовые» сигналы ИИ (с PRO TradingView)\n\n"
-        f"🔥 Подключи ТВХ — всего ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда.\n\n"
-        "👥 Чат трейдеров 👉 [TBX Chat](https://t.me/TBX_Chat)\n"
-        "💬 Вопросы 👉 [@zhbankov_alex](https://t.me/zhbankov_alex)\n\n"
-        "✨ И это только начало. Мы с ботом будем каждый день становиться лучше, чтобы ты рос вместе с комьюнити. "
-        "ТВХ — это твоя точка входа и твоя поддержка. 🚀"
+        "• GPT-психолог, когда эмоции ломают стратегию 😅\n\n"
+
+        "⭐️ <b>Премиум</b>: авторские скальперские сетапы + «люксовые» AI-сигналы (с PRO TradingView)\n"
+        f"💳 <b>Подключение</b>: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда\n"
+        "📊 <b>Альтернатива</b>: бесплатный доступ через брокера (пиши менеджеру)\n\n"
+
+        "🔗 <b>Инфраструктура ТВХ</b>\n"
+        "• Публичный канал: <a href=\"https://t.me/TBXtrade\">t.me/TBXtrade</a>\n"
+        "• Чат с топиками: <a href=\"https://t.me/TBX_Chat\">t.me/TBX_Chat</a>\n"
+        "• Приватный канал (VIP): <a href=\"https://t.me/+TAbYnYSzHYI0YzVi\">перейти</a>\n\n"
+
+        "💬 <b>Любые вопросы</b>: <a href=\"https://t.me/zhbankov_alex\">@zhbankov_alex</a>\n\n"
+
+        "⚡️ Не откладывай: лучшие сетапы раздаются здесь и сейчас. "
+        "Пропустишь вход — рынок не вернётся. 🚀"
     )
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Получить доступ", url=bot_url)]
+        [InlineKeyboardButton("💰 Получить доступ", url=bot_url)],
+        [
+            InlineKeyboardButton("📢 Публичный канал", url="https://t.me/TBXtrade"),
+            InlineKeyboardButton("💬 Чат с топиками", url="https://t.me/TBX_Chat"),
+        ],
+        [InlineKeyboardButton("🔒 VIP-канал", url="https://t.me/+TAbYnYSzHYI0YzVi")]
     ])
 
+    chat_id = CHANNEL_USERNAME
+
     try:
-        chat_id = "https://t.me/TBX_Chat"
-
-        # убираем старый закреп, если есть
+        # снимаем старый пин
         chat_obj = await context.bot.get_chat(chat_id)
-        if getattr(chat_obj, "pinned_message", None):
-            await context.bot.unpin_chat_message(
-                chat_id=chat_id,
-                message_id=chat_obj.pinned_message.message_id
-            )
+        pinned = getattr(chat_obj, "pinned_message", None)
+        if pinned:
+            try:
+                await context.bot.unpin_chat_message(chat_id=chat_id, message_id=pinned.message_id)
+            except Exception as e_unpin:
+                logging.warning(f"[publish_post] unpin failed: {e_unpin}")
 
-        # публикуем одну и ту же анимацию, что и в /start; при ошибке — фото
-        try:
-            with open(VIDEO_PATH, "rb") as anim:
-                message = await context.bot.send_animation(
-                    chat_id=chat_id,
-                    animation=anim,
-                    caption=caption,
-                    parse_mode="Markdown",
-                    reply_markup=keyboard
-                )
-        except Exception as e_anim:
-            logging.warning(f"[publish_post] send_animation failed, fallback to photo. err={e_anim}")
-            with open(PHOTO_PATH, "rb") as photo:
+        message = None
+
+        # пробуем отправить гифку/видео
+        if POST_VIDEO_PATH.exists():
+            try:
+                with POST_VIDEO_PATH.open("rb") as anim:
+                    message = await context.bot.send_animation(
+                        chat_id=chat_id,
+                        animation=anim,
+                        caption=caption,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+            except Exception as e_anim:
+                logging.warning(f"[publish_post] send_animation failed, fallback to photo. err={e_anim}")
+
+        # если нет — fallback на фото
+        if message is None:
+            if not POST_PHOTO_PATH.exists():
+                raise FileNotFoundError(f"Не найдено ни видео ({POST_VIDEO_PATH}) ни фото ({POST_PHOTO_PATH}).")
+            with POST_PHOTO_PATH.open("rb") as photo:
                 message = await context.bot.send_photo(
                     chat_id=chat_id,
                     photo=photo,
                     caption=caption,
-                    parse_mode="Markdown",
+                    parse_mode="HTML",
                     reply_markup=keyboard
                 )
 
         # закрепляем пост
-        await context.bot.pin_chat_message(
-            chat_id=chat_id,
-            message_id=message.message_id,
-            disable_notification=True
-        )
+        try:
+            await context.bot.pin_chat_message(
+                chat_id=chat_id,
+                message_id=message.message_id,
+                disable_notification=True
+            )
+        except Exception as e_pin:
+            logging.warning(f"[publish_post] pin failed: {e_pin}")
 
         await update.message.reply_text("✅ Пост опубликован и закреплён в канале.")
+
     except Exception as e:
         logging.error(f"[PUBLISH] Ошибка публикации: {e}")
         await update.message.reply_text("⚠️ Не удалось опубликовать или закрепить пост. Проверь файл, права и логи.")
