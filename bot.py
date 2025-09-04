@@ -69,7 +69,7 @@ global_bot = None
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PHOTO_PATH = os.path.join(BASE_DIR, "banner.jpg")
 VIDEO_PATH = os.path.join(BASE_DIR, "Video_TBX.mp4")  # файл в корне!
-POST_VIDEO_PATH = Path("Promo_TBX.gif") 
+POST_VIDEO_PATH = Path("Promo_TBX.mp4") 
 POST_PHOTO_PATH = Path("Promo_TBX.png")
 CHANNEL_USERNAME = "@TBXtrade"   # или numeric ID канала
 
