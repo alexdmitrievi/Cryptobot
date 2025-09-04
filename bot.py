@@ -2170,22 +2170,40 @@ PHOTO_PATH = os.path.join(BASE_DIR, "GPT-Трейдер помощник.png")
 def render_health_ok():
     return "OK", 200
 
-async def set_post_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сохраняет file_id последнего присланного видео для публикации в канал."""
-    if update.effective_user.id not in ADMIN_IDS:
+# === Save post video (file_id) ===============================================
+async def save_post_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохраняет file_id видео для поста. Работает так:
+    - если команда дана в ответ на видео → берём video из reply
+    - если команда отправлена вместе с видео → берём video из текущего сообщения
+    - иначе подсказываем, что нужно сделать
+    """
+    uid = update.effective_user.id
+    if uid not in ADMIN_IDS:
         return await update.message.reply_text("⛔️ Нет прав.")
-    vid = getattr(update.message, "video", None)
+
+    msg = update.effective_message
+    vid = None
+
+    # 1) Если команда дана в ответ на видео
+    if msg and msg.reply_to_message and msg.reply_to_message.video:
+        vid = msg.reply_to_message.video
+    # 2) Если видео прислано вместе с командой
+    elif msg and msg.video:
+        vid = msg.video
+
     if not vid:
-        return await update.message.reply_text("Пришли видео (MP4) как «Видео», затем повтори /set_post_video.")
+        return await update.message.reply_text(
+            "Пришли видео (MP4) и ответь на него командой /save_post_video\n"
+            "или отправь команду вместе с видео в одном сообщении."
+        )
 
     file_id = vid.file_id
-    # сохраняем в переменную процесса; при желании — в .env/БД
-    globals()["POST_VIDEO_FILE_ID"] = file_id
-    await update.message.reply_text(f"✅ Видео сохранено.\nfile_id:\n<code>{file_id}</code>", parse_mode="HTML")
-
-# регистрируем
-application.add_handler(MessageHandler(filters.VIDEO, set_post_video))
-application.add_handler(CommandHandler("set_post_video", set_post_video))
+    globals()["POST_VIDEO_FILE_ID"] = file_id  # можно ещё положить в .env/БД при желании
+    await update.message.reply_text(
+        "✅ Видео сохранено для публикаций.\n"
+        f"file_id: <code>{file_id}</code>",
+        parse_mode="HTML"
+    )
 
 async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -2619,7 +2637,7 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     logging.info("🚀 GPT-Трейдер стартовал!")
 
-    # ✅ Глобальный bot для уведомлений из вебхука
+    # ✅ Глобальный bot для уведомлений из вебхуков
     global_bot = app.bot
 
     # 🚀 Общий asyncio-loop (его передаём во Flask-поток для run_coroutine_threadsafe)
@@ -2724,6 +2742,10 @@ def main():
     app.add_handler(CommandHandler("reload_users", reload_users, block=False))
     app.add_handler(CommandHandler("stats", stats, block=False))
     app.add_handler(CommandHandler("export", export, block=False))
+
+    # 🔐 Сохранение file_id видео для постов (команда /save_post_video)
+    # Работает: ответь командой на видео ИЛИ пришли команду вместе с видео в одном сообщении.
+    app.add_handler(CommandHandler("save_post_video", save_post_video, block=False))
 
     # ✅ Диалоги
     app.add_handler(therapy_handler)
