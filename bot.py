@@ -2169,14 +2169,24 @@ PHOTO_PATH = os.path.join(BASE_DIR, "GPT-Трейдер помощник.png")
 def render_health_ok():
     return "OK", 200
 
+from pathlib import Path
+
 async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Публикует видео-пост в канал и закрепляет его.
+    Делает фолбэк на анимацию, затем на фото. Показывает точную причину ошибки в чат.
+    """
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
         await update.message.reply_text("⛔️ У тебя нет прав на публикацию.")
         return
 
+    # --- безопасные абсолютные пути к медиа ---
+    base_dir = Path(__file__).resolve().parent
+    video_path = POST_VIDEO_PATH if POST_VIDEO_PATH.is_absolute() else base_dir / POST_VIDEO_PATH
+    photo_path = POST_PHOTO_PATH if POST_PHOTO_PATH.is_absolute() else base_dir / POST_PHOTO_PATH
+
     bot_url = globals().get("BOT_URL", "https://t.me/CtyptorobBot")
-    chat_id = CHANNEL_USERNAME  # куда публикуем
+    chat_id = CHANNEL_USERNAME  # рекомендуется numeric id канала (-100...)
 
     # --- Текст поста ---
     caption = (
@@ -2185,7 +2195,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⏳ <b>Почему сейчас</b>\n"
         "• Альтсезон близко: если не сейчас, то, возможно, никогда\n"
         "• VIP-места ограничены — потом доступ будет дороже\n"
-        "• Каждая неделя промаха = потерянные X% роста\n\n"
+        "• Каждая неделя прокрастинации = потерянные X% роста\n\n"
         "📈 <b>Что ты получаешь</b>\n"
         "• Прогноз по скрину за 10 секунд\n"
         "• Чёткие уровни: вход · стоп · тейки\n"
@@ -2212,7 +2222,9 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     try:
-        # Снимаем старый пин, если есть
+        logging.info(f"[publish_post] start chat={chat_id} video={video_path} exists={video_path.exists()}")
+
+        # 1) Снимаем старый пин (если есть)
         try:
             chat_obj = await context.bot.get_chat(chat_id)
             pinned = getattr(chat_obj, "pinned_message", None)
@@ -2222,11 +2234,12 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.warning(f"[publish_post] unpin failed: {e_unpin}")
 
         message = None
+        last_err = None
 
-        # 1) Публикуем как ВИДЕО с плеером
-        if POST_VIDEO_PATH.exists():
+        # 2) Публикуем как ВИДЕО с плеером
+        if video_path.exists():
             try:
-                with POST_VIDEO_PATH.open("rb") as v:
+                with video_path.open("rb") as v:
                     message = await context.bot.send_video(
                         chat_id=chat_id,
                         video=v,
@@ -2235,13 +2248,15 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         supports_streaming=True,
                         reply_markup=keyboard
                     )
+                logging.info("[publish_post] send_video OK")
             except Exception as e_video:
-                logging.warning(f"[publish_post] send_video failed, fallback to animation. err={e_video}")
+                last_err = e_video
+                logging.error(f"[publish_post] send_video ERROR: {e_video}")
 
-        # 2) Фолбэк — как анимацию (MP4/GIF)
-        if message is None and POST_VIDEO_PATH.exists():
+        # 3) Фолбэк — анимация (mp4/gif)
+        if message is None and video_path.exists():
             try:
-                with POST_VIDEO_PATH.open("rb") as anim:
+                with video_path.open("rb") as anim:
                     message = await context.bot.send_animation(
                         chat_id=chat_id,
                         animation=anim,
@@ -2249,16 +2264,19 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="HTML",
                         reply_markup=keyboard
                     )
+                logging.info("[publish_post] send_animation OK")
             except Exception as e_anim:
-                logging.warning(f"[publish_post] send_animation failed, fallback to photo. err={e_anim}")
+                last_err = e_anim
+                logging.error(f"[publish_post] send_animation ERROR: {e_anim}")
 
-        # 3) Последний фолбэк — фото
+        # 4) Последний фолбэк — фото
         if message is None:
-            if not POST_PHOTO_PATH.exists():
+            if not photo_path.exists():
                 raise FileNotFoundError(
-                    f"Нет медиа: ни видео ({POST_VIDEO_PATH}), ни фото ({POST_PHOTO_PATH})."
+                    f"Нет медиа: ни видео ({video_path}), ни фото ({photo_path}). "
+                    f"Последняя ошибка при видео/анимации: {last_err}"
                 )
-            with POST_PHOTO_PATH.open("rb") as photo:
+            with photo_path.open("rb") as photo:
                 message = await context.bot.send_photo(
                     chat_id=chat_id,
                     photo=photo,
@@ -2266,23 +2284,24 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="HTML",
                     reply_markup=keyboard
                 )
+            logging.info("[publish_post] send_photo OK")
 
-        # Закрепляем пост
+        # 5) Закрепляем пост
         try:
             await context.bot.pin_chat_message(
                 chat_id=chat_id,
                 message_id=message.message_id,
                 disable_notification=True
             )
+            logging.info("[publish_post] pin OK")
         except Exception as e_pin:
             logging.warning(f"[publish_post] pin failed: {e_pin}")
 
         await update.message.reply_text("✅ Пост опубликован и закреплён в канале.")
 
     except Exception as e:
-        logging.error(f"[PUBLISH] Ошибка публикации: {e}")
-        await update.message.reply_text("⚠️ Не удалось опубликовать или закрепить пост. Проверь файл, права и логи.")
-
+        logging.exception("[publish_post] FAILED")
+        await update.message.reply_text(f"⚠️ Не удалось опубликовать/закрепить пост.\nПричина: {e}")
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
