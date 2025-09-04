@@ -2181,7 +2181,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Не просто бот, а целая экосистема: 🤖 GPT-бот · 📢 публичный канал · 💬 чат с топиками · 🔒 VIP-сигналы.\n\n"
 
         "⏳ <b>Почему сейчас</b>\n"
-        "• Альтсезон на горизонте: промедлишь — войдёшь хуже\n"
+        "• Альтсезон близко: если не сейчас, то, возможно, никогда\n"
         "• VIP-места ограничены — потом доступ будет дороже\n"
         "• Каждая неделя промаха = потерянные X% роста\n\n"
 
@@ -2204,16 +2204,16 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💬 <b>Любые вопросы</b>: <a href=\"https://t.me/zhbankov_alex\">@zhbankov_alex</a>\n\n"
 
         "⚡️ Не откладывай: лучшие сетапы раздаются здесь и сейчас. "
-        "Пропустишь вход — рынок не вернётся. 🚀"
+        "Пропустишь возможность — аналогичная ситуация может повториться только через несколько лет. 🚀"
     )
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 Получить доступ", url=bot_url)],
+        [InlineKeyboardButton("🔒 VIP-канал", url="https://t.me/+TAbYnYSzHYI0YzVi")],
         [
             InlineKeyboardButton("📢 Публичный канал", url="https://t.me/TBXtrade"),
             InlineKeyboardButton("💬 Чат с топиками", url="https://t.me/TBX_Chat"),
         ],
-        [InlineKeyboardButton("🔒 VIP-канал", url="https://t.me/+TAbYnYSzHYI0YzVi")]
     ])
 
     chat_id = CHANNEL_USERNAME
@@ -2272,6 +2272,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"[PUBLISH] Ошибка публикации: {e}")
         await update.message.reply_text("⚠️ Не удалось опубликовать или закрепить пост. Проверь файл, права и логи.")
+
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
