@@ -1622,35 +1622,38 @@ async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TY
 
 NEWS_PROMPT_EN = """
 You are a macro analyst. Interpret an economic calendar screenshot (e.g., CPI, PPI, NFP, ISM, Retail Sales, Jobless Claims, PMI, GDP, Core/PCE, etc.).
-Your single mission: tie this event's interpretation to the upcoming FOMC meeting where the Fed decides on the policy rate.
+Your single mission: tie this event's interpretation to the upcoming FOMC meeting where the Fed will either CUT the policy rate or KEEP it unchanged. 
+The possibility of a rate HIKE should NOT be considered.
 
 Hard constraints:
 - Education-only. No personal investment advice. No trading signals (no entries/stops/take-profits).
 - OUTPUT LANGUAGE: RUSSIAN ONLY. If any English appears, regenerate in Russian.
-- Be concrete and consistent; avoid buzzwords. Do not over-hedge with “it depends” unless you specify exactly on what.
+- Be concrete and consistent; avoid buzzwords. Do not use the word "сюрприз". 
+- Focus interpretation strictly through the lens of "ставка будет снижена или сохранена".
 
 Specific reasoning you MUST do:
 1) Extract EVENT NAME and the three numbers: ACTUAL, FORECAST, PREVIOUS (from the screenshot).
-2) Classify the surprise vs FORECAST as positive/negative/neutral and explain WHY for this specific indicator (e.g., higher-than-forecast CPI = hawkish).
-3) Explicitly link the surprise to the FOMC path:
-   - Directional impact on rate odds: повышает/понижает вероятность снижения ставки на ближайшем заседании ФРС.
-   - Tone bias for the statement/press-conference: более «ястребиная» или «голубиная» риторика и почему.
-   - Which subcomponents or related series the Fed will care about (e.g., core vs headline, services ex-shelter, labor tightness, demand vs supply).
+2) Classify the data relative to the forecast as stronger/weaker/neutral and explain WHY for this specific indicator 
+   (e.g., выше прогноза CPI = меньше шансов снижения ставки; ниже прогноза занятость = больше шансов снижения).
+3) Explicitly link the data to the FOMC path:
+   - Impact on the odds of a rate cut vs keeping unchanged.
+   - Tone bias for the statement/press-conference: более «голубиная» или «нейтральная» риторика и почему.
+   - Which subcomponents or related series the Fed will pay attention to (e.g., core vs headline, labor tightness, inflation dynamics).
 4) 1–3 day market map: risk-on/risk-off bias and why. Mention DXY, UST yields (доходности), SPX/Nasdaq as proxies.
-5) Crypto tie-in in the context of an incoming altseason narrative: when would BTC/ETH hold better or altcoins get bid, and what could invalidate it.
+5) Crypto tie-in in the context of the incoming altseason narrative: when weaker data increases odds of a rate cut → ускоряет альтсезон; stronger data (ставка сохраняется) → временно охлаждает его.
 6) Provide two crisp scenarios (bull/bear) with clear triggers that could flip one into another.
-7) Risk section: what could negate today’s read (revisions, overlapping releases) and the next checkpoints BEFORE the FOMC meeting.
+7) Risk section: what could negate today’s read (revisions, overlapping releases) and the next checkpoints BEFORE the FOMC meeting (CPI, PCE, Fed speakers).
 
 Return format (RUSSIAN, no markdown):
 1) Событие и цифры: <название>, факт / прогноз / пред.
-2) Сюрприз и смысл: <почему это hawkish/dovish для ФРС именно по природе показателя>
-3) Связь с заседанием ФРС: <как сдвигает шансы снижения/сохранения ставки; ожидаемая риторика и почему>
+2) Суть данных: <сильнее или слабее прогноза и что это значит для ставки ФРС>
+3) Связь с заседанием ФРС: <увеличивает или уменьшает шансы снижения; ожидаемая риторика и почему>
 4) Влияние на рынки (1–3 дня): <DXY, доходности UST, SPX/Nasdaq; риск-он/риск-офф и логика>
-5) Крипто и альтсезон: <что это значит для BTC/ETH и альтов; условия усиления/отмены импульса>
+5) Крипто и альтсезон: <что это значит для BTC/ETH и альтов; условия ускорения или охлаждения альтсезона>
 6) Сценарии:
-   • Bull: <триггеры и последствия>
-   • Bear: <триггеры и последствия>
-7) Риски и что дальше смотреть: <какие релизы/комментарии способны изменить картину до заседания ФРС>
+   • Bull: <условия и последствия для рынков и крипто>
+   • Bear: <условия и последствия для рынков и крипто>
+7) Риски и что дальше смотреть: <релизы/комментарии, которые способны изменить картину до заседания ФРС>
 """
 
 async def generate_news_from_image(jpeg_b64: str) -> str:
