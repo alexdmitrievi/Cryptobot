@@ -1533,90 +1533,157 @@ async def handle_uid_submission(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_calendar_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, image_bytes: BytesIO | None = None):
     """
-    Скрин экономического календаря:
-    - берём BytesIO (из аргумента или вытаскиваем сами),
-    - конвертируем в JPEG b64,
-    - вызываем generate_news_from_image(...) и отправляем ответ.
+    Обрабатывает скрин экономического календаря:
+    1) Берёт BytesIO (из аргумента или вытаскивает сам из сообщения),
+    2) Конвертирует в JPEG base64,
+    3) Вызывает generate_news_from_image(...) — промпт жёстко связывает интерпретацию с грядущим заседанием ФРС,
+    4) Отправляет результат пользователю (строго RU, без инвестсоветов).
     """
     msg = update.effective_message
 
+    # 0) Защитим состояние (если ты где-то отмечаешь «ждём календарь»)
+    context.user_data.pop("awaiting_calendar_photo", None)
+
     # 1) Достаём картинку
-    if image_bytes is None:
-        image_bytes = await _extract_image_bytes(update, context)
+    try:
+        if image_bytes is None:
+            image_bytes = await _extract_image_bytes(update, context)
         if image_bytes is None:
             await msg.reply_text(
-                "⚠️ Не вижу изображения календаря. Пришлите фото или документ-картинку (PNG/JPG).",
+                "⚠️ Не вижу изображения календаря.\n"
+                "Пришлите фото или документ-картинку (PNG/JPG) с видимыми полями: событие, Факт / Прогноз / Пред.",
                 reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
             )
             return
+    except Exception as e_extract:
+        logging.exception("[calendar] extract error")
+        await msg.reply_text(
+            "⚠️ Не удалось получить изображение. Пришлите скрин как фото или как документ (PNG/JPG).",
+            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+        )
+        return
 
-    await msg.reply_text("🔎 Читаю значения и формирую интерпретацию...")
+    # 2) Сообщение-прогресс с акцентом на ФРС
+    await msg.reply_text("🔎 Читаю скрин и оцениваю, как это сдвигает расклад перед ближайшим заседанием ФРС…")
 
-    # 2) JPEG→b64 и генерация
+    # 3) JPEG→b64 и генерация интерпретации
     try:
         jpeg_b64 = _to_jpeg_base64(image_bytes)
         analysis_ru = await generate_news_from_image(jpeg_b64)
-        await msg.reply_text(
-            f"🧠 Интерпретация события:\n\n{analysis_ru}",
-            reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
-        )
+
+        # Страховка от пустых/коротких ответов
+        if not analysis_ru or not analysis_ru.strip():
+            analysis_ru = (
+                "1) Событие и цифры: не удалось надёжно распознать значения (факт/прогноз/пред.).\n"
+                "2) Сюрприз и смысл: сравните факт с прогнозом — для инфляции/занятости выше прогноза чаще «ястребиный» сигнал, ниже — «голубиный».\n"
+                "3) Связь с заседанием ФРС: жёсткие данные уменьшают шансы снижения ставки; мягкие — повышают.\n"
+                "4) Влияние (1–3 дня): «ястреб» → DXY/доходности ↑, риск-активы под давлением; «голубь» → поддержка акций и крипто.\n"
+                "5) Крипто и альтсезон: мягкий фон поддерживает BTC/ETH; альты оживают при устойчивом риск-он.\n"
+                "6) Сценарии: мягкие данные → риск-он; жёсткие → риск-офф. Следите за пересмотрами и близкими релизами."
+            )
+
+        # Телеграм ограничение ~4096 символов — аккуратно разобьём при необходимости
+        text = "🧠 Интерпретация события в контексте заседания ФРС:\n\n" + analysis_ru.strip()
+        if len(text) <= 4000:
+            await msg.reply_text(
+                text,
+                reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+            )
+        else:
+            # Разбить на части по абзацам
+            parts = []
+            chunk = []
+            size = 0
+            for line in text.splitlines(True):
+                if size + len(line) > 3800:
+                    parts.append("".join(chunk))
+                    chunk, size = [line], len(line)
+                else:
+                    chunk.append(line)
+                    size += len(line)
+            if chunk:
+                parts.append("".join(chunk))
+            # Отправим по порядку
+            for i, p in enumerate(parts, 1):
+                header = "" if i == 1 else f"(часть {i}/{len(parts)})\n"
+                await msg.reply_text(
+                    header + p,
+                    reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
+                )
+
     except Exception as e:
-        logging.exception("[calendar] error")
+        logging.exception("[calendar] analysis error")
         await msg.reply_text(
-            "⚠️ Не удалось распознать скрин. Кадрируйте область с названием события и числами "
-            "(ФАКТ / ПРОГНОЗ / ПРЕД.) и пришлите снова.",
+            "⚠️ Не удалось распознать скрин.\n"
+            "Совет: кадрируйте область с названием релиза и числами «Факт / Прогноз / Пред.», "
+            "уберите лишнее и пришлите снова.",
             reply_markup=ReplyKeyboardMarkup([["↩️ Выйти в меню"]], resize_keyboard=True)
         )
-    finally:
-        context.user_data.pop("awaiting_calendar_photo", None)
 
-# === NEWS INTERPRETATION (economic calendar) ===
 NEWS_PROMPT_EN = """
-You are a macro analyst. Task: interpret an economic calendar screenshot (PMI, CPI, jobs, FOMC etc.)
-ONLY provide an educational, high-level macro interpretation. DO NOT give personal investment advice,
-no trading signals, no entries/stops/take-profits.
+You are a macro analyst. Interpret an economic calendar screenshot (e.g., CPI, PPI, NFP, ISM, Retail Sales, Jobless Claims, PMI, GDP, Core/PCE, etc.).
+Your single mission: tie this event's interpretation to the upcoming FOMC meeting where the Fed decides on the policy rate.
 
-Context to consider:
-- Market narrative: incoming altseason on expectations of a Fed rate cut on Sep 17, 2025 and approvals of spot ETFs for several altcoins.
-- Output must be in RUSSIAN only. If you produce any English phrase, regenerate in Russian.
-- Be specific: identify EVENT, ACTUAL vs FORECAST vs PREVIOUS, whether surprise is positive/negative,
-  short-term risk-on/risk-off bias, potential impact on Crypto (BTC, ETH) and majors (DXY, SPX) in 1–3 days.
-- Provide 2 scenario paths (bull/bear) and simple risk notes. No financial advice.
+Hard constraints:
+- Education-only. No personal investment advice. No trading signals (no entries/stops/take-profits).
+- OUTPUT LANGUAGE: RUSSIAN ONLY. If any English appears, regenerate in Russian.
+- Be concrete and consistent; avoid buzzwords. Do not over-hedge with “it depends” unless you specify exactly on what.
 
-Return format (RUSSIAN):
-1) Событие и показатели: ...
-2) Ключевая интерпретация: ...
-3) Влияние на рынок (1–3 дня): ...
-4) Крипто в контексте альтсезона: ...
-5) Два сценария: ...
-6) Риски и на что смотреть дальше: ...
+Specific reasoning you MUST do:
+1) Extract EVENT NAME and the three numbers: ACTUAL, FORECAST, PREVIOUS (from the screenshot).
+2) Classify the surprise vs FORECAST as positive/negative/neutral and explain WHY for this specific indicator (e.g., higher-than-forecast CPI = hawkish).
+3) Explicitly link the surprise to the FOMC path:
+   - Directional impact on rate odds: повышает/понижает вероятность снижения ставки на ближайшем заседании ФРС.
+   - Tone bias for the statement/press-conference: более «ястребиная» или «голубиная» риторика и почему.
+   - Which subcomponents or related series the Fed will care about (e.g., core vs headline, services ex-shelter, labor tightness, demand vs supply).
+4) 1–3 day market map: risk-on/risk-off bias and why. Mention DXY, UST yields (доходности), SPX/Nasdaq as proxies.
+5) Crypto tie-in in the context of an incoming altseason narrative: when would BTC/ETH hold better or altcoins get bid, and what could invalidate it.
+6) Provide two crisp scenarios (bull/bear) with clear triggers that could flip one into another.
+7) Risk section: what could negate today’s read (revisions, overlapping releases) and the next checkpoints BEFORE the FOMC meeting.
+
+Return format (RUSSIAN, no markdown):
+1) Событие и цифры: <название>, факт / прогноз / пред.
+2) Сюрприз и смысл: <почему это hawkish/dovish для ФРС именно по природе показателя>
+3) Связь с заседанием ФРС: <как сдвигает шансы снижения/сохранения ставки; ожидаемая риторика и почему>
+4) Влияние на рынки (1–3 дня): <DXY, доходности UST, SPX/Nasdaq; риск-он/риск-офф и логика>
+5) Крипто и альтсезон: <что это значит для BTC/ETH и альтов; условия усиления/отмены импульса>
+6) Сценарии:
+   • Bull: <триггеры и последствия>
+   • Bear: <триггеры и последствия>
+7) Риски и что дальше смотреть: <какие релизы/комментарии способны изменить картину до заседания ФРС>
 """
 
 async def generate_news_from_image(jpeg_b64: str) -> str:
-    """Интерпретация календаря по скрину. 2 попытки + читаемый fallback, строго RU."""
-    # Попытка 1 (через работающий ask_gpt_vision)
-    prompt = NEWS_PROMPT_EN + "\n\nRespond strictly in Russian (Cyrillic). No markdown. No apologies."
-    out = await ask_gpt_vision(prompt_text=prompt, image_base64=jpeg_b64)
+    """Интерпретация календаря по скрину с фокусом на грядущее заседание ФРС. 2 попытки + читаемый RU-fallback."""
+    base_prompt = NEWS_PROMPT_EN + "\n\nОтвет строго на русском. Без англоязычных терминов. Без инвестиционных рекомендаций."
+    out = await ask_gpt_vision(prompt_text=base_prompt, image_base64=jpeg_b64)
 
-    # Попытка 2 при отказе/пусто/англ
-    if _is_refusal(out) or not out or out[:40].isascii():
-        stronger = (NEWS_PROMPT_EN + 
-                   "\n\nSTRICTLY EDUCATIONAL, NO PERSONAL ADVICE. " 
-                   "Ответ ДОЛЖЕН быть строго на русском языке. "
-                   "Если начинаешь на английском или даёшь отказ — перегенерируй и выдай русский аналитический разбор без инвестрекомендаций.")
+    # Перегенерация, если пришёл отказ / пусто / заметно англ.
+    def _looks_english(s: str) -> bool:
+        s = (s or "").strip()
+        return not s or s[:80].isascii()  # грубая эвристика: начало строки чисто ASCII
+
+    if _is_refusal(out) or _looks_english(out):
+        stronger = (
+            NEWS_PROMPT_EN
+            + "\n\nСТРОГО на русском языке, без английских слов и аббревиатур. "
+              "Только образовательная макро-интерпретация, никаких торговых рекомендаций. "
+              "Если ответ начат на английском или содержит отказ — перегенерируй и выдай корректный русский разбор."
+        )
         out = await ask_gpt_vision(prompt_text=stronger, image_base64=jpeg_b64)
 
-    # План Б
+    # План Б — аккуратный шаблон, чтобы пользователь всё равно получил пользу
     if _is_refusal(out) or not out:
         out = (
-            "1) Событие и показатели: не удалось надёжно распознать значения с изображения.\n"
-            "2) Ключевая интерпретация: сопоставьте ФАКТ с ПРОГНОЗОМ — выше прогноза → риск-он, ниже → риск-офф.\n"
-            "3) Влияние (1–3 дня): позитивный сюрприз поддерживает риск-активы; негативный повышает вероятность коррекции.\n"
-            "4) Крипто в контексте альтсезона: основной фон — ожидания снижения ставки 17.09.2025 и возможные одобрения ETF на альткоины.\n"
-            "5) Два сценария:\n"
-            "   • Bull: факт > прогноз — краткосрочный риск-он (BTC/ETH устойчивее, интерес к альтам растёт).\n"
-            "   • Bear: факт < прогноз — риск-офф (рост DXY/волатильности, давление на альткоины).\n"
-            "6) Риски: пересмотр данных, комментарии ФРС, геополитика; смежные релизы (ISM, NFP, инфляция) могут изменить баланс."
+            "1) Событие и цифры: не удалось надёжно распознать значения со скрина (факт/прогноз/пред.).\n"
+            "2) Сюрприз и смысл: сопоставьте факт с прогнозом. Для инфляции и занятости выше прогноза — чаще «ястребиный» сигнал; ниже — «голубиный».\n"
+            "3) Связь с заседанием ФРС: позитивный сюрприз по инфляции/рынку труда снижает шансы на понижение ставки и усиливает жёсткую риторику; слабость данных — наоборот.\n"
+            "4) Влияние на рынки (1–3 дня): «ястребиный» фон → рост доллара (DXY) и доходностей, давление на акции; «голубиный» → поддержка акций и рисковых активов.\n"
+            "5) Крипто и альтсезон: «голубиный» сдвиг чаще поддерживает BTC/ETH; альты получают приток позже и на фоне общего риска-он. «Ястребиный» — повышает волатильность и риск распродаж.\n"
+            "6) Сценарии:\n"
+            "   • Bull: мягкие данные → рынок закладывает больше шансов снижения ставки, риск-он усиливается.\n"
+            "   • Bear: жёсткие данные → шансы снижения ставки тают, доллар и доходности вверх, давление на риск.\n"
+            "7) Риски и что дальше смотреть: пересмотры данных, комментарии членов ФРС, близкие релизы (Core PCE, NFP/заявки, ISM/PMI). До заседания именно они могут поменять баланс."
         )
     return out
 
@@ -2214,11 +2281,14 @@ async def save_post_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Публикует промо-пост в канал с видео и закрепляет его.
+    Публикует промо-пост в канал, закрепляет его.
+    В одном сообщении: первая строка inline-кнопок — «Подключиться» (попадёт в плашку закрепа),
+    ниже — остальные кнопки (VIP-канал, Чат и т.п.).
+
     Приоритет источников видео:
-    1) POST_VIDEO_FILE_ID  (самый надёжный)
-    2) Локальный файл (POST_VIDEO_PATH)
-    3) POST_VIDEO_URL
+      1) POST_VIDEO_FILE_ID
+      2) Локальный файл POST_VIDEO_PATH
+      3) POST_VIDEO_URL
     Фолбэк — фото POST_PHOTO_PATH.
     """
     user_id = update.effective_user.id
@@ -2226,15 +2296,13 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔️ У тебя нет прав на публикацию.")
         return
 
-    # --- безопасно достаём константы/пути/переменные окружения ---
+    # --- конфиг/пути ---
     bot_url = (globals().get("BOT_URL") or "https://t.me/CtyptorobBot")
     chat_id = globals().get("CHANNEL_USERNAME")
 
-    # file_id и url берём из globals ИЛИ из env (что есть)
     file_id = (str(globals().get("POST_VIDEO_FILE_ID") or os.getenv("POST_VIDEO_FILE_ID", ""))).strip()
     video_url = (str(globals().get("POST_VIDEO_URL") or os.getenv("POST_VIDEO_URL", ""))).strip()
 
-    # локальные пути — приводим к абсолютным, даже если заданы относительные
     base_dir = Path(__file__).resolve().parent
     _video_path = globals().get("POST_VIDEO_PATH", Path("Promo_TBX.mp4"))
     _photo_path = globals().get("POST_PHOTO_PATH", Path("Promo_TBX.png"))
@@ -2245,7 +2313,6 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not photo_path.is_absolute():
         photo_path = base_dir / photo_path
 
-    # --- текст поста ---
     caption = (
         "🚀 <b>ТВХ — твоя точка входа в трейдинг</b>\n"
         "Не просто бот, а экосистема: 🤖 GPT-бот · 💬 чат с топиками · 🔒 VIP-сигналы.\n\n"
@@ -2267,9 +2334,9 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💬 <b>Вопросы</b>: <a href=\"https://t.me/zhbankov_alex\">@zhbankov_alex</a>"
     )
 
-    # --- кнопки (без «Публичный канал») ---
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Получить доступ", url=bot_url)],
+    # ⬇️ Первая строка — «Подключиться» (попадёт в плашку закрепа). Ниже — остальные кнопки.
+    keyboard_inline = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 Подключиться", url=bot_url)],
         [InlineKeyboardButton("🔒 VIP-канал", url="https://t.me/+TAbYnYSzHYI0YzVi")],
         [InlineKeyboardButton("💬 Чат с топиками", url="https://t.me/TBX_Chat")],
     ])
@@ -2280,7 +2347,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"video_path={video_path} exists={video_path.exists()} url={'yes' if video_url else 'no'}"
         )
 
-        # 0) снимаем старый пин, если есть
+        # снять старый пин
         try:
             chat_obj = await context.bot.get_chat(chat_id)
             pinned = getattr(chat_obj, "pinned_message", None)
@@ -2292,7 +2359,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = None
         last_err = None
 
-        # 1) Публикация по file_id (самый надёжный способ)
+        # отправка видео по file_id
         if file_id:
             try:
                 message = await context.bot.send_video(
@@ -2301,14 +2368,14 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     caption=caption,
                     parse_mode="HTML",
                     supports_streaming=True,
-                    reply_markup=keyboard,
+                    reply_markup=keyboard_inline,
                 )
                 logging.info("[publish_post] send_video by file_id OK")
             except Exception as e:
                 last_err = e
                 logging.error(f"[publish_post] send_video by file_id ERROR: {e}")
 
-        # 2) Фолбэк — локальный файл, если есть на диске
+        # фолбэк — локальный файл
         if message is None and video_path.exists():
             try:
                 with video_path.open("rb") as v:
@@ -2318,14 +2385,14 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         caption=caption,
                         parse_mode="HTML",
                         supports_streaming=True,
-                        reply_markup=keyboard,
+                        reply_markup=keyboard_inline,
                     )
                 logging.info("[publish_post] send_video by file path OK")
             except Exception as e_video:
                 last_err = e_video
                 logging.error(f"[publish_post] send_video by path ERROR: {e_video}")
 
-        # 3) Фолбэк — по прямому URL (если указан в env)
+        # фолбэк — URL
         if message is None and video_url:
             try:
                 message = await context.bot.send_video(
@@ -2334,14 +2401,14 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     caption=caption,
                     parse_mode="HTML",
                     supports_streaming=True,
-                    reply_markup=keyboard,
+                    reply_markup=keyboard_inline,
                 )
                 logging.info("[publish_post] send_video by URL OK")
             except Exception as e_url:
                 last_err = e_url
                 logging.error(f"[publish_post] send_video by URL ERROR: {e_url}")
 
-        # 4) Последний фолбэк — фото
+        # финальный фолбэк — фото
         if message is None:
             if not photo_path.exists():
                 raise FileNotFoundError(
@@ -2354,11 +2421,11 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     photo=ph,
                     caption=caption,
                     parse_mode="HTML",
-                    reply_markup=keyboard,
+                    reply_markup=keyboard_inline,
                 )
             logging.info("[publish_post] send_photo OK")
 
-        # 5) Закреп
+        # закреп
         try:
             await context.bot.pin_chat_message(
                 chat_id=chat_id,
@@ -2369,7 +2436,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e_pin:
             logging.warning(f"[publish_post] pin failed: {e_pin}")
 
-        await update.message.reply_text("✅ Пост опубликован и закреплён в канале.")
+        await update.message.reply_text("✅ Пост опубликован и закреплён (кнопка в шапке + кнопки под постом).")
 
     except Exception as e:
         logging.exception("[publish_post] FAILED")
