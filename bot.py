@@ -2176,64 +2176,70 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     bot_url = globals().get("BOT_URL", "https://t.me/CtyptorobBot")
+    chat_id = CHANNEL_USERNAME  # куда публикуем
 
     # --- Текст поста ---
     caption = (
         "🚀 <b>ТВХ — твоя точка входа в трейдинг</b>\n"
-        "Не просто бот, а целая экосистема: 🤖 GPT-бот · 📢 публичный канал · 💬 чат с топиками · 🔒 VIP-сигналы.\n\n"
-
+        "Не просто бот, а целая экосистема: 🤖 GPT-бот · 💬 чат с топиками · 🔒 VIP-сигналы.\n\n"
         "⏳ <b>Почему сейчас</b>\n"
         "• Альтсезон близко: если не сейчас, то, возможно, никогда\n"
         "• VIP-места ограничены — потом доступ будет дороже\n"
         "• Каждая неделя промаха = потерянные X% роста\n\n"
-
         "📈 <b>Что ты получаешь</b>\n"
         "• Прогноз по скрину за 10 секунд\n"
         "• Чёткие уровни: вход · стоп · тейки\n"
         "• Рынки: Crypto · Forex · MOEX\n"
         "• Анализ новостей (ФРС, ETF, хардфорки, макро)\n"
         "• GPT-психолог, когда эмоции ломают стратегию 😅\n\n"
-
         "⭐️ <b>Премиум</b>: авторские скальперские сетапы + «люксовые» AI-сигналы (с PRO TradingView)\n"
         f"💳 <b>Подключение</b>: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда\n"
         "📊 <b>Альтернатива</b>: бесплатный доступ через брокера (пиши менеджеру)\n\n"
-
         "🔗 <b>Инфраструктура ТВХ</b>\n"
         "• Публичный канал: <a href=\"https://t.me/TBXtrade\">t.me/TBXtrade</a>\n"
         "• Чат с топиками: <a href=\"https://t.me/TBX_Chat\">t.me/TBX_Chat</a>\n"
         "• Приватный канал (VIP): <a href=\"https://t.me/+TAbYnYSzHYI0YzVi\">перейти</a>\n\n"
-
         "💬 <b>Любые вопросы</b>: <a href=\"https://t.me/zhbankov_alex\">@zhbankov_alex</a>\n\n"
-
         "⚡️ Не откладывай: лучшие сетапы раздаются здесь и сейчас. "
         "Пропустишь возможность — аналогичная ситуация может повториться только через несколько лет. 🚀"
     )
 
+    # --- Кнопки (без «Публичный канал») ---
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 Получить доступ", url=bot_url)],
         [InlineKeyboardButton("🔒 VIP-канал", url="https://t.me/+TAbYnYSzHYI0YzVi")],
-        [
-            InlineKeyboardButton("📢 Публичный канал", url="https://t.me/TBXtrade"),
-            InlineKeyboardButton("💬 Чат с топиками", url="https://t.me/TBX_Chat"),
-        ],
+        [InlineKeyboardButton("💬 Чат с топиками", url="https://t.me/TBX_Chat")],
     ])
 
-    chat_id = CHANNEL_USERNAME
-
     try:
-        # снимаем старый пин
-        chat_obj = await context.bot.get_chat(chat_id)
-        pinned = getattr(chat_obj, "pinned_message", None)
-        if pinned:
-            try:
+        # Снимаем старый пин, если есть
+        try:
+            chat_obj = await context.bot.get_chat(chat_id)
+            pinned = getattr(chat_obj, "pinned_message", None)
+            if pinned:
                 await context.bot.unpin_chat_message(chat_id=chat_id, message_id=pinned.message_id)
-            except Exception as e_unpin:
-                logging.warning(f"[publish_post] unpin failed: {e_unpin}")
+        except Exception as e_unpin:
+            logging.warning(f"[publish_post] unpin failed: {e_unpin}")
 
         message = None
 
-        # пробуем отправить гифку/видео
+        # 1) Публикуем как ВИДЕО с плеером
         if POST_VIDEO_PATH.exists():
+            try:
+                with POST_VIDEO_PATH.open("rb") as v:
+                    message = await context.bot.send_video(
+                        chat_id=chat_id,
+                        video=v,
+                        caption=caption,
+                        parse_mode="HTML",
+                        supports_streaming=True,
+                        reply_markup=keyboard
+                    )
+            except Exception as e_video:
+                logging.warning(f"[publish_post] send_video failed, fallback to animation. err={e_video}")
+
+        # 2) Фолбэк — как анимацию (MP4/GIF)
+        if message is None and POST_VIDEO_PATH.exists():
             try:
                 with POST_VIDEO_PATH.open("rb") as anim:
                     message = await context.bot.send_animation(
@@ -2246,10 +2252,12 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e_anim:
                 logging.warning(f"[publish_post] send_animation failed, fallback to photo. err={e_anim}")
 
-        # если нет — fallback на фото
+        # 3) Последний фолбэк — фото
         if message is None:
             if not POST_PHOTO_PATH.exists():
-                raise FileNotFoundError(f"Не найдено ни видео ({POST_VIDEO_PATH}) ни фото ({POST_PHOTO_PATH}).")
+                raise FileNotFoundError(
+                    f"Нет медиа: ни видео ({POST_VIDEO_PATH}), ни фото ({POST_PHOTO_PATH})."
+                )
             with POST_PHOTO_PATH.open("rb") as photo:
                 message = await context.bot.send_photo(
                     chat_id=chat_id,
@@ -2259,7 +2267,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=keyboard
                 )
 
-        # закрепляем пост
+        # Закрепляем пост
         try:
             await context.bot.pin_chat_message(
                 chat_id=chat_id,
