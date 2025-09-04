@@ -68,9 +68,16 @@ global_bot = None
 
 # Абсолютные пути к файлам (безопаснее для Render)
 BASE_DIR = Path(__file__).resolve().parent
-PHOTO_PATH = BASE_DIR / "banner.jpg"
-VIDEO_PATH = BASE_DIR / "Video_TBX.mp4"   # промо-ролик или другое видео
-POST_VIDEO_PATH = BASE_DIR / "Promo_TBX.mp4"
+
+PHOTO_PATH = BASE_DIR / "banner.jpg"          # баннер
+VIDEO_PATH = BASE_DIR / "Video_TBX.mp4"       # тестовое/другое видео
+POST_VIDEO_PATH = BASE_DIR / "Promo_TBX.mp4"  # локальный фолбэк для промо-поста
+POST_PHOTO_PATH = BASE_DIR / "Promo_TBX.png"  # фолбэк на фото
+
+# Источники видео для поста
+POST_VIDEO_FILE_ID = os.getenv("POST_VIDEO_FILE_ID", "").strip()  # приоритетный источник
+POST_VIDEO_URL = os.getenv("POST_VIDEO_URL", "").strip()          # опциональный фолбэк по прямой ссылке
+
 # ID канала (username работает, но лучше numeric -100…)
 CHANNEL_USERNAME = "@TBXtrade"
 
@@ -2206,27 +2213,51 @@ async def save_post_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Публикует промо-пост в канал с видео и закрепляет его.
+    Приоритет источников видео:
+    1) POST_VIDEO_FILE_ID  (самый надёжный)
+    2) Локальный файл (POST_VIDEO_PATH)
+    3) POST_VIDEO_URL
+    Фолбэк — фото POST_PHOTO_PATH.
+    """
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
         await update.message.reply_text("⛔️ У тебя нет прав на публикацию.")
         return
 
-    bot_url = globals().get("BOT_URL", "https://t.me/CtyptorobBot")
-    chat_id = CHANNEL_USERNAME  # лучше numeric id -100...
+    # --- безопасно достаём константы/пути/переменные окружения ---
+    bot_url = (globals().get("BOT_URL") or "https://t.me/CtyptorobBot")
+    chat_id = globals().get("CHANNEL_USERNAME")
 
+    # file_id и url берём из globals ИЛИ из env (что есть)
+    file_id = (str(globals().get("POST_VIDEO_FILE_ID") or os.getenv("POST_VIDEO_FILE_ID", ""))).strip()
+    video_url = (str(globals().get("POST_VIDEO_URL") or os.getenv("POST_VIDEO_URL", ""))).strip()
+
+    # локальные пути — приводим к абсолютным, даже если заданы относительные
+    base_dir = Path(__file__).resolve().parent
+    _video_path = globals().get("POST_VIDEO_PATH", Path("Promo_TBX.mp4"))
+    _photo_path = globals().get("POST_PHOTO_PATH", Path("Promo_TBX.png"))
+    video_path = _video_path if isinstance(_video_path, Path) else Path(_video_path)
+    photo_path = _photo_path if isinstance(_photo_path, Path) else Path(_photo_path)
+    if not video_path.is_absolute():
+        video_path = base_dir / video_path
+    if not photo_path.is_absolute():
+        photo_path = base_dir / photo_path
+
+    # --- текст поста ---
     caption = (
         "🚀 <b>ТВХ — твоя точка входа в трейдинг</b>\n"
-        "Не просто бот, а целая экосистема: 🤖 GPT-бот · 💬 чат с топиками · 🔒 VIP-сигналы.\n\n"
+        "Не просто бот, а экосистема: 🤖 GPT-бот · 💬 чат с топиками · 🔒 VIP-сигналы.\n\n"
         "⏳ <b>Почему сейчас</b>\n"
         "• Альтсезон близко: если не сейчас, то, возможно, никогда\n"
         "• VIP-места ограничены — потом доступ будет дороже\n"
-        "• Каждая неделя прокрастинации = потерянные X% роста\n\n"
+        "• Каждая неделя промаха = потерянные X% роста\n\n"
         "📈 <b>Что ты получаешь</b>\n"
         "• Прогноз по скрину за 10 секунд\n"
-        "• Чёткие уровни: где войти, где стоп, где зафиксировать прибыль\n"
+        "• Планы сделок: где войти, где стоп, где зафиксировать прибыль\n"
         "• Рынки: Crypto · Forex · MOEX\n"
-        "• Анализ новостей (ФРС, ETF, хардфорки, макро)\n"
-        "• Поддержка после неудачных сделок 🧘\n\n"
+        "• Разбор новостей и поддержка после неудачных сделок 🧘\n\n"
         f"💳 <b>Подключение</b>: ${MONTHLY_PRICE_USD}/мес или ${LIFETIME_PRICE_USD} навсегда\n"
         "📊 <b>Альтернатива</b>: бесплатный доступ через брокера (пиши менеджеру)\n\n"
         "🔗 <b>Инфраструктура ТВХ</b>\n"
@@ -2236,6 +2267,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💬 <b>Вопросы</b>: <a href=\"https://t.me/zhbankov_alex\">@zhbankov_alex</a>"
     )
 
+    # --- кнопки (без «Публичный канал») ---
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 Получить доступ", url=bot_url)],
         [InlineKeyboardButton("🔒 VIP-канал", url="https://t.me/+TAbYnYSzHYI0YzVi")],
@@ -2243,7 +2275,12 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     try:
-        # Снимаем старый пин
+        logging.info(
+            f"[publish_post] chat={chat_id} file_id={'yes' if file_id else 'no'} "
+            f"video_path={video_path} exists={video_path.exists()} url={'yes' if video_url else 'no'}"
+        )
+
+        # 0) снимаем старый пин, если есть
         try:
             chat_obj = await context.bot.get_chat(chat_id)
             pinned = getattr(chat_obj, "pinned_message", None)
@@ -2255,8 +2292,7 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = None
         last_err = None
 
-        # 1) ПРИОРИТЕТ — file_id (не зависит от файлов на сервере)
-        file_id = globals().get("POST_VIDEO_FILE_ID", "") or os.getenv("POST_VIDEO_FILE_ID", "")
+        # 1) Публикация по file_id (самый надёжный способ)
         if file_id:
             try:
                 message = await context.bot.send_video(
@@ -2272,62 +2308,64 @@ async def publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 last_err = e
                 logging.error(f"[publish_post] send_video by file_id ERROR: {e}")
 
-        # 2) Фолбэк — локальный файл (если реально присутствует)
-        if message is None and POST_VIDEO_PATH.exists():
+        # 2) Фолбэк — локальный файл, если есть на диске
+        if message is None and video_path.exists():
             try:
-                with POST_VIDEO_PATH.open("rb") as v:
+                with video_path.open("rb") as v:
                     message = await context.bot.send_video(
                         chat_id=chat_id,
                         video=v,
                         caption=caption,
                         parse_mode="HTML",
                         supports_streaming=True,
-                        reply_markup=keyboard
+                        reply_markup=keyboard,
                     )
                 logging.info("[publish_post] send_video by file path OK")
             except Exception as e_video:
                 last_err = e_video
                 logging.error(f"[publish_post] send_video by path ERROR: {e_video}")
 
-        # 3) Фолбэк — URL
-        if message is None and POST_VIDEO_URL:
+        # 3) Фолбэк — по прямому URL (если указан в env)
+        if message is None and video_url:
             try:
                 message = await context.bot.send_video(
                     chat_id=chat_id,
-                    video=POST_VIDEO_URL,
+                    video=video_url,
                     caption=caption,
                     parse_mode="HTML",
                     supports_streaming=True,
-                    reply_markup=keyboard
+                    reply_markup=keyboard,
                 )
                 logging.info("[publish_post] send_video by URL OK")
             except Exception as e_url:
                 last_err = e_url
                 logging.error(f"[publish_post] send_video by URL ERROR: {e_url}")
 
-        # 4) Последний фолбэк — фото (на случай, если видео недоступно)
+        # 4) Последний фолбэк — фото
         if message is None:
-            if not POST_PHOTO_PATH.exists():
+            if not photo_path.exists():
                 raise FileNotFoundError(
-                    f"Нет источника видео (file_id/файл/URL) и нет фото ({POST_PHOTO_PATH}). "
+                    f"Нет источника видео (file_id/файл/URL) и нет фото ({photo_path}). "
                     f"Последняя ошибка по видео: {last_err}"
                 )
-            with POST_PHOTO_PATH.open("rb") as photo:
+            with photo_path.open("rb") as ph:
                 message = await context.bot.send_photo(
                     chat_id=chat_id,
-                    photo=photo,
+                    photo=ph,
                     caption=caption,
                     parse_mode="HTML",
-                    reply_markup=keyboard
+                    reply_markup=keyboard,
                 )
+            logging.info("[publish_post] send_photo OK")
 
-        # Закрепляем
+        # 5) Закреп
         try:
             await context.bot.pin_chat_message(
                 chat_id=chat_id,
                 message_id=message.message_id,
-                disable_notification=True
+                disable_notification=True,
             )
+            logging.info("[publish_post] pin OK")
         except Exception as e_pin:
             logging.warning(f"[publish_post] pin failed: {e_pin}")
 
