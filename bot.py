@@ -80,6 +80,7 @@ POST_VIDEO_URL = os.getenv("POST_VIDEO_URL", "").strip()          # опцион
 
 # ID канала (username работает, но лучше numeric -100…)
 CHANNEL_USERNAME = "@TBXtrade"
+VIP_CHANNEL_ID = -1002747865995  # приватный VIP-канал
 
 app_flask = Flask(__name__)  # создаём один раз глобально
 
@@ -1013,70 +1014,57 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.reply_text(full_message, reply_markup=keyboard)
 
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Получаем фото от пользователя
+    """Финальный шаг сетапа: владелец прикрепляет скрин, бот собирает данные и постит в приватный канал с кнопкой 'Калькулятор'."""
+    user_id = update.effective_user.id
+
+    # Разрешаем только владельцу
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("⛔️ У тебя нет прав публиковать сетапы.")
+        return ConversationHandler.END
+
+    # Берём фото
     photo = update.message.photo[-1]
     file = await photo.get_file()
-    photo_bytes = await file.download_as_bytearray()
+    image_stream = BytesIO()
+    await file.download_to_memory(image_stream)
+    image_stream.seek(0)
 
-    # Преобразуем в BytesIO для Telegram API
-    image_stream = BytesIO(photo_bytes)
-    image_stream.name = "setup.jpg"
-
-    # Собираем данные
-    instrument = context.user_data.get("instrument", "Не указано")
-    risk_area = context.user_data.get("risk_area")
-    targets = context.user_data.get("targets", "Не указано")
-    stoploss = context.user_data.get("stoploss", "Не указано")
-    entry = context.user_data.get("entry")
-
-    # Авторасчёт области риска
-    if not risk_area or risk_area == "Не указано":
-        try:
-            entry_value = float(entry)
-            stop_value = float(stoploss)
-            risk_percent = abs((entry_value - stop_value) / entry_value * 100)
-            risk_area = f"{risk_percent:.2f}% (авторасчёт)"
-        except:
-            risk_area = "Не указана — оценивай внимательно"
+    # Собираем данные из предыдущих шагов
+    instrument = context.user_data.get("instrument", "—")
+    risk_area = context.user_data.get("risk_area", "—")
+    targets = context.user_data.get("targets", "—")
+    stoploss = context.user_data.get("stoploss", "—")
 
     caption = (
-        f"🚀 Новый сетап от админа\n\n"
-        f"• 📌 Инструмент: {instrument}\n"
-        f"• 💰 Область риска: {risk_area}\n"
-        f"• 🎯 Цели: {targets}\n"
-        f"• 🚨 Стоп-лосс: {stoploss}"
+        f"📌 <b>Сетап</b>\n\n"
+        f"Инструмент: <b>{instrument}</b>\n"
+        f"Область риска в %: {risk_area}\n"
+        f"Цели: {targets}\n"
+        f"Стоп-лосс: {stoploss}\n\n"
+        f"⚡️ Твоя Точка Входа"
     )
 
-    # Кнопка для рассчета риска
+    # Кнопка «Калькулятор»
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📏 Рассчитать риск", callback_data="start_risk_calc")]
+        [InlineKeyboardButton("📏 Калькулятор", callback_data="start_risk_calc")]
     ])
 
+    # Публикуем в приватный канал
     try:
-        # Отправляем в канал
-        chat_id = '-1002747865995'
         message = await context.bot.send_photo(
-            chat_id=chat_id,
+            chat_id=VIP_CHANNEL_ID,
             photo=image_stream,
             caption=caption,
+            parse_mode="HTML",
             reply_markup=keyboard
         )
-
-        # Закрепляем
-        await context.bot.pin_chat_message(
-            chat_id=chat_id,
-            message_id=message.message_id,
-            disable_notification=True
-        )
-
-        await update.message.reply_text("✅ Сетап опубликован и закреплён в канале!", reply_markup=REPLY_MARKUP)
-
+        await update.message.reply_text("✅ Сетап опубликован в приватный канал.")
     except Exception as e:
-        logging.error(f"[SETUP_PHOTO] Ошибка публикации: {e}")
-        await update.message.reply_text(
-            "⚠️ Не удалось опубликовать сетап. Проверь права бота в канале и логи."
-        )
+        logging.error(f"[setup_photo] Ошибка публикации: {e}")
+        await update.message.reply_text("⚠️ Не удалось опубликовать сетап.")
 
+    # Чистим состояние
+    context.user_data.clear()
     return ConversationHandler.END
 
 def fetch_price_from_binance(symbol: str) -> float | None:
