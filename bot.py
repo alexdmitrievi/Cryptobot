@@ -2758,27 +2758,6 @@ def main():
             pass
     app.add_error_handler(error_handler)
 
-    # 🔄 Еженедельная рассылка (по умолчанию: пн 12:00)
-    CRON_TIME = os.getenv("CRON_TIME", "0 12 * * mon")
-
-    @aiocron.crontab(CRON_TIME)
-    async def weekly_broadcast():
-        message_text = (
-            "🚀 Еженедельный обзор:\n"
-            "• BTC сейчас около $108,700 — зона интереса $108,000–109,000.\n"
-            "• ETH держится на $2,576 — ищем покупки в диапазоне $2,520–2,600.\n"
-            "• Стопы держи коротко, цели фиксируй по R:R ~2:1."
-        )
-        success, fails = 0, []
-        for vip_id in get_allowed_users():
-            try:
-                await app.bot.send_message(chat_id=vip_id, text=message_text)
-                success += 1
-            except Exception as e:
-                logging.error(f"[WEEKLY BROADCAST] {vip_id}: {e}")
-                fails.append(vip_id)
-        logging.info(f"✅ Рассылка завершена: {success} успехов, {len(fails)} ошибок.")
-
     # 🧘 GPT-Психолог (опциональный отдельный диалог)
     therapy_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🧘 Спокойствие$"), start_therapy)],
