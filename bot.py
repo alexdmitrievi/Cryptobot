@@ -88,6 +88,9 @@ app_flask = Flask(__name__)  # создаём один раз глобально
 PROCESSED_PAYMENTS: Dict[str, float] = {}  # хранит уникальные payment_id/tx_id/комбинации
 PROCESSED_TTL_SEC = 3600  # 1 час
 
+# 1) Состояние для шага "точка входа"
+SETUP_WAIT_ENTRY = 101  # любое уникальное число
+
 # =====================[ ENV CHECKS ]=====================
 # Для Google Sheets обязателен GOOGLE_CREDS (JSON сервисного аккаунта в переменной окружения)
 if not os.getenv("GOOGLE_CREDS"):
@@ -497,10 +500,14 @@ async def check_access(update: Update):
 
     return True
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     chat_id = update.effective_chat.id
+
+    # 🎯 Deep-link обработка: t.me/<bot>?start=calc
+    arg = (context.args[0].lower() if getattr(context, "args", None) and context.args else "")
+    if arg == "calc":
+        return await start_risk_calc(update, context)
 
     caption = (
         "🚀 *ТВХ — твоя точка входа*\n\n"
@@ -527,7 +534,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     return ConversationHandler.END
-
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1013,45 +1019,82 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Используем msg.reply_text (а не update.message) — это устойчиво для фото и документов
     await msg.reply_text(full_message, reply_markup=keyboard)
 
+# 2) Обновлённый финальный шаг: запрашиваем точку входа
 async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Финальный шаг сетапа: владелец прикрепляет скрин, бот собирает данные и постит в приватный канал с кнопкой 'Калькулятор'."""
+    """Владелец прикрепляет скрин → бот спрашивает 'Точка входа' → затем публикует сетап в приватный канал."""
     user_id = update.effective_user.id
 
-    # Разрешаем только владельцу
     if user_id not in ADMIN_IDS:
         await update.message.reply_text("⛔️ У тебя нет прав публиковать сетапы.")
         return ConversationHandler.END
 
-    # Берём фото
+    # Берём фото и сохраняем в user_data (как байты), чтобы можно было отправить после ответа
     photo = update.message.photo[-1]
     file = await photo.get_file()
-    image_stream = BytesIO()
-    await file.download_to_memory(image_stream)
-    image_stream.seek(0)
+    buf = BytesIO()
+    await file.download_to_memory(buf)
+    buf.seek(0)
 
-    # Собираем данные из предыдущих шагов
+    # Сохраняем всё, что уже собрано ранее
+    context.user_data["setup_image_bytes"] = buf.getvalue()
+    context.user_data["instrument"] = context.user_data.get("instrument", "—")
+    context.user_data["risk_area"] = context.user_data.get("risk_area", "—")
+    context.user_data["targets"]   = context.user_data.get("targets", "—")
+    context.user_data["stoploss"]  = context.user_data.get("stoploss", "—")
+
+    # Спрашиваем точку входа
+    await update.message.reply_text(
+        "✍️ Введи <b>Точку входа</b> (пример: <code>1.1655</code>)",
+        parse_mode="HTML"
+    )
+    return SETUP_WAIT_ENTRY
+
+# 3) Обработчик ответа с точкой входа и публикация в приватный канал
+async def setup_set_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (update.message.text or "").strip().replace(",", ".")
+    # Простая валидация числа
+    try:
+        float(text)
+    except ValueError:
+        await update.message.reply_text(
+            "⚠️ Нужно число. Пример: <code>1.1655</code>. Введи ещё раз:",
+            parse_mode="HTML"
+        )
+        return SETUP_WAIT_ENTRY
+
+    context.user_data["entry"] = text
+
     instrument = context.user_data.get("instrument", "—")
-    risk_area = context.user_data.get("risk_area", "—")
-    targets = context.user_data.get("targets", "—")
-    stoploss = context.user_data.get("stoploss", "—")
+    entry      = context.user_data.get("entry", "—")
+    risk_area  = context.user_data.get("risk_area", "—")
+    targets    = context.user_data.get("targets", "—")
+    stoploss   = context.user_data.get("stoploss", "—")
 
     caption = (
         f"📌 <b>Сетап</b>\n\n"
         f"Инструмент: <b>{instrument}</b>\n"
+        f"Точка входа: <b>{entry}$</b>\n"
         f"Область риска в %: {risk_area}\n"
         f"Цели: {targets}\n"
         f"Стоп-лосс: {stoploss}\n\n"
         f"⚡️ Твоя Точка Входа"
     )
 
-    # Кнопка «Калькулятор»
+    # 🔗 В канале используем дип-линк в ЛС вместо callback
+    try:
+        bot_me = await context.bot.get_me()
+    except Exception:
+        bot_me = None
+    bot_username = (os.getenv("BOT_USERNAME") or (bot_me.username if bot_me else "") or "").lstrip("@")
+
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📏 Калькулятор", callback_data="start_risk_calc")]
+        [InlineKeyboardButton("📏 Калькулятор", url=f"https://t.me/{bot_username}?start=calc")]
     ])
 
-    # Публикуем в приватный канал
+    # Достаём сохранённое изображение и публикуем
     try:
-        message = await context.bot.send_photo(
+        image_stream = BytesIO(context.user_data["setup_image_bytes"])
+        await context.bot.send_photo(
             chat_id=VIP_CHANNEL_ID,
             photo=image_stream,
             caption=caption,
@@ -1060,11 +1103,11 @@ async def setup_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text("✅ Сетап опубликован в приватный канал.")
     except Exception as e:
-        logging.error(f"[setup_photo] Ошибка публикации: {e}")
+        logging.error(f"[setup_set_entry] Ошибка публикации: {e}")
         await update.message.reply_text("⚠️ Не удалось опубликовать сетап.")
+    finally:
+        context.user_data.clear()
 
-    # Чистим состояние
-    context.user_data.clear()
     return ConversationHandler.END
 
 def fetch_price_from_binance(symbol: str) -> float | None:
@@ -2791,7 +2834,7 @@ def main():
         ],
     )
 
-    # 📌 Сетап (многошаговый ввод)
+    # 📌 Сетап (многошаговый ввод) — добавлено состояние SETUP_WAIT_ENTRY
     setup_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📌 Сетап$"), handle_main)],
         states={
@@ -2799,7 +2842,8 @@ def main():
             SETUP_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_risk_area)],
             SETUP_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_targets)],
             SETUP_4: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_stoploss)],
-            SETUP_5: [MessageHandler(filters.PHOTO, setup_photo)],
+            SETUP_5: [MessageHandler(filters.PHOTO, setup_photo)],                       # загрузили скрин
+            SETUP_WAIT_ENTRY: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_set_entry)],  # ➜ ввели «Точку входа»
         },
         fallbacks=[
             CommandHandler("start", start, block=False),
@@ -2819,7 +2863,6 @@ def main():
     app.add_handler(CommandHandler("export", export, block=False))
 
     # 🔐 Сохранение file_id видео для постов (команда /save_post_video)
-    # Работает: ответь командой на видео ИЛИ пришли команду вместе с видео в одном сообщении.
     app.add_handler(CommandHandler("save_post_video", save_post_video, block=False))
 
     # ✅ Диалоги
