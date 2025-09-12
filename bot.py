@@ -2772,8 +2772,18 @@ def main():
     ALLOWED_USERS_TIMESTAMP = time.time()
     logging.info(f"📥 ALLOWED_USERS загружен при старте: {len(ALLOWED_USERS)} пользователей")
 
-    # ✅ Telegram-приложение (post_init снимет webhook, чтобы не было 409)
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+    # ✅ Telegram-приложение: увеличенные таймауты для Render + снятие webhook в post_init
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_TOKEN)
+        .connect_timeout(15)           # медленный коннект → даём запас
+        .read_timeout(30)              # чтение ответов (в т.ч. get_me)
+        .write_timeout(30)             # отправка больших payload'ов
+        .pool_timeout(5)               # ожидание свободного коннекта
+        .get_updates_read_timeout(60)  # long-poll таймаут для polling
+        .post_init(post_init)
+        .build()
+    )
     logging.info("🚀 GPT-Трейдер стартовал!")
 
     # ✅ Глобальный bot для уведомлений из вебхуков
@@ -2786,7 +2796,6 @@ def main():
     svc_type = (os.getenv("RENDER_SERVICE_TYPE", "web") or "web").lower()
     if svc_type in ("web", "web_service", "webservice"):
         threading.Thread(target=run_flask, args=(loop,), daemon=True).start()
-        logging.info("[render-port] Flask started (Web Service).")
     else:
         logging.info("[render-port] Worker mode detected — Flask server is not started.")
 
